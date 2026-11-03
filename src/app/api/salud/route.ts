@@ -2,6 +2,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import {
+  databaseHint,
+  databaseTarget,
+  prismaErrorCode,
+} from '@/lib/databaseDiagnostics';
 import { getConfiguredProviders, hasAiProvider, localModelMemory } from '@/lib/aiEngine';
 
 /**
@@ -46,6 +51,7 @@ export async function GET() {
 
   let database = false;
   let databaseDetail = '';
+  let databaseCode: string | null = null;
   let counts: { subjects: number; topics: number; notes: number } | null = null;
 
   try {
@@ -58,6 +64,9 @@ export async function GET() {
     counts = { subjects, topics, notes };
   } catch (error) {
     databaseDetail = error instanceof Error ? error.message : String(error);
+    // El código (P1001, P2021…) es lo único que distingue «no llego» de «faltan
+    // tablas» o «contraseña mal». Sin él, el parte de salud no sirve para nada.
+    databaseCode = prismaErrorCode(error);
   }
 
   const providers = getConfiguredProviders();
@@ -105,7 +114,15 @@ export async function GET() {
       build: currentBuildId(),
       checkedAt: new Date().toISOString(),
       responseMs: Date.now() - startedAt,
-      database: { ok: database, detail: databaseDetail || undefined, counts },
+      database: {
+        ok: database,
+        code: databaseCode ?? undefined,
+        detail: databaseDetail || undefined,
+        // Qué hacer, en castellano: es lo que enseña la pantalla de error.
+        hint: database ? undefined : databaseHint(databaseDetail, databaseCode),
+        target: databaseTarget(),
+        counts,
+      },
       memory,
       ai: {
         configured: hasAiProvider(),
