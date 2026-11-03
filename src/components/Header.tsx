@@ -3,10 +3,37 @@ import { Flame, Target, Zap, Play } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
 import PwaRegister from './PwaRegister';
 
+/**
+ * El perfil que pinta la cabecera, sin poder tumbar la app.
+ *
+ * Este componente vive en el layout raíz: se monta en TODAS las rutas. Si su
+ * consulta lanza (Supabase inaccesible, `DATABASE_URL` sin definir, tablas sin
+ * migrar, motor de Prisma que no carga), no falla una vista: falla el layout, y
+ * React devuelve el error #441 en cada página, con la pantalla de «algo se ha
+ * roto al arrancar» y ningún detalle en producción.
+ *
+ * La cabecera es decorativa: con los valores por defecto se ve bien y el resto de
+ * la app puede seguir funcionando. El fallo se apunta en la consola del servidor
+ * (que es donde se puede leer) y nunca se propaga al render.
+ */
+async function loadProfile() {
+  try {
+    if (!process.env.DATABASE_URL?.trim()) {
+      console.warn('[header] DATABASE_URL no está definida: cabecera con valores por defecto.');
+      return null;
+    }
+    return await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+  } catch (error) {
+    console.error(
+      '[header] no se ha podido leer el perfil:',
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
+}
+
 export default async function Header() {
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
-  });
+  const user = await loadProfile();
 
   const streak = user?.streakCurrent ?? 0;
   const targetGrade = user?.targetGradePau ?? 13.5;

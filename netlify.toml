@@ -1,11 +1,36 @@
+# Despliegue en Netlify.
+#
+# Lo que había aquí rompía la app al arrancar en producción:
+#
+#     [[redirects]]
+#       from = "/*"
+#       to = "/index.html"
+#       status = 200
+#
+# Esta app no es un sitio estático con un `index.html`: es Next con App Router y
+# componentes de servidor. Esa regla capturaba TODAS las rutas y devolvía la
+# portada en lugar de la página pedida y, sobre todo, por delante de las funciones
+# que genera el plugin de Next. El navegador acababa cargando el HTML de una ruta
+# distinta a la pedida y el render de servidor devolvía el error 441. El plugin ya
+# crea la regla de cada ruta: no hay que añadir ninguna.
+#
+# `publish = ".next"` es lo que espera @netlify/plugin-nextjs: él convierte esa
+# salida en funciones y archivos estáticos.
+
 [build]
   command = "npm run build"
   publish = ".next"
 
+[build.environment]
+  # Next 16 necesita Node 20 o superior; el runtime por defecto puede ser menor.
+  NODE_VERSION = "20"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# El service worker nunca puede quedarse cacheado: si el navegador conserva uno
+# viejo, sirve código de una compilación anterior contra un HTML nuevo.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"

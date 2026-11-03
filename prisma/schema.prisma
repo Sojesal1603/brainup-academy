@@ -1,5 +1,10 @@
 generator client {
   provider = "prisma-client-js"
+  // Netlify ejecuta las funciones en Amazon Linux, no en la imagen donde se
+  // compila. Sin este binario, `prisma generate` deja el motor para la máquina
+  // de build y en runtime Prisma falla con «Query engine library not found»:
+  // el layout raíz no puede leer la base y la app entera devuelve el error 441.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {

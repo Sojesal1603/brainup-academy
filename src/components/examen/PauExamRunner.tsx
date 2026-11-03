@@ -61,6 +61,7 @@ export default function PauExamRunner({
 
   /* ---- Borrador local: la sesión se retoma aunque se recargue la página ---- */
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     try {
       const raw = localStorage.getItem(storageKey);
       if (!raw) return;
@@ -80,6 +81,7 @@ export default function PauExamRunner({
   }, [storageKey]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     try {
       localStorage.setItem(storageKey, JSON.stringify({ answers }));
     } catch {
