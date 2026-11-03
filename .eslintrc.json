@@ -1,0 +1,17 @@
+{
+  "root": true,
+  "extends": "next/core-web-vitals",
+  "overrides": [
+    {
+      "files": ["scripts/**/*.js"],
+      "env": { "node": true, "es2022": true },
+      "parserOptions": {
+        "sourceType": "script",
+        "ecmaFeatures": { "globalReturn": true }
+      },
+      "rules": {
+        "@next/next/no-assign-module-variable": "off"
+      }
+    }
+  ]
+}

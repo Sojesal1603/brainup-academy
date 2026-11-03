@@ -1,0 +1,479 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // PostgreSQL (Vercel Postgres, Neon, Supabase, Railway…). La cadena de
+  // conexión se define en DATABASE_URL, nunca en el repositorio.
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Perfil del Estudiante
+model UserProfile {
+  id                   String    @id @default("user_default")
+  name                 String    @default("Estudiante")
+  modality             String    @default("1º de Bachillerato (Ciencias y Tecnología)")
+  targetGradePau       Float     @default(13.5) // Nota objetivo sobre 14
+  weeklyHoursCap       Float     @default(25.0) // Horas disponibles a la semana
+  weeklyHoursDeclared  Boolean   @default(false) // ¿Las ha dicho él? (si no, es un valor de partida)
+  setupCompletedAt     DateTime? // Cuándo cerró la puesta a punto guiada por la IA
+  // ¿Ha repasado el horario entero (los cinco días) con el coordinador? Sin esta
+  // confirmación, un horario a medias parece completo y el plan se construye a
+  // ciegas: es lo que preguntaba el alumno cuando decía «me falta una clase».
+  timetableComplete    Boolean   @default(false)
+  studyMode            String    @default("athlete") // "comfort" o "athlete"
+  streakCurrent        Int       @default(0)
+  streakBest           Int       @default(0)
+  // Experiencia acumulada de los retos semanales (se deriva el nivel, no se
+  // guarda aparte: así no puede desincronizarse).
+  challengeXp          Int       @default(0)
+  lastStudyDate        DateTime?
+  moodleFeedUrl        String? // URL privada de suscripción iCal de Moodle
+  lastMoodleSync       DateTime? // Fecha de última sincronización
+  // Conexión real con Moodle por Web Services (token). El token no sale nunca
+  // del servidor: no se manda al navegador ni se guarda en los enlaces.
+  moodleBaseUrl        String? // Ej. https://moodle.micentro.es
+  moodleToken          String? // Token de Web Services del alumno
+  moodleSiteName       String? // Nombre del sitio Moodle (para poder mostrarlo)
+  moodleUserId         Int? // id del alumno en Moodle (para pedir sus cursos)
+  moodleConnectedAt    DateTime?
+  // Cómo se entra en Moodle. Hay dos puertas y no siempre se puede usar la
+  // buena: «token» (clave de Web Services, la limpia) y «sesion» (usuario y
+  // contraseña, entrando como el navegador) para los centros que no dejan crear
+  // claves al alumnado. Decide qué vía usa la sincronización, la de a mano y la
+  // del vigilante.
+  moodleAuthMode       String    @default("token") // "token" | "sesion"
+  moodleUsername       String? // El usuario con el que entra (solo en «sesion»)
+  // La contraseña, cifrada con la clave local del equipo (`localSecrets.ts`),
+  // para poder reconectar solo cada mañana. En claro no se guarda jamás; y si el
+  // alumno pulsa «desconectar», esto se borra con el resto.
+  moodlePasswordSealed String?
+  moodleSessionAt      DateTime? // Última vez que se abrió una sesión web de verdad
+  // Estado **comprobado** de esa clave y cuándo se comprobó. Lo escribe el
+  // vigilante (`moodleSelfHeal.ts`), no el alumno: así la app puede avisar de que
+  // la clave ha dejado de valer en vez de seguir enseñando datos de hace dos
+  // semanas como si fueran de hoy. «ok» | «caducado» | «sin_comprobar».
+  moodleTokenState     String?   @default("sin_comprobar")
+  moodleCheckedAt      DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+// 2. Asignaturas y Ponderaciones PAU
+model Subject {
+  id               String            @id @default(uuid())
+  name             String // "Matemáticas I", "Física y Química", "Tecnología e Ingeniería I", etc.
+  color            String            @default("#10b981") // HEX
+  pauWeight        Float             @default(0.2) // 0.2, 0.1 o 0
+  isPhaseGeneral   Boolean           @default(true)
+  currentGrade     Float             @default(7.0) // Nota media actual (0-10)
+  gradeSource      String            @default("sin_medir") // "sin_medir" | "declarada" | "simulacro"
+  targetGrade      Float             @default(9.5) // Nota objetivo (0-10)
+  totalHoursSpent  Float             @default(0.0)
+  order            Int               @default(0)
+  // ¿Esta materia se trabaja en la app o solo aparece en el horario? Religión,
+  // Educación Física o Tutoría están en el horario lectivo pero no se estudian
+  // para la PAU: deben salir en el horario (son horas que no puedes usar para
+  // estudiar) sin pedirles temario ni exámenes que no existen.
+  isTracked        Boolean           @default(true)
+  // ¿Ha confirmado el alumno que el temario está ENTERO? Tener 3 unidades no
+  // significa tener las 12: sin esta confirmación, el entrevistador sigue
+  // preguntando en vez de dar el temario por bueno.
+  syllabusComplete Boolean           @default(false)
+  topics           Topic[]
+  exams            Exam[]
+  errorLogs        ErrorLog[]
+  classPeriods     ClassPeriod[]
+  moodleTasks      MoodleTask[]
+  moodleCourses    MoodleCourse[]
+  aiAgent          AiAgent?
+  challenges       WeeklyChallenge[]
+  createdAt        DateTime          @default(now())
+}
+
+// 3. Temas y Bloques de Estudio
+model Topic {
+  id              String            @id @default(uuid())
+  subjectId       String
+  subject         Subject           @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  title           String // p.ej. "Matrices y Determinantes"
+  unitNumber      Int? // Nº de unidad dentro de la asignatura (orden del temario)
+  term            Int? // Evaluación del curso: 1, 2 o 3
+  status          String            @default("pendiente") // "pendiente" | "en_curso" | "visto" | "repasado"
+  source          String            @default("manual") // "curriculo" | "profesor" | "libro" | "ia" | "manual"
+  seenInClassAt   DateTime? // Última vez que se explicó en clase
+  // Cómo explicó el profesor ESTA unidad en clase, contado por el alumno con sus
+  // palabras (notación, pasos que exige, ejemplos que puso, dónde hizo hincapié).
+  // Es lo que hace que el apunte del catedrático coincida con lo que va a caer en
+  // el examen de su instituto y no con un temario genérico: el redactor lo recibe
+  // como metodología prioritaria.
+  teacherMethod   String?
+  difficulty      Int               @default(3) // 1 a 5
+  masteryLevel    Int               @default(20) // 0 a 100%
+  masterySource   String            @default("sin_medir") // "sin_medir" | "autoevaluacion" | "diagnostico" | "sesion" | "simulacro"
+  estimatedHours  Float             @default(6.0)
+  completedHours  Float             @default(0.0)
+  lastReviewedAt  DateTime?
+  srsIntervalDays Int               @default(1)
+  srsEaseFactor   Float             @default(2.5)
+  // FSRS: memoria medida de verdad. `srsStability` son los días para los que la
+  // probabilidad de recuerdo cae al 90% y `srsDifficulty` (1-10) lo que cuesta
+  // esta unidad. Son opcionales: sin repasos no hay nada que estimar y se usa el
+  // intervalo clásico (`srs.ts`) como respaldo, no un cero disfrazado de dato.
+  srsStability    Float?
+  srsDifficulty   Float?
+  studyBlocks     StudyBlock[]
+  sessions        StudySession[]
+  errors          ErrorLog[]
+  notes           Note[]
+  srsReviews      SrsReview[]
+  challenges      WeeklyChallenge[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+// 4. Exámenes y Convocatorias
+model Exam {
+  id            String           @id @default(uuid())
+  subjectId     String
+  subject       Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  title         String
+  examDate      DateTime
+  weightPercent Float            @default(30.0)
+  examType      String           @default("parcial") // "parcial", "final", "simulacro_pau"
+  // Cómo es la prueba: de test, de desarrollo o práctico. Es lo que cambia el
+  // plan (un test se entrena con preguntas cortas; un práctico, con problemas).
+  examFormat    String           @default("test") // "test", "desarrollo", "practico"
+  targetGrade   Float            @default(9.0)
+  achievedGrade Float?
+  isCompleted   Boolean          @default(false)
+  notes         String?
+  pauSessions   PauExamSession[]
+  createdAt     DateTime         @default(now())
+}
+
+// 5. Planificador: Bloques Diarios y Semanales
+model StudyBlock {
+  id              String   @id @default(uuid())
+  topicId         String
+  topic           Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  date            DateTime // Día asignado
+  // La duración es variable a propósito (10, 15, 25, 40, 50, 60 o 90 min): la
+  // decide el motor de sesiones con el tiempo real disponible, la dificultad, el
+  // tipo de tarea y la proximidad del examen. 45 fijos era una promesa falsa.
+  durationMinutes Int      @default(25)
+  technique       String // "active_recall", "problemas", "flashcards", "simulacro", "error_fix", "srs_review"
+  mode            String   @default("athlete") // "comfort" vs "athlete"
+  isCompleted     Boolean  @default(false)
+  orderIndex      Int      @default(0)
+  // Qué se hace exactamente y por qué toca hoy. Sin esto la agenda es una
+  // lista de títulos y el alumno tiene que reconstruir el motivo cada mañana.
+  objective       String?
+  reason          String?
+  material        String?
+  // Fase del trabajo: comprensión, práctica, repaso, corrección o simulacro.
+  stage           String   @default("practica")
+  // Descanso que toca DESPUÉS de esta sesión (no se impone el 25/5 a todo).
+  breakMinutes    Int      @default(5)
+  // "pendiente" | "en_curso" | "completada" | "abandonada" | "parcial"
+  status          String   @default("pendiente")
+  spentMinutes    Int      @default(0) // minutos realmente hechos (pausas incluidas)
+  priorityScore   Float    @default(0)
+  // De dónde sale: "plan" | "reprogramada" | "micro" | "recuperacion"
+  origin          String   @default("plan")
+  resumedFrom     String? // id del bloque que se pausó y se retoma aquí
+  createdAt       DateTime @default(now())
+}
+
+// 6. Registro de Sesiones / Pomodoro
+model StudySession {
+  id              String   @id @default(uuid())
+  topicId         String
+  topic           Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  startedAt       DateTime @default(now())
+  minutesSpent    Int
+  techniqueUsed   String
+  outcome         String // "entendido", "con_dudas", "fallado"
+  previousMastery Int
+  newMastery      Int
+  notes           String?
+}
+
+// 7. Banco de Errores Quirúrgico
+model ErrorLog {
+  id               String   @id @default(uuid())
+  subjectId        String
+  subject          Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topicId          String
+  topic            Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  questionPrompt   String
+  myAnswer         String
+  correctAnswer    String
+  rootCause        String // "concepto", "calculo", "lectura_enunciado", "tiempo", "bloqueo"
+  keyLesson        String
+  correctiveAction String
+  reviewCount      Int      @default(0)
+  isMastered       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// 8. Hábitos Diarios y Retos
+model Habit {
+  id          String     @id @default(uuid())
+  title       String
+  description String?
+  streak      Int        @default(0)
+  logs        HabitLog[]
+  createdAt   DateTime   @default(now())
+}
+
+model HabitLog {
+  id        String   @id @default(uuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date      DateTime // Truncada al día
+  completed Boolean  @default(true)
+}
+
+// 9. Agentes Especializados (Catedráticos de IA)
+model AiAgent {
+  id            String           @id @default(uuid())
+  subjectId     String           @unique
+  subject       Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  name          String
+  specialty     String
+  systemPrompt  String
+  conversations AiConversation[]
+  notes         Note[]
+}
+
+model AiConversation {
+  id        String      @id @default(uuid())
+  agentId   String?
+  agent     AiAgent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  title     String      @default("Consulta de Estudio")
+  messages  AiMessage[]
+  createdAt DateTime    @default(now())
+}
+
+model AiMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // "user" | "assistant" | "system"
+  content        String
+  stepStage      String? // "diagnostico", "pista_1", "pista_2", "verificacion", "resolucion"
+  rawStepsJson   String? // Pasos crudos del modelo (historial local sin estado para la API)
+  // Propuesta de apunte que el catedrático deja pendiente de tu permiso
+  // (JSON: { unitNumber, title, reason }).
+  noteProposal   String?
+  attachments    AiAttachment[] // Capturas, PDFs y archivos que le enseñas al catedrático
+  createdAt      DateTime       @default(now())
+}
+
+// 15. Archivos que el alumno le enseña al catedrático IA
+// (capturas de pantalla, PDFs, fotos del cuaderno, enunciados escaneados).
+model AiAttachment {
+  id        String    @id @default(uuid())
+  messageId String
+  message   AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  name      String // Nombre original del archivo
+  mimeType  String // image/png, image/jpeg, application/pdf…
+  sizeBytes Int       @default(0)
+  localPath String? // Copia en data/uploads: se puede volver a leer sin conexión
+  createdAt DateTime  @default(now())
+}
+
+// 10. Sesiones de Examen PAU & Corrección
+model PauExamSession {
+  id             String   @id @default(uuid())
+  examId         String?
+  exam           Exam?    @relation(fields: [examId], references: [id], onDelete: SetNull)
+  subjectName    String
+  timedMinutes   Int
+  elapsedMinutes Int
+  questionsJson  String? // Bloques del simulacro generados (enunciados, puntos y tema)
+  answersJson    String? // Respuestas escritas por el alumno
+  finalScore     Float?
+  weakTopicsJson String?
+  rubricFeedback String?
+  isCompleted    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
+
+// 11. Cuaderno de Apuntes y Base de Datos tipo Notion
+model Note {
+  id                   String   @id @default(uuid())
+  topicId              String
+  topic                Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  title                String
+  content              String // Markdown estructurado con bloques, toggles de active recall y fórmulas
+  tags                 String?  @default("apuntes,resumen")
+  isPinned             Boolean  @default(false)
+  // Quién ha escrito el apunte: tú, o un catedrático IA con su agente y la
+  // consulta en la que nació (así siempre se sabe de dónde sale).
+  author               String   @default("alumno") // "alumno" | "catedratico"
+  agentId              String?
+  agent                AiAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  sourceConversationId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// 12. Horario de Clases del Instituto (Lunes a Viernes)
+model ClassPeriod {
+  id        String  @id @default(uuid())
+  dayOfWeek Int // 1 = Lunes, 2 = Martes, 3 = Miércoles, 4 = Jueves, 5 = Viernes
+  period    Int // 1ª hora, 2ª hora, etc. (1 a 6)
+  startTime String // "08:15"
+  endTime   String // "09:10"
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  classroom String? // "Aula 104", "Taller Tecnología", "Lab Física"
+}
+
+// 13. Tareas y Tareas Pendientes sincronizadas de Moodle
+model MoodleTask {
+  id           String   @id @default(uuid())
+  externalId   String?  @unique // UID único del evento en Moodle
+  title        String // "Entrega Problemas Dinámica", "Práctica Circuito Mixto"
+  description  String?
+  courseName   String // Nombre del curso en Moodle
+  subjectId    String?
+  subject      Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  dueDate      DateTime // Fecha límite de entrega
+  isCompleted  Boolean  @default(false)
+  moodleUrl    String?
+  // Vía Web Services (token): la tarea llega con más contexto que el iCal.
+  assignmentId Int?     @unique // id de la tarea en Moodle (mod_assign)
+  source       String   @default("ical") // "ical" | "web_services"
+  submitted    Boolean? // ¿ya la ha entregado? (null = no lo sabemos)
+  graded       Boolean  @default(false)
+  grade        Float? // nota de Moodle (0-10) si ya está corregida
+  createdAt    DateTime @default(now())
+}
+
+// 14. Moodle por Web Services: cursos y apuntes (archivos y recursos)
+model MoodleCourse {
+  id        String           @id @default(uuid())
+  moodleId  Int              @unique
+  fullName  String
+  shortName String
+  subjectId String?
+  subject   Subject?         @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  sections  Int              @default(0)
+  syncedAt  DateTime         @default(now())
+  materials MoodleMaterial[]
+  createdAt DateTime         @default(now())
+}
+
+model MoodleMaterial {
+  id          String       @id @default(uuid())
+  externalId  String       @unique // id del módulo en Moodle + nombre del archivo
+  courseId    String
+  course      MoodleCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  sectionName String // "Tema 3: Dinámica" (bloque del curso donde está)
+  name        String // "Problemas resueltos.pdf"
+  moduleType  String // "resource" | "folder" | "url" | "page" | "forum"…
+  moduleName  String? // título del módulo ("Apuntes Tema 3")
+  mimeType    String?
+  sizeBytes   Int          @default(0)
+  modifiedAt  DateTime?
+  downloadUrl String? // archivo en Moodle SIN token (se añade al servirlo)
+  webUrl      String? // página del recurso en Moodle
+  localPath   String? // copia local, si ya lo ha abierto (queda offline)
+  fetchedAt   DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+// 16. Repaso Espaciado (SRS): CADA repaso real, con el intervalo que llevaba y
+// si lo recordaba. Es lo que permite calcular retención de verdad en vez de
+// estimarla: sin historial no hay analítica, solo promesas.
+model SrsReview {
+  id                 String   @id @default(uuid())
+  topicId            String
+  topic              Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  subjectId          String? // copia a propósito: las consultas de retención van por materia
+  reviewedAt         DateTime @default(now())
+  rating             String // "again" | "hard" | "good" | "easy"
+  quality            Int      @default(3) // 0-5, el valor interno del algoritmo
+  recalled           Boolean  @default(true) // ¿lo tenía? (again → no)
+  intervalBeforeDays Int      @default(0) // intervalo que llevaba programado
+  intervalAfterDays  Int      @default(1) // intervalo nuevo
+  easeAfter          Float    @default(2.5)
+  overdueDays        Int      @default(0) // días de retraso sobre la fecha prevista
+  minutesSpent       Int      @default(0)
+  createdAt          DateTime @default(now())
+}
+
+// 17. Retos semanales: metas cortas de la semana, generadas de datos reales del
+// alumno (repasos vencidos, errores sin cerrar, exámenes a la vista), no de una
+// lista fija. El progreso se calcula del trabajo hecho, no se marca a mano.
+model WeeklyChallenge {
+  id          String    @id @default(uuid())
+  weekKey     String // "2026-W42" (semana ISO)
+  weekStart   DateTime // lunes 00:00 de esa semana
+  kind        String // "srs_reviews" | "study_minutes" | "master_errors" | "simulacro" | "mastery_gain" | "streak_days"
+  title       String
+  description String
+  target      Int // cuánto hay que conseguir
+  unit        String // "count" | "minutes" | "percent" | "days"
+  subjectId   String?
+  subject     Subject?  @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topicId     String?
+  topic       Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  rewardXp    Int       @default(50)
+  status      String    @default("active") // "active" | "completed" | "expired"
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Ojo: en PostgreSQL un índice único con columnas NULL tampoco impide duplicados
+  // (NULL != NULL), así que la generación comprueba la existencia a mano. Aquí
+  // solo va el índice que sí acelera la consulta por semana.
+  @@index([weekKey])
+}
+
+// 18. Fallos del sistema: lo que reporta el alumno, lo que detecta el vigilante y
+// lo que resuelve el taller de mantenimiento. Es el cuaderno de incidencias: sin
+// él, cada fallo se cuenta una vez y se olvida.
+model SystemIssue {
+  id          String   @id @default(uuid())
+  title       String
+  detail      String?
+  contextJson String? // datos de alrededor (ruta, mensaje de error, versión)
+  source      String   @default("alumno") // "alumno" | "vigilante" | "ia"
+  status      String   @default("abierto") // "abierto" | "revisado" | "resuelto"
+  resolution  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+}
+
+// 23. Memoria entre días de la IA (catedráticos, puesta a punto y mantenimiento)
+//
+// Sin esto, cada IA empieza de cero cada mañana y vuelve a preguntar lo que ya
+// sabía ayer. Una fila por ámbito y día: crece acotado (un registro al día) y se
+// puede leer ordenado por día para armar el bloque que recibe el modelo.
+model AgentMemory {
+  id        String   @id @default(uuid())
+  // Quién recuerda: el id del catedrático, «coordinador» o «mantenimiento».
+  scope     String
+  // Día al que pertenece el recuerdo (AAAA-MM-DD, hora local del alumno).
+  day       String
+  // Lo hablado, en dos o tres frases, escrito para que lo lea otra IA mañana.
+  summary   String
+  // Datos concretos y estables en JSON (unidades, fechas, acuerdos, pendientes).
+  factsJson String?
+  // Quién lo escribió: las reglas de siempre, o el modelo si ha podido pulirlo.
+  writtenBy String   @default("reglas") // "reglas" | "ia"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, day])
+  @@index([scope, createdAt])
+}

@@ -1,0 +1,64 @@
+--- Página 1 ---
+SIMULACRO DE EXAMEN
+BLOQUE A: Cuestiones Teórico-Prácticas (4,0 puntos)
+Responde a las cuatro cuestiones planteadas a continuación. Cada cuestión tiene un valor de 1,0
+punto.
+Cuestión 1 (1,0 punto)
+a) Define las magnitudes de Fuerza, Trabajo, Potencia y Energía, e indica sus unidades de medida
+en el Sistema Internacional (SI).
+b) Indica las equivalencias numéricas exactas para transformar:
+● Caballos de Vapor (CV) a Vatios (W) y Kilovatios (kW).
+● Kilovatios-hora (kWh) a Julios (J) y Kilocalorías (kcal).
+Cuestión 2 (1,0 punto)
+Describe los tres mecanismos fundamentales de transmisión del calor (conducción, convección y
+radiación):
+a) Escribe la ecuación matemática que determina el flujo calorífico por unidad de tiempo (Q/t) para
+cada mecanismo, identificando cada variable y sus unidades.
+Cuestión 3 (1,0 punto)
+a) Define el concepto de rendimiento o eficiencia energética (η) de una máquina o sistema
+térmico/mecánico.
+Cuestión 4 (1,0 punto)
+a) Define poder calorífico de un combustible (Pc) y diferencia entre la combustión de sólidos/líquidos
+y gases.
+BLOQUE B: Problemas Aplicados (6,0 puntos)
+Problema 1: (2,0 puntos)
+Un recinto industrial rectangular tiene unas dimensiones interiores de 6 m (largo) × 5 m (ancho) × 3
+m (alto). El recinto dispone de 4 ventanas de cristal de 1,5 m × 1,0 m cada una, con un espesor de
+vidrio de 8 mm y un coeficiente de conductividad térmica λvidrio = 0,75 kcal/(m·h·°C). El resto de las
+paredes perimetrales son de ladrillo de 25 cm de espesor con un coeficiente λladrillo = 0,35
+kcal/(m·h·°C). Se desprecian las pérdidas por techo y suelo.
+Para mantener una temperatura interior constante de 20 °C cuando la temperatura exterior es de 4
+°C:
+a) (0,75 ptos) Calcula la superficie neta de ladrillo y de cristal, y el flujo de calor total perdido por
+conducción por hora (Q/t) expresado en kcal/h y en Vatios [W]
+b) (0,75 ptos) Determina la energía calorífica total perdida a lo largo de un día completo (24 horas)
+expresada en Julios [J] y en kilovatios-hora [kWh].
+c) (0,50 ptos) Se instala un radiador eléctrico de 6.000 W (6 kW) de potencia. Analiza
+matemáticamente cuántas horas debería funcionar al día para reponer el calor perdido y razona si un
+único radiador de esa potencia es técnicamente suficiente.
+
+--- Página 2 ---
+Problema 2: (2,0 puntos)
+Un automóvil de 1.200 kg de masa circula por una vía horizontal a una velocidad constante de 90
+km/h (25 m/s). El motor de combustión interna del vehículo funciona con un rendimiento global η =
+25% (0,25) utilizando gasolina con un poder calorífico Pc = 10.500 kcal/kg.
+a) (0,50 ptos) Calcula la energía cinética (Ec) que posee el automóvil expresada en Julios [J].
+b) (0,50 ptos) Determina la energía total (Es) producida por la combustión de la gasolina necesaria
+para comunicar dicha energía cinética al vehículo y la masa de gasolina (en gramos) consumida en
+ese proceso.
+c) (0,50 ptos) Si el vehículo frena bruscamente hasta detenerse por completo, calcula la cantidad de
+calor (Q) que se disipa en los discos de freno expresada en Julios [J] y en kilocalorías [kcal].
+d) (0,50 ptos) Suponiendo que todo el calor generado en la frenada se transfiriera íntegramente a un
+depósito de refrigerante con 20 litros de agua (m = 20 kg, ce = 1 kcal/(kg·°C)), calcula la elevación
+de temperatura (ΔT) que experimentaría el agua.
+Problema 3: (2,0 puntos)
+Un montacargas industrial eleva una masa total de 350 kg a una altura de 40 metros (toma g = 9,8
+m/s2). El sistema está accionado por un motor de gas propano de potencia nominal 4 CV (1 CV = 735
+W) cuyo rendimiento energético global es del 15% (η = 0,15). El poder calorífico del propano es Pc =
+11.000 kcal/kg.
+a) (0,50 ptos) Calcula el trabajo útil (Wu) realizado para elevar la carga y la potencia útil (Pu)
+efectiva desarrollada por el motor en Vatios [W].
+b) (0,75 ptos) Determina el tiempo (t) en segundos que tarda el montacargas en completar la
+ascensión de 40 m.
+c) (0,75 ptos) Calcula la energía total (Es) consumida en kilocalorías y la masa de gas propano (en
+gramos) necesaria para llevar a cabo la elevación.

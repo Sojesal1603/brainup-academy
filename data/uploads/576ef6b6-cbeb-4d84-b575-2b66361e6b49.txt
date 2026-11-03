@@ -1,0 +1,1740 @@
+--- Página 1 ---
+Un monomio está formado por
+* un coeficiente y una parte literal.
+me
+coeficiente parte literal
+Lenguaje matemático
+» Llamamos términos de un
+polinomio a cada uno de los
+monomiosque lo Forman.
+o El término principal es el
+monomiode mayor grado.
+o El término á
+eselmonomiode grado O.
+* Decimos que dos monomios
+son semejantes si tienen la
+misma parte literal.
+Ejercicio resuelto
+Ó Polinomios. Operaciones
+Los ingresos de una papelería son 200 € al día, mientras que los gastos dependen
+del número de días que abra cada mes: debe pagarel coste de la electricidad (26,67€
+al día), la nómina de un empleado (1092 € al mes), el seguro de empresa (12 € al dia),
+que tiene un descuento equivalente al número de días que se contrata, y el precio
+del alquiler del local (700 € al mes).
+Con estos datos y si llamamos x al número de días que abre, podemos expresar los
+ingresos de la tienda mediante el monomio: 10) = 200x
+Por otro lado, podemos expresar el gasto mensual total como:
+x
+60)— 26,67: +1092+12x — —-12x +700=1792+ 38,67x — 012
+100
+Esta expresión es un polinomio, que podemos encontrar en diversos contextos.
+Para determinar el gasto en un mes que la papeleria abre 20 días, calculamos:
+G(20)=1792 + 38,67- 20 — 0,12- 20” =2517,40 €
+Un polinomioes la suma de dos o más monomios de distinto grado.
+P()=a+0, 4 4 -+0X+0,
+El valor numérico de un polinomio es el que se obtiene al sustituir la variable, x,
+por un valor, a, y realizar las operaciones indicadas. Se escribe P(a).
+1.1. Operaciones con polinomios
+Sig hallar los fch les de la tienda, tendremos que restar el
+gasto mensuala los ingresos: B()=200x — (1 792 +38,67x — 0,12: )
+Para obtener el resultado, los coefici de los ñ j
+y obtenemos:
+860=200x — (1 792+ 38,67x — 0,12" ) - -17924161,33x + 0,128
+Para operar con polinomios, tenemos que tener en cuenta las propiedades de las
+operaciones con números reales.
+Vamos a realizar diferentes operaciones considerando estos polinomios:
+PL)= De — 57418, QU) => — x+1 y SO) =x+5
+= Para sumar o restar polinomios, se suman o restan, respectivamente, los
+coeficientes de los términos semejantes, es decir, con la misma parte literal, y se
+deja indicada la suma o resta de los términos no semejantes.
+PG0+Q0) =-20 — + 1840 — 04120 — 4 — 10419
+= Para multiplicar dos polinomios se multiplica cada término de uno de los
+factores por todos los términos del otro factor, multiplicando sus coeficientes y
+sus partes literales, y se suman los términos semejantes.
+Q6) 5600 +1) SIS 10 Sata a — +S
+0) Calcula PG — Q6) - Sa), siendo PG)=—2Be — 5 +18, Q60i=x0 — 1 +1 y S00=x0+5.
+Sol
+Operamos respetandola jerarquía de las operaciones.
+PG0 — Q6) - 56) =—2e — 5 +18 [10 —x+1)00+5)=-20— 507418 (a+ 5x0 al — Gx+ 5)=
+= 2854180 a 5 30 — A+13
+O) roque tucesra
+Para dividir polinomios procedemos de dos maneras, dependiendo del divisor.
+Por ejemplo, para calcular 2 — 5 +18 | el
+P00 : QU) utilizamos el algoritmo de De -— 20+ 2x — 2x1
+la división. 7742 +18
+Cl =-2x 7 De Ta 7
+RO) =5x +25 5x4 25
+Mientras que, para calcular PG) : 560) 2. 5 o 18
+podemos aplicarla regla de Ruffini, NN 10 295 125
+porque S(« es de la forma x — a.
+Cb)= 27+ 5 — 25 ROO =143 -2 5 -25| 143
+Potencia de un polinomio. Binomio de Newton
+La papeleria rebaja un 5 % el precio de un articulo. Si expresamos este
+descuento como 0,05, el cliente paga (1 — 0,05) - 100 % del precio inicial. Si
+lo rebaja 3 veces con el mismo porcentaje, pagará un (1 — 0,057 - 100 % del
+precio inicial. Para hallar cuánto se paga para un porcentaje, x %, hacemos:
+EE
+Para realizar la ia de un poli lo, lo multiplicamos por él mismo tantas
+veces como indique el exponente. Si se trata de un binomio, podemos utilizar la
+fórmula del binomio de Newton, y para ello debemos recordar que:
+o el factorialde un número es: n=n -(n— D+(n- 2)-...2.1y0!=1
+—m)!
+ae. sl jes
+O EO ES
+0 1 n
+En particular, sin es 2 obtenemos:
+(a +bY= 0? +2ab + b* (a — bP=0?— 20b + b?
+Si calculamos las potencias sucesivas, podemos colocar los
+coeficientes de manera que cada uno es la suma de los dos
+que tiene encima y formamos de este modo el triángulo de
+Pascal.
+o un número combinatorio cumple que:%n |:=
+abañcorr [ojos >|?
+(a-bY co
+Ejercicio resuelto
+E) Rosuolve: [> - E
+Al hacer una división:
+el grado del polinomio
+cociente, Cl, es la diferencia
+de los grados del dividendo,
+DG),y del divisor, dd.
+el grado del polinomio resto,
+RGd, es menor que el del
+polinomio divisor, dd.
+Podemos comprobar si la
+división de polinomios está bien
+hecha Leniendo en cuenta que:
+DG = dex) - Ox)+ RG :
+Lenguaje matemático
+El simbolo Y se llama sumatorio y
+representa una suma de Lérminos.
+Si lo escribimos , indica que
+»es la suma desde el término¡= 0
+hasta eli=n.
+Así, podemos expresar la Fórmula
+del binomio de Newton como:
+b ree
+es r 3H
+bf = = A ”n y
+(a —bY Y slk
+Solución
+1
+2) =(- ws je | + okJeolz,) HE "E leo[2+
+4 1 1 1
++0] e $ reosa o =2M AZ +6: z. -4. + =
+(3) “ae E “a A Pr
+2 8 8 1
+A
+3. 3 2 Bl
+
+--- Página 2 ---
+nen
+Presta atención
+Para buscar raices enteras de un
+polinomio utilizamos la regla de
+Ruffini, y vamos probandocon los
+del término independiente.
+| a 140 -613 455 -1950
+s| -20 600 -65 1950
+4 120 -13 390| 0
+30 120 o -390
+El matemático Niels Henrik
+Abel (1802-1829), demostró
+que no existe ninguna fórmula
+para encontrar las raíces de
+polinomios de grado mayor
+que 4 usando sus coeficientes.
+NORGE i
+: !
+Ba . P
+his
+o BLOQUE. ÁLGEBRA
+1.2. Raíces de un polinomio. Factorización
+Sergio tiene una tienda de alquiler de bicicletas eléctricas cuyo beneficio se modeliza
+con el polinomio Blx)=—4x*+140 — 6137 +455x — 1950, siendox el número de
+bicicletas alquiladas. Le interesa saber cuándo su empresa obtiene beneficio nulo,
+esto es, los valoresa que hacen que Bla)= 0.
+Prueba con distintos valores y si hace x= 5 comprueba que B(5) = O.
+Decimos que 5 es una raiz del polinomio y por tanto, si alquila 5 bicicletas, el
+beneficio es nulo.
+Una raiz a de un polinomio PG) es un valorde x que, al sustituirlo en el polinomio,
+lo anula, es decir: Pla) =0
+Si dividi el poli lo porx— 5 la regla de Ruffini, obtenemos que el
+resto es O, esto es, coincide con el valor numérico del polinomio para x=5.
+Por tanto, si el resto de la división PLd : (x
+x=a es raiz del polinomio.
+a) es O es porque P(a) = O, es decir,
+Teorema del resto. El resto de la división del polinomio PG) entre x — a coincide
+con Pla).
+Si a es una raiz del polinomio, podemos escribir: PL) = (x — a) + CLd
+Asi, para el ejemplo escribimos:
+800 =(x — SÓ —4x? +120x — 13x+ 390)
+Teorema del factor.Si x = a es una raiz del polinomio PG0, entoncesx — a es
+un factor de P(x).
+Si dividimos ahora —4 + 1207 — 13x + 390 por x
+raiz de Pd y portanto, podemos escribir: BL = (x — 5: 30l-4x —13 )
+Como —4x” — 13 no tiene raices reales, el beneficio de la tienda de Sergio será nulo
+cuando alquile 5 o 30 bicicletas.
+A este procedimiento lo denominamos factorización de un polinomio.
+30, resulta que x= 30 es otra
+Consiste en descomponer el polinomio como producto de polinomios irreducibles,
+es decir, que no se pueden descomponera su vez en polinomios de grados inferiores
+a ellos. Los polinomios irreducibles son de la forma ax +b o de grado 2 sin soluciones
+enR.
+Por ejemplo, para factorizar el polinomio PL]= 2" — 2x7 — 18x* +18x:
+1. Sacamos factor común si es posible. Pbo= 2xl Ci Ox 9)
+yA Obtenemos las raices del polinomio, 1 1 9 a
+aplicando el teorema del resto y el del
+factor, o la resolución de ecuaciones 1 A o 9 -
+o y utilizando las 1 o 9 o
+En este caso, utilizamos: Po)= 2 — Dl 3)
+Co + bXo — b)=07 — b? xd — 9=(x— 3Mx+3)
+3. Escribimos el polinomio factorizado PG) =2xdx — Die — 3Mx + 3)
+teniendo en cuenta sus divisores.
+Para factorizar un polinomio se saca factor común, si es posible y se expresa
+como producto de factores irreducibles.
+Actividades
+9
+15)
+17)
+o
+19)
+¿ Obtén el valor numérico de los siguientes polinomios
+cuandox es —2, 1,0 y=.
+5
+a) Pbd=x — 8x+2 b) QU) =x+4x? — Sx
+S: a) 22,1,2, 61/25 b)6,5,0, 303/1125
+2 Realiza las operaciones indicadas siendo
+1
+PG) =x0 — De+ 5 — — y QU) =x07 — 3 +7
+a) PGd+0Q6) <) Pbd - Q63
+bj) PC — QU) di P6d:Q6)
+Sal Po a bIx? — Za +Bx dE
+El 2
+a a+ 18 E
+El 2 dd
+xa— 15/12
+di —————
+xXx —3x+7
+3 Realiza las operaciones indicadas con:
+PLO=37 — Tx +4
+Q6) =+ 2x —1
+RO= 2 — 3x — 5
+a) PGd — (Q00+ RG) «e Q6) :P00
+b) RGd — (PG) 3Q6) dd) (P00Y
+S:a) xt 6x4 10 b)3 — + 10x — 12
+11.7. (55x/9)-(37/9)
+A
+3 9 30 —Txr dd
+dd 9% 4204 73 — 56x 416
+a Resuelve desarrollando las identidades notables.
+a (e +2x) 5) (2x sy)
+x i 3 ¡
+b) | —+2% di | -—5xy
+4 Xx
+3
+2 Halla el desarrollo del binomio: E +20
+4
+.
+E Desarrolla el binomio: Jx— z]
+5
+3 Faetoriza los siguientes polinomios.
+a) 5 — Abe di xx — 294100
+b) -34-12—3x+18 el 2x— 3 — 2x
+e) +4 xd DO +1 204448
+5: a) 5xlx — 3300 +3) b) (e — 13004 2)0:+ 3)
+€) Oe + Ae DGFD de 204 290 5) +5)
+0) 2 +12Mx 2)E) 00 ZOO 44)
+“o
+Ejercicio resuelto
+(D) Escribe un polinomio cuyas raices sean —2, 2 y 3 y
+O
+112)
+113]
+(0)
+114)Lo)
+Desafío
+cuyo coeficiente principal sea 3.
+Solució
+x=-2,x=2yx=3 son las raices del polinomio, por
+tanto, es de la forma PQ) =k + (c+ 2): — 2)00 — 3)y
+como el coeficiente principal es 3, k será 3, luego:
+PG)= 30 + Dx — 204 — 3)
+¿ Escribe un polinomio cuyas raices sean —1, O y 2 y
+cuyo coeficiente principal sea —2.
+ñ Escribe un polinomio cuyas raices sean x=5 y x=1 y
+tal que cuando x — O valga 3.
+£ ¿Una raiz del polinomio P(x)=x — 4x7 — x +4
+puede serx=47 ¿Yx=—67
+S: Si. No
+E La factura de teléfono móvil de Sofía refleja un coste
+fijo mensual de 5 € más 0,03 € por minuto de llamada.
+Le ofrecen cambiarse a otra compañía sin coste fijo
+mensual y una tarifa de 0,05 € por minuto.
+a) Escribe el polinomio que expresa cada situación.
+b) Si habla 70 minutos al mes, ¿debe cambiar de
+compañia?
+S: b) Si
+£ El precio por ir en taxi en una ciudad es de 2,50 € por
+inicio del servicio y 1,10 €/km y la tarifa es nocturna es
+de 3,15 € por inicio del servicioy 1,35 £/km. Si lván va de
+su casa al teatro, que está a 7,5 km, ¿cuánto le costará
+el viaje de ida? La vuelta será a las 23:00, es decir, en
+horario nocturno. ¿Cuánto le costará ese trayecto?
+5:10,75 €.13,28 €
+atemático (A
+116) Encuentra el coeficiente del término de grado 3
+del binomio
+de
+x
+2. Álgebra o
+
+--- Página 3 ---
+0 IA
+Dos fracciones algebraicas
+Pan Pa
+Q(*) mn
+PGO+ 560) = QU+ ROO
+Presta atención
+Para — simplificar — fracciones
+dividimos todo el numerador y
+todo el denominadorpor el mismo
+númeroo polinomio, no podemos
+dividirsolo una parte.
+E 34 3
+=—.-
+9 712 7
+dex E
+Sit “E
+Presta atención
+da) Fracciones algebraicas. Operaciones
+Sofa tiene un litro de leche y otro de chocolate. Pasa un vaso de leche al litro de
+chocolate y después de mezclarlo bien pasa un vaso de la mezcla al envase de la
+leche. ¿Qué cantidad de chocolate tendrá la mezcla en el envase de leche?
+Si x es la cantidad que cabe en un vaso, primero pasa x de leche al chocolate, asi
+la proporción de chocolate será ——. Después, pasa x de la mezcla a la leche, y la
+l+x
+x
+cantidad ahora será: x- —— = ——. Esta expresión es una fracción algebraica.
+lex dex
+siendo
+PbO
+Una fracción algebraica es un cociente indicadode dos polinomios »
+Q6dde grado mayorque O. Q6)
+Como ocurre con las fracciones numéricas, podemos obtener otras fracciones
+Igeb quival. por amf ión o por simplificación.
++ Para amplificar multiplicamos el numerador y el denominador por la misma
+expresión algebraica. Por ejemplo:
+x+1 2x+1) Ma+IMa+2) 2 +6x+4
+x-2 2Ma-2) 2(x-—2Mx+2) 2 -8
+Para simplificar factorizamos primero el numerador y el denominador. Después,
+eliminamos los factores que sean iguales en ambos, hasta obtener una fracción
+algebraica irreducible, esto es, que no se puede simplificar más. Por ejemplo:
+6x +18% +12x GilY +3x+2) 6x(x+ 1042) 2x(x+1
+3 -12 al 4) 3(e+2 M2) (x-2)
+Sacamos factor común. Factorizamoslos polinomios. — Simplificamos.
+Una fracción ica es irreduciblesi el dor y el d inador no
+tienen factores comunes.
+Las op ii con fraccik se realizan de manera similar a las
+operaciones con fracciones numéricas.
++ Para sumar o restar fraccix Igeb: primero las red: a común
+denominador: factorizamos los denominadores para obtener las fracciones
+algebraicas equivalentes cuyo denominador sea el minimo común múltiplo
+de los denominadores. Después, operamos los numeradores y si es posible,
+factorizamos el numerador para simplificar el resultado. Por ejemplo:
+X+2 3x x+2 3x Le +2) +D-3x-x
+Lo AMAD
+ES E
+x(x— Da +D xx— Dx +1)
+= Para multiplicar y dividir fracci Igebrais antes de operar podemos
+factorizar los di y denominadores para simplificar los cálculos.
+Por ejemplo:
+x+3x 4x x(x+3) Ax AGA DO AD
+5x5 e-1 Slx-D (x-MerD
+(x+3Mx+D > +4x+3
+22. 20
+S(x= 1) -4x
+Actividades
+Ejercicio resuelto
+Simplifi las T fi algebraicas
+calculando primero el máximo común divisor del
+numeradory el denominador.
+xx —-3x+2 ; 2 Tx +2x+3
+Ax 5-5x
+Solución
+a)
+El máximo común divisor de varios polinomios es
+el producto de los factores que tienen en común,
+elevados al menor exponente.
+al —-3x+2=(x—DXx— 2)
+xd — 4)x0 — 2 +2)
+med(x -3x+2,x - 4x)=x-2
+Dividimos el numerador y el denominador por
+x — 2, para obtener la fracción irreducible.
+x-3x+2 (xD2) xt
+XA AD) 2
+]x+=
+2
+5-55 (1-0) =-5(é 1)=-50—M+1
+med (2 7d +2x+3, 5-51 )ox 1
+imos el numerador y el denominador por
+|, para obtener la fracción irreducible.
+Es 2 — 7 +2 + 3= 2x — Dx — 3)
+1
+20 IEDF 2(x= a
+5-5 SNA
+2(x — 3)| Ll 2
+_ 2 2x —-5x-3
+SAD SS
+O:E Simplifica estas fr algebraicas
+primero el máximo común divisor del numerador y el
+denominador.
+Ax+4 xl — Si +6x
+a) Y ———
+E —1 x —Ox
+2x4+4 Ñ x +5 —16x—80
+xi +2x 3 — 63x +60
+ES +4
+si 1m2922 92
+xx x+3 3(x-1)
+120) az Realiza estas operaciones con fracciones algebraicas.
+7 2x
+y —-—=—
+x+1 x+1
+1-5
+d) =>
+1-2 x
+se, 5 2%
+x(2-x) (+4Xx 1)
+Mx Y
+d——
+Lori? 5(x-2)
+(21) £ Opera y simplifica el resultado.
+x+1 x+1 x +4x x+1
+2535 d +2.
+xr -1
++2 x+3 x ox
+b) +
+x+2 -3 2x-2 2x x
+Es:9—— ECO ml
+xlx-1) 0 —x-6
+ED E Opera y simplifica.
+1 ps
+x-1)
+2 de E
+b) [+ .
+4-9 143) x+4
+xi +7x x-5 x
+x+2 x+4 e-16
+x+1l 2x1
+(x+D(x-D 2
+a) x+1
+e)
+14 -2x-40
+b) el
+(eTM -3) — (x+3Mx+4) x(x +2)
+S: a)
+£ Unos amigos alquilan un local que cuesta 300 €.
+00
+a) Escribe una expresión del precio que debe pagar
+cada uno dependiendo del número de amigos.
+b) Después de pagar se incorporan 5 amigos más.
+¿Cuánto dinero tendrian que pagar ahora? ¿Cuánto
+dinero tendrán que devolvera cada uno de los que
+ya habian pagado? 1500
+x(x +5)
+S: b)
+Desafío matemático (M)-.»
+124) Un coche recorre un trayecto en autopista a una
+velocidad media de v, m/s. A continuación, abandona
+la autopista y recorre un tercio de lo recorrido en
+pista a una velocidad de v, m/s. Determina la(198: Determina dos fracciones algebraicas qui a
+2-x A+x 6x4
+a — yn — dl — F==
+Tx 2x4 Tex 1+2x
+expresión de la distancia total recorrida en función
+de Y, Y, y el tiempo total del trayecto, £
+2Ngera (Y)
+
+--- Página 4 ---
+Una ecuación es una igualdad
+entre expresiones algebraicas
+que es cierta para algunos
+valores de la variable. Estos son
+las solucionesde la ecuación.
+Resolver una ecuación es
+encontrarsus soluciones.
+Nota histórica
++ Dada una ecuaciónde la
+= formaod+bx+c=0la
+= expresamos como:
+a boe
+z tot =0
+a 1
+Segúnlas fórmulas de
+= Cardano-Vieta,sus
+soluciones,x, x,, cumplen:
+b
++ Enel siglo xu el gran
+Tartaglia vence en un desafío
+matemático a Antonio
+María del Fiero al resolver
+ecuaciones cúbicas gracias a
+su método.
+Tras esto, Girolamo Cardano
+= publicaen su libro Ars Magna
+= — dichométodoen contra de la —
+decisión de Tartagha sobre la
+= — publicación.
+Con la calculadora El
+Podemos utilizar la a
+13) Ecuaciones
+Iván quiere comprar un televisor de 50 pulgadas y no sabe si cabe en el hueco del
+mueble de su salón, de 70 cm de alto por 110 cm de ancho. Sabe que una pulgada
+equivale a 2,54 em y que los lados del televisor guardan una proporción de 16:9, es
+decir, cada 16 cm de ancho corresponden a 9 cm de alto.
+Si expresa el ancho del televisor como léx, el alto será 9x. Y utiliza el teorema de
+Pitágoras para plantear la ecuación: (9xP + (16xP = (50 - 2,54P = 3377 =16 129
+Se trata de una ecuación polinómica.
+Las ecuaciones polinómicas son aquellas que podemos expresar como P(x) = 0,
+siendo P(x) un polinomio. Su gradoes el mayor grado de sus términos.
+Para resolver 33717 =16 129, Iván despeja la incógnita x y obtiene: x ++ 16,918
+Por tanto, el alto del televisor es de 9x = 9 - 6,918 = 62,26 cm y el ancho,
+16x =16 - 6,918 = 110,69 cm, por lo que no cabe en el mueble.
+R las a linómicas dependiendo de su grado.
++ Las ecuaciones polinómicas de grado 2 las expresamos como a + bx +0c=0,
+-bixb' — 4ac
+siendoa +0 y para resolverlas utilizamos la fórmula: x = ———————
+20
+* Para resolver ecuaciones bicuadradas, es decir, de la forma x” + x" + k= 0,
+hacemos el cambio de variable t =" para convertirlas en ecuaciones de segundo
+grado. Por ejemplo, para resolver 3* = 3x7 4-18:
+ea e
+38 =3t418
+3(' -3t -18-0 >t-=-2yt-3
+x= 2 No tiene solución.
+e=3x=343 yx=-43
++ En general,para resolver ecuaciones polinómicas de grado superior a 2,
+escribimosla ecuación como PG) =0, siendoPG un polinomio.Silo factorizamos,
+obtenemos sus raices, y al igualar a O cada factor, resultan las soluciones de la
+ecuación. Por ejemplo, para resolver2x* + 8x7 = 8x7 + 2x0
+L Escribimosla ecuación como PG9=0. 2e — BX+ 8 — 2x=0
+2x[x' - ax +4x-1)-0
+1. Realizamos el cambio de variable.
+2. Resoh la jón obtenid
+3. Deshacemos el cambio para cada valor
+de t y determinamos los valores de x.
+2. Sacamos factor común.
+* para encontrar las soluciones de
+una ecuación polinómica.
+31 a O cada factor. 2=0>x=0
+Como esta ecuación es de grado 3, — x'-4x"+4x-1=0
+di aplicar la regla de Ruffini 1.4 4 A
+para obtener una raiz del polinomio
+corri ; iendo en 1 1-3 1
+cuenta el teorema del resto y el 1-3 1 0
+del factor.
+4 + 4x1 (Dll -3x+1)
+x—-1=0>x=1
+—-3x+1=0>x=
+De nuevo, igualamos a O cada
+factor, y resolvemos la ecuación
+de segundo grado.
+3+v5 3-5
+ZA
+Portanto, las soluciones son: x= 0,x=1,x=
+Ecuaciones racionales
+Para resolver ecuaciones en las que aparecen fracciones algebraicas, es decir,
+jonales, las multipli por el mínimo común múltiplo de los
+denominadores, para eliminarlos y obtener una ecuación polinómica.
+a
+. +x 2 x-5
+Por ejemplo, para resolver — lA
+r—- Y —dx+d
+1. Factorizamoslos 1 — Ax — 2 +2) x?— dx + 4=(x — 2P
+denominadores y hallamos — y. yy, (e Ae -4x+4) (+2 ay
+su mínimo común múltiplo. :
+(54002) 24D 22 5h+ 2)
+3 10407DH d+ Be 16 = + 2 — 5 — 10
+Pp - Multiplicamos la ecuación
+por el minimo común
+múltiplo obtenido.
+ya Resolvemos la ecuación 5 +30 +16x — 16=0 -3 316 -16
+polinómica obtenida. 1 30 16
+-3 016| 0
+357432 +16x —16=(x — DÍ 3" +16)
+x-1=0>x=1 16 ad3 4/3
+74 16=0 > = — 32M= ¿== -—Á
+3 3 3
+Comprobamos que las soluciones no anulan los denominadores porque en
+ese caso no serian soluciones de la ecuación inicial. Como las raices de los
+denominadores son x= 2 y x= —2, todas son soluciones.
+>
+Las ecuaciones racionales son aquellas en las que aparecen fracciones algebraicas
+en alguno de sus miembros.
+Ecuaciones con radicales
+Para resolver ecuaciones en las que la incógnita se encuentra dentro de una raiz
+cuadrada, llamadas ecuaciones con radicales, debemos aislar el radical en un
+miembro y elevamosal cuadrado, para eliminarloy obteneruna ecuación polinómica.
+Por ejemplo, para resolver V3x — 242 = 2x2
+- Dejamos solo el radical en 3x-2=2x-2
+uno de los miembros. ,
+(Vax-2)=0x - 2y
+3x — 2 4x* — Bx +4 >4x—- 1M+6=0
+1M+5 3
+» Elevamos al cuadrado
+ambos miembros.
+yw '. Resolvemos la ecuación
+linómica obtenida.polinómica obtenida. xr ax 2yx=
+8 4
+> Comprobamos que las soluciones verifican la ecuación inicial pues, al elevar
+al cuadrado, podemos haber añadido soluciones extra que no lo son de dicha
+ecuación. En este caso!
+1222 43-2-242=2:2>242=2-2> Es solución.
+3 3 301 3
+x=-—>3,13-—-242=2-—+>-+2 4-5 No es solución.
+4 4 4 2 2
+Las ecuaciones con radicales son aquellas en las que la incógnita se encuentra
+dentro de al menos un radical.
+Presta atención
+Si una ecuación con radicales
+contiene más de un radical,
+repeliremos el proceso lantas
+veces como sea necesario.
+
+--- Página 5 ---
+O
+Presta atención
+El logaritmo de un número no
+reales,ya que sia, n > 0:
+log,(—n=x050=—n
+Lenguaje matemático
+Para indicar que un elemento
+no pertenece a un conjunto
+utilizamos el simbolo .
+log, 7) gR
+Presta atención
+Como la base a de un logaritmo
+siemprees un número positivo,
+mo hay ningún número real x que
+verifique:o = —n, siendo m > O.
+[45] BLOQUE. ÁLGEBRA.
+Ecuaciones logaritmicas. Ecuaciones exponenciales
+Para resolver ecuaciones en las que la incógnita sse encuentra en el argumento o la
+base de logaritmos, esto es, ii ill: las propiedades de
+los logaritmos para eliminarlos.
+Si además hay términos en los que no aparecen logaritmos, los expresamos como
+logaritmoso los aislamosen un miembro y la definición de logaritmo.
+Porejemplo,para resolver:log, (x — 3) + log, (x+3)=1l0g, 28 — 2
+|. Como 2=log,4, sustituimos log,(x — 3)+ log, (x +3)=l0g,28 — log,4
+2 por el logaritmo.
+2. Aplicamos las propiedades de los
+logaritmos para expresar cada
+miembro como un logaritmo.
+3. Como ambos logaritmos son G— D0+tD=7 => -9=7
+iguales, las expresiones sin los e 16=0 14 yx=-4
+logaritmos también lo son.
+4. Comprobamos que al sustituirx en la ecuación inicial por las soluciones halladas
+no resultan logaritmos de números negativos, que no existen.
+x=4 => log, 1+log,7 =log, 28 — 2 > Es solución.
+x=-—4 =>log,(—7) y log,(-D £ R => No es solución.
+Para resolver ecuaciones con variables en los exponentes de potencias, llamadas
+ecuaciones exponenciales, utilizamos técnicas similares a las de las logarítmicas.
+28
+log,(6 — D6c+ 3109,
+»= Si queremos resolver ecuaciones como e*-3- ee”, aplicamos las propiedades
+de las potencias para conseguir una igualdad de potencias con la misma base y
+escribir una ecuación polinómica con los exponentes.
+a a la 1 2 10e 0-e >e e > lx 1TP=0>x=1
+3
+»= Para resolver ecuaciones como 2? ——=0, eliminamos el denominador y
+7
+aislamos la potencia en un miembro para tomar logaritmos en ambos miembros.
+7.2->-3-0>2->-3 3 log 7"*)-t0g3 > (2x — 3) -log 2=10g 3
+log3
+log3 lega 2A E
+log2 log2
+* En ecuaciones como - "+ 4, podemos realizar el cambio de variable t =3*
+para obtener la ó con los
+>)-eya -3-3-38t
+>P=3t44 > - 3t- 4=0 >t=4yt=-1
+Deshacemosel cambiode variable para cada valor de t.
+p
+F7-4>x=
+4
+lo9 1,262 —> Es solución.
+3
+3 - —1—> No tiene solución.
+Las ecuaciones logarítmicas son aquellas en las que la incógnita se encuentra
+en el argumento o la base del logaritmo.
+Las ha quellas en las que la i
+en el exponentede una potencia.
+se encuentra
+Actividades
+pi2 Resuelve las si
+a 3 =50—2e
+3 27
+bio! +—x+9 = 101 +—x
+2 2
+c) (e —6x+6)Le —2)x=0
+Sax=1:=23,x=0 b)x=3,x=1/2,x=-2,
+x=-3 €) x1=3143,x=343,x=0
+E Averig si estas 1 son bicuadradas y
+resuólvelas.
+al +5- 360
+b) Dxx0=1 xk
+dla + 4x)-24 21 —2)14 +2)
+5:a)SLx=2,x=-2 b)Six=3+y2/2
+CEFEESE]
+3 Halla la solución de estas ecuaciones racionales.
+E —x -
+a) AZAR
+x-2 x-4x+4 (x-2)
+2 5x+5 2
+O A AA
+x-2 1 Y -3x+2
+x+1 5 2x+1
+— + AO
+x+3 X +2x-3
+5S:a)x=3yx=1 b) No tiene solución.
+ex=21=-3/12
+R nE estas il con
+a) AT xx 1
+bj) Y2x+3+43-4x-3
+c) Álaxr3—3x-2=0
+S:iadx=-2 b)x=112,x=-3/2 e)x=-1
+E Resuelve estas
+1
+a) log(19x+27) — 2llog(3 am tg( e -6x+09)
+br 109, (/x) +109, (/%) =109, (fx +1)
+S:alx=0 blx=
+E Resuelve estas logaritmi:
+a) 2 log,(x —2)-2log,x
+1 1
+b) log,x-|1- +log,x | =log,—
+log, Vx 4
+2
+€) log, 3—log,x= ——
+log,3
+S:adx=3 1) x=V212 )x=/3,x=113
+(31
+ei
+ls
+E
+o
+2 Determina las soluciones de estas ecuaciones
+exponenciales.
+2
+a e le)=e?
+2) -8 S:a)x=0,x=1,x=2 b)x=1,x=-3
+y usa( 8 +5)
+b) 39-"-3""=12
+y mao" -1)
+S:a)x=1,x=-1 b)x =l0g,12 eJx=2
+Z Las longitudes de los catetos de un triángulo
+rectángulo se diferencian en una unidad y su perimetro
+mide 70 unidades. ¿Cuánto miden sus lados?
+5: 20, 21 y 29 unidades, respectivamente
+H En las E una
+de radio 1m, do que su superficie
+S:1m,/3m
+l Manuel inicia un bulo enviando una información
+falsa a 2 contactos. Cada uno de ellos la reenvía a otros
+2 contactos a su vez, y asi sucesivamente.
+a) ¿En cuántos pasos llegará la información a
+10 000 personas? ¿Y a 100 000 personas?
+b) Si además de la cadena de envíos iniciada por
+Manuel, Lola inicia otra cadena en la que se envía
+la información a 4 contactos cada vez, ¿en cuántos
+pasos llegará la información a 100 000 personas?
+mide
+S: a) 14 pasos, 17 pasos b)9 pasos
+i El pH de una disolución acuosa, depende de la
+concentración de iones H' e jones OH en moles según
+la ecuación logarítmica: log [H'] + log [OH] -= —14
+El pH se define como el logaritmo de la concentración
+de ¡ones H' cambiado de signo.
+a) Si una disolución posee una concentración de jones
+positivos H' = 3,22 - 10-7M, ¿cuál es el pH de esta
+disolución?
+b) ¿Cuál sería el pH de una disolución, si la
+concentración de ¡ones negativos fuera
+'OH-= 4,22 -10-7M2
+Desafío matemático (A
+137) ¿Es posible resolver estas ecuaciones? ¿Cómo lo
+(5) harias?
+a) /8x-3-2x=3
+b) 245% -x-2=x
+
+--- Página 6 ---
+Presta atención
+Alpresentar en el plano las
+O Sistemas de ecuaciones
+4.1. Sistemas lineales
+La delegada de clase se encargó de hacer fotocopias y comprar boligrafos.
+Por 500 fotocopias y 10 boligrafos pagó 28 €. Otro dia, por 300 fotocopias y
+15 boligrafospagó 19,50€ ¿Cuál es el precio de cada cosa? 500x +10y = 28
+Para responder planteamosel sistema de ecuaciones lineales: * yo
+300x+ 15y = 19,5
+Una ecuación es lineal si es una ecuación polinómica de grado 1.
+Los sistemas lineales son aquellos que están formados por ecuaciones lineales.
+¿tod ”indistiPara resolver el sistema pod utilizar tres
+» Sustitución: despejamos una incógnita en una ecuación y sustituimos en la otra.
+la misma ii
+» Reducción: b dos nú de forma que al multiplicar cada ecuación
+por uno de ellos y sumarlas, eliminamos una de las incógnitas.
+en ambas ecuaciones e igualamos.
+Asi, si aplicamos el método de igualación, obtenemos:
+S00x + 10y = 28-—500x 19,5- 300x
+> xo
+300x+ 15y= 19,5 10 15
+> 420 — 7 500x=195 — 3 000x > 4 500x= 225 —>x= 0,05; y = 0,3
+Luego por cada fotocopia pagó 0,05 € y por cada boligrafo 0,30 €.
+Dependiendo del número de solucí un sistema puede ser compatible si tiene
+solución e incompatible si no la tiene. Además, si la solución es única, el sistema es
+determinadoy si tiene infinitas soluciones, es ii
+ión de sist s li l
+Cuando un sistema tiene más de dos ecuaciones, para resolverlo podemos utilizar
+el método de Gauss, que consiste en transformar el sistema inicial en otro sistema
+R l método de Gauss
+% paralelas, en este caso, el
+incompatible.
+es decir, con las mismas soluciones, en el que cada ecuación tiene una
+incógnita menos que la anterior. Decimos que el sistema es escalonado.
+2x-y+z=3
+Asi, para transformarel sistema x — 4y — 2 — —1 | en otro equivalente escalonado:
+-Jx+y+2=0
+1 E liminando la incógnita x de la segunda y la tercera ecuación:
+2x- y+z-=3 2x- y+ 2-3 2x- y+ 2-3
+O A O A
+-3x+ y+2=0 <Jx+ y+ 2=0 -= y+5z=9
+2. Eliminamos la incógnitay de la segunda ecuación ya que si utilizáramos la primera
+volveria a aparecer la x eliminada en el paso anterior:
+o 2x-y+z=3
+-2y-32=-5
+387= 68
+Un sistema de tres si ¡con tres úl sicada Só
+tiene una incógnita menos que la anterior, Y de modo que una de ellas ene solo
+una incógnita y en otra falta alguna de las otras dos.
+Cuando tenemos el sistema escalonado, podemos resolverlo despejando la
+incógnita en la ecuación que tiene solo una incógnita. A continuación, en la que
+tiene dos, sustituyendo el valor de la anterior, y por último, en la que tiene las tres,
+sustituyendo el valor de las anteriores.
+2x-y+2=3
+Así, para resolver ly -32=-5
+387 - 68
+|. Despejamos la incógnita z en la última ecuación:
+68 34
+3872-68 >21=—=—
+38 19
+Sustituimos el resultado en la segunda ecuación para obtener el valor de y.
+1y 3: qm 5>-7 5 12 —7 7 !- —=-5> =54 — A Y SY—Á
+” Y 19 Y 19 19
+p
+3. sein. los valores obtenidos para y y z en la primera ecuación y de ese
+modo hallamos el valor de x.
+34 35 35 57-35
+2x| -—|+—=3 >2x+—=3 >2x-3-— >2x=
+19) 19 19 19 19
+2 5]
+AÑ A —Á
+19 19
+n 1 34 | 1 34
+Por tanto, la solución es! x =—, y =-—,2=—0|—, -—,—
+19 19 19 119 19 19
+Cuando resolvemos un sistema por el método de Gauss, es posible que se anulen
+una o dos ecuaciones, por tanto, obtenemos infinitas soluciones y el sistema es
+compatible indeterminado.
+También es posible que lleguemos a un resultado imposible, como Ox + Oy + Oz=k,
+siendo k +0. En este caso, el sistema no tiene solución y, portanto, es incompatible.
+Ejercicio resuelto
+R n
+quetienecada uno.
+a) x+y+57=0 b) x- 3Jy+52=2
+mu 1 Anno
+Nota
+El método de Gauss, que toma
+sunombre del gran matemático
+Carl Friedrich Gauss, no fue
+stórica
+= descubierto por él, sino que
+tiene su origen en la China del =
+E siglo 1 a.C.y fue Newton quien
+lo describió de forma general.
+Como Gauss lo utilizó para
+resolver algunos problemas
+relevantes, tras la segunda
+Guerra Mundial se popularizó —
+Presta atención
+Podemos escribir la solución de
+un sistema de tres ecuacionescon
+tres incógnitas como la terna de
+números (x, y, 7) que veremos que
+a las coordenadasde
+un punto en el espacio.
+estos sistemas aplicando el método de Gauss y elasificalos teniendo en cuenta el número de soluciones
+e) x-3y+27=1
+2x4 Ay —10z = 7 x+2y+z=1 x—-2y+7=3
+—2x + dy +307= 1 x-1y+132=4 l2x+y+2=-9
+Solución
+bja]
+jm
+E ot
+bsmcr
+PE]
+14.0
+MAA,
+cn rc
+
+--- Página 7 ---
+0
+4.2. Sistemas no lineales Actividades
+Para resolver sistemas con ecuaciones en los que al menos una de ellas no es lineal (39) h Ri Ive estos sist ilizando el método de 143) 2 En una perfumeria venden tres tipos de lotes que
+utilizaremos los mismos métodos que usamos para los sistemas lineales, teniendo Gauss. contienen jabones, cremas y sales de baño. Uno está
+en cuenta el tipo de cada una de las ecuaciones que lo forman. Dd Eensa=2 Dd day compuesto por 3 sales, 2 eremas y 4 jabones, y cuesta
+Por ej . Nx—1+3=y dy-4 dr+dy-32=2 27 €. Otro lleva 2 jabones, 3 cremas y 4 sales, y su
+r ejemplo, para resolver el sistema: -60 Fey SA BS precio es de 32 €. El tercero contiene 2 sales, 3 cremas
+L Aph : do. el método de ionalació bt 2x+y+32=-2 Sx-9y+72=1 y 4 jabones y cuesta 25 €. ¿Cuánto cuesta cada artículo?
+L icamos, je lei ción, y obtenemos:
+Por ejemplo, Y Y ' 5:1,50 € el jabón, 3 € la crema y 5 € las sales
+60 60 , b) x+2y+32=0 el —4x+4dy+z=3 m3
+de —1+43=— > 4x—-1=—-3 »(Lx—1) =|—-3 =x+y+27=1 =r-y-2=2 2 1 Resuelve los siguientes sistemas no lineales.
+2600 360 z 2y+2=3 Ax-2y-61=2 a) A O 2Nx+y=2
+-1- -— 490 103600 — 360% + 90 y=6 1>. E QA .. e dx—y=-1 Fl x+y+z=0 =+y=5
+x
+2R la ión polinómica obtenida: x* — 10.7+ 360x — 3600=0 -2x-2y+32=-1 x-2y+3:=0 2 - =-
+1 10 360 -3600 Aplicamos la regla de Rufini y resulta: lx — 107 +360)=0 >x=10 y-z=1 2x+y-52=0 DA an] aos
++y=1 1.1 2
+10 0 3600 Resolvemos:+ 3600 +x=/-360£ R No tiene solución. S:a)(6,1, 5) b)(-1,2, 0 c)0,4,3) *+y AS
+1 O 360 0 60 d)(9, 26, 40) e) (1,0, 1 f1(0,0,0) x y 3
+L 3. Deter la solución del sistema: x=10 =—=6solucion del sistema:x Y (TE Resuelvee indica en cada caso de qué tipo de sistema 5:216,2) )(2,-0,0.1,2)10 don qué tipo
+1+3-6 se trata según su número de soluciones. (14,0 4(1,3,6, 1
+“a a y10-1+3= z
+4. Comprobamosque la solución verifica el sistema: 10-660 a) x+y-z=2 €) x+y-21=3 145) 3 Encuentra todas las soluciones de estos sistemas.
+o aya 2e+y+3z=1 de logy”Ay 5 a 5"-5*=20 ay YsPor otro lado, vesolver el sistema: =r- = -rotro para resolver coma 775) x-5y+z=0 3x+2y+z=4 "45% 650 logx
+1 Aplicamos,por ejemplo, el método de reducció do ambas al : b) 2x-y=1 dd 2y+2=5 opel)SUN
+3-12 y 4 >y=2 y=-2 x+y+2=0 x+y-2=2 b) 2.3 =18 e) 7.768
+2. Determinamoslas soluciones del sistema. 3x+7=5 =x—Jy+r=2 243 =13 log, x +log,y = 3
+y=2>%=9>x:x-3,x=-3 y=-23%=9 >x-3,x=-3 S:a)(5/2+E 12,t),teR. 2nx+l 2 $ 1
+rr - = nx + In y =
+Las solucionesson: (3, 2), (3, -2),(-3, 2), (-3, -2) E Z 7 : | "702 5,5+7,0,teR. Inx —Iny =-2 e 6
+3. Comprobamos que todas las soluciones verifican el sistema. Compatible indeterminado d) (13, 2,9). log, x— log, y = —1
+Py 1 Compatible determinado SIDAD
+i ; *-— y :2D(l, ,2),Sin embargo, para resolverel sistema: 3 £D E Indica, sin resolverlo, cuántas soluciones puede tener: Ci410).100. (2:240)) o(1.2)
+logx — 2logy =1 O EOS (log, (11-410), 109, (2+210))(1, e
+1. Eliminamoslas potencias y los logaritmos: x-2y+32=0 al, 10%), (107, 10*)
+po yu-y x+y-3=-1 3 2x-y+47=0 2)02,4,4,2) 00,2
+o > ox > x HN o o (73 3 Julia quiere cercar un recinto rectangularde forma
+*- = = —= = y naranjas, iwis manzanas, álogx—logy” =1f log tog10 10 10y' =x (2 ll Por?kg de naranjas, 3 kg de kiwis y 4 kg de que el lado más largo sea el doble que el otro, y cuya
+Presta atención Y Y Carlosha pagado 37,50 €. En la misma frutería, por4 kg diagonal mida6 m. ¿Cuánto debe medir cada lado?
+de naranjas,1 kg de kiwis y 2 kg de manzanas, Alicia ha EE CS medir cada
+pagado17,50€. Roberto ¿8N5 12N5¿—— my —— m
+5ha comprado 6 kg de
+. Aplicamos, por ejemplo, el método de sustitución, y obtenemos:
++414+80 -1+9 2 1
+|
+|
+polinómicas de grado mayor 10y + 2-0 => y = —————- A > e E
+que 1, racionales, con radicales, r+y Y 20 20 dl 5 Y 2 a E — -
+ote a oia! 3. Hallamos las solucionesy comprobamos que verifican el sistema. REE Desafío matemático (NM 2
+- e es peable que 2 8 1 1 A (E) Añade una ecuación para que**Y72= sea:
+AA E y=— >x=- 3 Es solución. y=-— log — | R > No es solución. En.esta fruteria, ¿cuánto o . . 2x+y+32=1
+al de 7 5 5 2 2 cuesta el kilogramo de a) compatible determinado.
+. . cada tipo de fruta? b) compatible indeterminado.
+Los sistemas no lineales son aquellos en los que al menosuna de las ecuaciones
+que los forman es no lineal. 5: 2 €/kg las naranjas, 4,50 €/kg los kiwis
+y 2,50 E/kg las manzanas
+e) incompatible.
+2. Álgebra [3]
+
+--- Página 8 ---
+15) Inecuaciones. Sistemas de inecuaciones
+Inés va a enviar por correo una lámpara de cristal con forma cilindrica, cuyo
+diámetro mide lo mismo que su altura. Para que no se rompa, decide meterla en una
+caja cúbica y rellenar los huecos con virutas de poliestireno. ¿Cuánto poliestireno
+puede utilizar para proteger la lámpara si tiene 60 cm?
+Si la arista de la caja midex cm, el poliestireno que puede incluir ha de cumplir que:
+Ñ x
+X—Al—-|x<60
+2
+Como se trata de una desigualdad, decimos que es una inecuación.
+Lasi A desiaualdad a Suc -
+ep y
+para un conjunto de valores de la variable. Este es su solución y puede expresarse
+como desigualdad o como los valores que pertenecen a uno o varios intervalos.
+Para resolver cualquier inecuación podemos buscar las soluciones de la ecuación
+correspondiente. Estos valores serán los extremos de los intervalos solución, y
+después, elegimos de entre los intervalos obtenidos cuáles verifican la inecuación.
+Asi, para averiguar la cantidad de poliestireno necesaria para embalar la lámpara,
+d; resolver la ÓN cor díp
+Ñ x . mé
+Xi —A —-|x=60>x -—=60D >(4 — ah =240 +17 a: 279,59 co?
+2 4
+La solución es única, luego debemos elegir entre los intervalos (—00; 279,59] y
+(279,59; +00). Tomamos un valor perteneciente a uno de ellos, por ejemplo, x=0, y
+2
+4]
+comprobamossi cumplela desigualdad: 0 — xr] -0<60
+Como la cumple, la solución es (—cu; 279,59]. En este caso, el resultado tiene que
+ser un número positivo, por tanto, Inés puede utilizar desde O hasta 279,59 em.
+Inceuaciones polinómicas de primer grado
+2x-1
+Para resolver inecuaciones como 3x — 6 < 2x-— 20 z
+manera similara cuando resolvemos ecuaciones.
+» Pod
+< 3x, procedemos de
+sumaro restar cualquier número o expresión en ambos miembros ya
+que la desigualdad no cambia.Asi, para resolverla inecuación 3x — 6 < 2x — 2:
+Restamos 2x en ambos miembrosy obtenemos: x — 6 < —2
+Sumamos6 en ambos miembrosy resulta: x < 4 0 (—0o,4]
+* Podemos multiplicar o dividir por cualquier cantidad con la particularidad de
+que, si el númeroes negativo, la desigualdad cambia.
+2x- 1
+Asi, para resolver < he
+1. Multiplicamos ambos miembros por3 y obtenemos: 2x — 1 < 9x
+2. Restamos9x y sumamos 1 en ambos miembrosy resulta: —7x < 1
+1
+b x>--0x€
+7
+ambos mí por—7y 1
+=-, +00
+7
+Las inecuaciones polinómicas de primer grado están formadas por polinomios
+de gradoL
+Inccuaciones polinómicas de grado superior a 1
+Para resolver inecuaciones como2x — ? < 3x — 62
+1. Hallamos las soluciones de la ecuación correspondiente.
+2 PB 6 3H 60 3 x= 3,02
+Estos puntos dividen la recta real en tres intervalos.
+5432-1011 2345
+(00, —3) (23,2 (2, +00)
+Para saber cuáles son los intervalos solución, elegimos un valor que pertenece a
+cada intervalo y comprobamos si cumple o no la desigualdad inicial.
+En (oo, -D:x=-4 52 -(-4) — (-4F 23 -(-4) — 6 >(-00, -3)es solución.
+En(-3,3:x=0 52-07 <3-0-—6-(-3,2) no es solución.
+En (2, +00): x=10 >2-10 — 107< 3-10 — 6 > (2, +00) es solución.
+En este caso, como en la inecuación aparece el signo < debemos incluir los
+extremos de estos intervalos.
+p
+Luego la solución es: x € (00, -3] U [2, +00)
+Las inecuaciones polinómicas de grado superior a 1 son aquellas que están
+formadas por polinomios de grado mayor que 1.
+Inecuaciones racionales > ;
+Para resolver inecuaciones con fracciones algebraicas, como 1-—— < A
+x+1 xXx -1
+¡pasamos todos los términosa uno de los miembros, dejando O en el otro. Obtenemos
+asi una única fracción algebraica, de la que estudiamos su signo, que varía según los
+signos del numerador y del denominador.
+1. Pasamos todos los términos al primer miembro y operamos.
+2 1 Le -1)- 2-01 Y -2x
+1 ——-—— 20 > ——————£ 0 > <0
++1 ox 1 ea 1
+2. Factorizamos el numerador y el denominador.
+x(x-2)
+AO
++ Dr 1
+3. Estudiamos el signo del cociente en cada intervalo.
+Cto0. 00 (00 4,23 | (2,+00)
+dx — 2) + + - - +
+c+ DG — 1 + — — + +
+xlx—2)
+=== + = + = +
+Dot Mx — 1)
+Como no se puede dividir por O, no incluimos los valores que anulan el
+denominador, en este caso, —1 y 1. Además, como en la inecuación aparece el
+signo < debemos incluir los extremos de los intervalos.
+Por tanto, la solución es: x € (1, 0] (1, 2]
+Las inecuaciones racionales son aquellas en las que aparecen fracciones
+algebraicasen alguno de sus miembros.
+Presta atención
+Una manera de identificar el signo
+Presta atención
+mayoresque a.
+*raz0 a *a>0
+También podemos tomarun valor
+en cada intervalo.
+
+--- Página 9 ---
+0 II
+Sistemas de inceuaciones Actividades
+Hay distintos tipos de sistemasde inecuaciones según su número de incógnitas. lao] 2 Determina la solución de estas inecuaciones. (55) H Calcula qué valores puede tomarx para que exista:
++ Un sistemade it ii con una incógnita está formado por varias a) 20-30 -4x<3-(-D dx-5
+i i incógni —2 — El 1inecuacionescon una sola incógnita. b) 3-2*-D>3-5 a) log,( 2) e) In xi
+Para resolverlo, resolvemos cada inecuación por separado y hallamos la x 1-2x% Xx
+intersecciónde los intervalos solución obtenidos. e) 3 - E < e b) In(6-xG—1) mm eb Ñ 3- z)
+Porek 3- (1-20 <-x-1 Ñ zejemplo, para resolver seguimos estos pasos: 1 x 5 +1 1 1 2
+4-2x<2-x[x+5) dl —-|x+-|-——> x| -—x|-— : El -Salx< b)x€ (-2,3)
+3 el 5 2 5 5
+1. Resolvemosla primera inecuación.
+3-14+2x<-x-1>3x<
+2. Resolvemos la segunda inecuación.
+4-22 e 4 3420
+€)x€ (oo, DU (5/4, +00) dx >1
+(56) E Resuelve estos sistemas de inecuaciones.
+al O 3-(2x+5)>4x-2
+3>x<- 1.0 Siadx>-2 usb al
+3 3
+d) No tiene solución.
+(2) d Escribe una inecuación que tenga por solución: 2-x>x-5 3-2x x
+EN LA- A 3 20434 2=0>x= 3 = > a) xE|-00,— cx € (—00, 0] U [2, +00)
+A 3 b) x-(8-3x)>x+5] a x(2x-5)<x-3
+La soluciónes: -2<x< —1 21.0 b) x€ [-3, +00) di x=3 * 32% 5-3x<2-3(x-1)
+x
+3. Determinamosla intersecciónde ambos intervalos, y a (51) E ¿Cuánto tiene que valera en 2 — 3(a+x) <1-— para 2 > 3 =0
+la soluciónes: -2<x< —10x€ [-2, 1) 2 1 0 101] que la solución sea x > 17 2 157) > of de_G 5. con
+= Un sistema de i ii con dos incó está formado por varias Sa=-1/2 2 Eos 3] z b) >2
+: anni ax -
+inecuacionescon dos incógnitas. 52) e Hallala sol de las sigui P 7 ml Im” z MA
+Por tratarse de inecuaciones con dos incógnitas, la solución de cada una de a ele +2)<8lx -1) Y ys
+ellas es un semiplano. Para determinarlo, representaremos las soluciones de la 15 x0 a y-1 >0
+ecuación correspondiente, estas formarán una recta que indica cuál es el borde b) Y3-x-2< pol +1 2
+de dicho semiplano. Después, decidiremos qué semiplano de los dos separados 2 [58] E Averigua cuánto debe medir el lado de un cuadrado
+.por esta recta verifica la inecuación. e e-341>3
+d) log2+2logx> log (2x +6) — log 2
+s:3)x€ (-2,-vV2)u(y2,2) brxe [-13,3]
+)x>3+In2 d)x> 3/2
+para que se cumpla que el área de dicho cuadrado más
+el área del circulo inscrito en él sea mayor que 9 u?,
+5:x>6/4+ TU
+59) H ¿Cuántos rectángulos cuya base mide una unidad
+La solución del sistema es una región del plano formada por todos los puntos
+cuyas coordenadas cumplen todas las inecuaciones a la vez.
+Ejercicio resuelto z ” . más que su altura, siendo ambas longitudes números
+3x—2y<3 ES) E Resuelve estas '
+[48] Resuelve este sistema de inecuaciones con dos incógnitas: Y " enteros, cumplen que el valor de su área es menor que
+Ax+y>5 : 5-x 2ax Str +1 7 unidades cuadradas?
+Solnció a) >3 e) = == zSolución Xx d=x x- e -1 S: 2 rectángulos
+1. Para resolver la primera inecuación, representamos 3 —9—x 1 Averigua cuántos triángulos isósceles cuya base mide
+las soluciones de la ecuación 3x — 2y= 3, hallando Y b) ” z1 d) == FT E- una unidad menos que los lados iguales, siendo ambas
+previamente dos de ellas. 110 —b o ada x longitudes nú enteros, plen que el valor de
+S:a)x€ (0,5/4) b)x€ (00, -4)U[2, +00)
+dxic(-3, DUCA,D dixcE oo, -3]0(0,1]
+ED) E Averigua qué valores puede tomarx para que exista:
+Ea Desafío matemático (M
+a) y2x-3 6)
+E) YIx(1— +6 d) ,[2-
+su área es menor que 6 unidades cuadradas.Elegimos un punto del plano que no sea solución de 3 3
+o 5: 3 triángulosla ecuación, por ejemplo (O, 0), y comprobamos si
+Hh-2Y<x
+3-0-2-0<3 Fr"
+Como cumple la desigualdad, el semiplano al que
+pertenece este punto es la solución de la inecuación.
+2. Repetimosel proceso para la inecuación4x + y > 5.
+161) En un depósito se almacenan bidones de petróleo
+y de gasolina. Para atender la demanda debe haber
+1+2x al menos 10 bidones de petróleo y 20 de gasolina.
+3 Siempre tiene que haber más bidones de gasolina
+que el cuadrado del número de bidones de petróleo
+PdEl punto (0, 0) cumple que: 4 - O +0 < 5, luegola
+solución esel semiplano que no lo contiene. Además,
+como en la inecuación aparece el signo > debemos 2 3
+incluir la recta. La solución es el conjunto de los
+puntos de la intersección, donde se mezclan ambos colores.
+[ss BLOQUE. ÁLGEBRA
+S:ia)x22 bIxc [1,2]
+2 5
+€)x€ (oo, -2]UL0, +00) di x <—
+2
+y en total no puede haber más de 200 bidones.
+Representa en el plano la región que es solución e
+indica cuántos bidones de cada tipo puede haber.
+2. Ñigebra [57]
+
+--- Página 10 ---
+Ejercicios resueltos Ba
+Polinomios >
+162) Averigua cuál es el término de grado 4 en el desarrollo del binomio 2-2]
+Solución z
+Como (a —bJ = coa jes «copos «—o(;jers cojos el término que ocupa la
+n
+posiciónk +1 es de la forma: T,, = coje
+Operonesprier apart) [2| =
+x
+¡Como queremoshallar el términode grado4 sabemos que: 10 — 3k=4 >k=2
+Luego, el término de grado 4 es:
+2 4
+T, =(-1f ser [3] = 10.4 --= 40%, que está en la tercera posición,
+Xx
+Ahora tú o
+3Y
+[63] E Escribe cul e témino de grado 5 nes de ino | 2 a
+Fracciones algebraicas
+(E) Operay simplifica el
+Solución
+3-3x d-4 x—x 2 «e
+M2 A6 26 742
+Primero factorizamos para simplificar las fracciones antes de operar.
+301=x) Des 2 2) (xx 102
+xi) +3) Ge+3)0e=2) (3x-2Mxa—D (3x-21(2rD
+1—x=-x—D
+3 (+2) (de * 3 (+2) —xl3x—2) 3 x+2
+= - A = - — +1
+x(x+3) (+3) (3x-2Mx=D (Bx-2) x(x+3) (+3) x(3X-2) xla+3) 2x+3
+A Ñ jón, b las fracci lgebrai iwal con de inador común, operamos y
+simplificamos de nuevo:
+3 x(x+2) x00 43) 3-124+3 3 1- + =- = =-
+x(x43) x(x+3) x(x+3) x(x +3) xlx+3) x
+Ahora tú o
+(3 E Opera y simplificaAGO — BG0 siendo:
+Y —5x Y —x-2 Bx—- 2 -3x+1
+AGO BL =
+rar Y +4x+48AX 30
+[ sa) BLOQUE. ÁLGEBRA
+Ecuaciones exponenciales
+Ecuaciones con radicales
+166) esta ión con radicales: 24/5x— 1/10 —3x= 4
+Solución
+Dejamos solo uno de los radicales en uno de los miembros de la ecuación y elevamos al cuadrado ambos miembros.
+(aYax1) =[/103x +4) >4(5x— 1-10 - 3x+8/10—3x +16
+De nuevo, dejamos solo el radical en uno de los miembros y elevamos al cuadrado. 2
+a
+(23x — a0r=(8/10 ax) + 529% — 1380x + 900 = 64010 — 3x) > 529? — 1188x + 260=0 ->4 130
+Comprobamos estas soluciones en la ecuación inicial. 529
+x=2 2 245-2-1-4110 -3-2 = 4 > Es solución.
+130 130 130
+x=— >2,5:—-1-,M0-3.—+4 —> No es solución.
+529 529 529
+Ahora tú o
+(E)3 Resuelve esta ecuación con radicales: Y3 — 3x + /5 — 10x= 8
+ade yj gu gr
+168) estas i P tal a) =4 bh) — +27 =34—
+e 3 9
+ución 4
+a) Aislamosla potencia en un miembroy apli las propiedades de las las: tt =—
+3
+| el 3
+4 4 EJ
+Tomamos logaritmos y comprobamos: inle?">)=4n 3 >2x -3 =In| — ETA 51,64
+10. 3
+aleRECUAAa
+e
+b) Realizamosel cambio de variable t = 3":
+enla ao 3 (3). 39-90 302 3".398tt 3-3 79
+9É ot 1
+Portanto: — +27 = Blt+ — +38 — B214+27=0 +t=27,t=-
+3 2 3 4
+Deshacemosel cambio de variable: 9 = 27> 3=3* >x=3 Y=->3$=3'>x=-1
+3
+gp” y gr 1
+— 427 =—+211=2214 — 2-42
+33] 3 Ñ 3 . > Essolución. x=-1>] 3 . 3 > Es solución.
+sa 2 E 2 3 1
+3 4—=3Y 4—=2214 PU — 3 4 = 274
+9 El 9 El
+Ahora tú >
+8.4 , Y
+ED E Resuelve las siguí 1 ep dal a) =5 b) 44 Ba= + —
+12 4
+2. Álgebra [so]
+
+--- Página 11 ---
+Ecuaciones logarítmicas Inecuaciones
+a . o 3 Box 1170) Resuelve la ecuación logarítmica: log ¿ 10 — log, (9 — xJ=2 [74] esta == 25 +
+Solución x xx -2x4+1 x-x x-1
+Solución 3 x+4 3>x 1
+Escribimos todos los logaritmos con lamisma base para poder aplicar sus propiedades. Para ello, realizamos primero
+el cambio de base de ambos logaritmos a base 10:
+logi0 1 2 log(9—x)
+10 SL (9-1) LE
+A A
+qa
+Portanto: ID 2 12 tog(9— 0=2logx >2=toge +log (9 — 1 > 2=tog[ (9x0)
+logx logx
+5
+Aplicamos la definición de logaritmo: 107 =x(9 — 1) >— 9 +100=0 —> 2+246
+2- 246
+Comprobamos quex = 2— 2/6 no es solución, pues no existe la raiz cuadrada de un número negativo.
+Ahora tú e
+(0) E Resuelve esta ión logarítmica: log , 4 — log, 8 = 16
+Sistemas de ecuaciones
+172) Juan, Lidia y Leticia han ido 3 dias seguidos a la misma cafeteria. El primer día tomaron 3 cafés, 2 refrescos y
+3 batidos, y pagaron 7 €. El segundo día tomaron 1 café, 2 refrescos y 2 batidos, pagando 5 €. Por último, el tercer
+día tomaron 2 cafés y un batido por 2 €. Justifica si puedes determinar los precios de estos productos.
+Solución
+Llamamos x al precio del café, y al precio del refresco y z al precio del batido, escribimos las 3 ecuaciones y
+aplicamos el método de Gauss:
+3x+2y+37=7 x+2y+2225 |, x+2y+22=5 | , x:+2y+22-5
+IES A Ey Pay 327 S > —Ay-32=-8| ——> -Ay-32=-8
+intercambiamos
+2x + 2=2| E porquecenviene 2% + 2=2% 2 -ay-32--8 0-0
+que la x de la primera
+ecuación tenga
+coeficienteL
+Por tanto, se trata de un sistema compatible ir inado, cuyas soluci len que: ¿=t, parateR
+Sustituimosen la segunda ecuación para hallarel valor de y: 4y + 3t=8 > y =
+3t 2-t
++1H=5>x=—
+2
+B-
+Y por último, sustituimos en la primera ecuación y obtenemos: x +2- 3
+¡Como el sistema es compatible indeterminado, tiene infinitas soluciones y, por tanto, no podemos determinar los
+precios.
+Ahora tú o
+173) £ Miriam hizo un test que de 30 p: Cada p suma 1 punto, cada pregunta sin
+ASA A ¿Cuántas preguntas acertó, cuántasno
+contestóy cuántas falló, si sabemos que obtuvo 15 puntos y que acertó tantas como las que no contestó y las
+que falló juntas?
+[ 60) BLOQUE. ÁLGEBRA
+Pasamos todos los términos a un miembro de la inecuación: — — —— - —— =0
+x xi -2x41 o o ol
+Calculamos el minimo común múltiplo de los denominadores. Para ello, primero los factorizamos.
+— 241 (x — 1 xi —x=x(x1)
+3 x+4 3—x 1
+x (x-1f xlx-1) x-1
+mem TEA —x,x-1)= xx —1F
+dCalculamoslas fracciones algebraicas equival: reducidas a común di r y operamos.
+Ma +4) (30D a 1) 20
+xlx 10 xx 1Y xt 1 xx 1y 1
+3 Ex +3 Al AB ea 2 —13x+6 20-0|»-"]
+> 20> =02 z=0>
+xr 1 xlx 1 xl 17
+Estudiamos el signo del cociente, teniendo en cuenta que es positivo si el dividendo y el divisor tienen el mismo
+signo.
+coll EN see1
+2u-0/=-! + + - - +
+2
+xl — 1 - + + + +
+1
+Mx —6 3 Ñ o Ñ n
+xlx—1P
+¡Como en la inecuación aparece el signo >, la solución deberia está formada por los intervalos en los que el cociente
+toma un valor positivo o 0. Sin embargo, en este caso, O anula al denominadory como no se puede dividir por cero,
+D no es parte de la solución.
+Por tanto, la solución es:x € lo 1 U[6, +00)
+2
+Ahora tú o
+1 | Resaeiearsiglenes necdex x—-6 2
+y — 3 Éé—
+2x-x xi dx+4 > x-2
+x x+1 1
+A
+2-x 4d x-2
+d+6x+O — 3+x dex
+b)
+=== — >
+DMI e x
+2. Álgebra [1]
+
+--- Página 12 ---
+Actividades de síntesis O
+Polinomios Fracciones algebraicas
+ED ] Dados los polinomios: PG) = 3 — 5x7 + 3x — 2, () $ Simplifica las sigui fi algebraicas.
+Q60) - 3 — 3 — 2 y RO) 2e — 3, calcula: y PE 8 Y —26x +25x
+- a, £
+_ : e 4 9x' +45x' +53 5x6
+S:al3 32 40 46160192 rr2 bp AAA A
+0205 6 19 +6 + Mie 9x+6 x -3x+2 3x' +8x' 151 — 32x +12
+0 09=e yO 9202 y 202 ¿068 452 Hal
+x+3 x-1 3 x-2
+£ CLO= 3x0 + 6x7 + 7 +17 y ROO=32 Ñ
+. o con fr
+177) £ Calcula y simplificael resultado.
+a) [+27 —(e-2Y Í - (8x+ 008% — D y AS
+bp) a Marlexela 6) (e 3P xi —3x+2 1-2
+S:3)1 b) 7 m 21. 3
+ED) ] Factorizalos siguientes polinomios. 2 -2x xx -1
+al PGd=de— 8 —x+2 , x+2 x—5A
+b) Q0I=xé— 2-1 +4x— 2 ox6 50 +3x+9
+) 500-20463 2-4 Axl É3012
+di 10)— 6x — 27 Sa) y
+(5)
+095)
+E Averigua el valor de k para que —3 sea raiz de:
+PC)= 2? lo? — 5x — 6
+S:k=19
+E ¿Cuál es el polinomiode raices —2, —1, 3 de grado3 y
+que el término de grado 1 tiene por coeficiente 1?
+2
+Ss: Pa)Ep rrl
+7 7
+i Usa el binomio de Newton para:
+a) desarrollar(1 2%.
+b) averiguar el término de segundo grado de
+e) resolver(2 — 3:P= (2 +30".
+A£ Demuestra: ”
+k 35)
+BLOQUE. ÁLGEBRA
+x-2 2 -2x iS 4319
+2 E Realiza las sigui iones confr[ss
+algebraicas y simplifica el resultado.
+x—-1 x+4
+Y +5x+4 e -1
+xi +6X +3x 10. 3x”+ 12x — 15
+Y +5x4+4
+x -25
+a
+a)
+b) Y -2x-3
+2x5
+x—6 xx +3x
+1» d-x-6 q
+GI 3(x+4)
+algebraicas y simplifica el resultado.
+3x43x 1
+) - .
+Bx+2lel 43 el 5x6
+dad —-25 x—Sx 5+2x
+e)
+xx -30x
+Ax 3)
+con fr
+S: a)
+dl 6x4O
+== —:
+x+4x+4 x+2 2x
+10 x
+3x+9 xx -1
+x-1
+e)
+443
+-x-3 7+2x y
+- y —_
+x-3 2(x+2) 3(x — 1
+S: a)
+CD E Un coche rebajado cuesta 14900 €.
+a) Escribe la fracción algebraica que expresa el precio
+inicial.
+b) ¿Qué fracción algebraica representa el descuento?
+c) Comprueba que si al precio inicial se le resta el
+descuento, se obtiene 14900 €.
+Ecuaciones
+Din Ive las sigui: ij linó
+a) 10:46 — 2-184+(3 — 2xP
+24+3x ix 3
+b) — =—
+4 6 6
+) ate 10
+d ére6
+e) [2% —1/+/x+2]=3
+Fl he+ 3] - e 5|=2
+5:aJx=2,x=0 b)x=0
+da=+V212 ax=V2,x-Y 3
+e)x=0yx=213 F)x=2
+190) B Halla el valor de x en función de a para que se cumpla
+la ecuación:
+1 (a
+x(x-a)--=
+y
++0
+2
+Six=+(140)
+191) E Calcula qué valores de k hacen que la ecuación
+De+ kx? — kx — 3— O tenga como solución única x=1.
+Skc( 3,9)
+197) £ Halla las sol de estas ] racional.
+4 x+2
+a > =—
+Box x-2
+2 4 x-d
+b) — + q¿q- Pq2 —
+lex x-1 x +2x+1
+xi -2x x 5x+2
+3] =
+20 — K + Exe ATE E ES 5
+S:a)x=4,x=7/3 b)x=2/3
+€) No tiene solución.
+193) E Busea uno de los posibles valores de a,b y e para que
+tenga por solucionesx= 3 yx=1.
+x-0a b c
+44241 ox2 ox2
+S:o0=5/3,b=0yc=13
+d Resueh joui di dical1941] las con
+1
+am == E) 433x 4 34x =2
+b) 2x43+1-1=1 dd) Y3x+10 -3-x=3
+S:a)x=1/2 b)x=3 e)x= 2 d)x=2
+[as] ¿R Ive las sigui a]
+1
+a) —log (3x+4)+log (x+1)=2 —log5
+2
+logaritmicas.
+b) 1+2 log, Vx —log, (6 — 2) — log, (e —D
+E) Inx- (Ink —19)=10
+1
+dl —logúr 2) logít—20=-log7
+2 S:adx=4 b)x=3/2
+exe x= feto d) No tiene solución.
+196) ¿R Ive las sigui
+a) 2-57'*-18.3*
+5
+d) 3vNe”* -9=0
+bl 2.9-:-— ed Y9-2.3-27=0
+orde lr) 4165-42?
+S:ialx=-2 b)x=0,834 c)x=1,x= 2
+dix=In34L ex=2 fx=-1,x=2
+2
+d ¿Cuántos números cumplen que la suma de su
+distancia con 3 y con —2 es 9 unidades?
+5: Dos: 4y5
+a
+0ls)
+198) z El precio de un vehiculo se PT
+devalúa un 20 % cada año desde
+su compra. Si costó 20000 €, |
+escribe la función que da el E
+precio del vehiculo a lo largo del
+tiempo, £. Averigua cuánto tiempo
+ha de pasar para que el vehiculo
+cueste un 10 % de su valor.
+Osm. so
+5: 1=10,32 años
+Sistemas de ecuaciones
+199) E Resuelve estos sistemas de ecuaciones lineales.
+lex 3-2y 3 3+2x
+al Y b) y-3=
+1+3x
+2% Y 4
+5 2
+5:a)( 3,3) b)(29, 76/5)
+2. Álgebra O
+
+--- Página 13 ---
+q.
+aY(5)
+sistemas indicando el tipode
+el -x +2=10
+5x+2y+z2=
+2x-y
+h 3x-2y+z=1
+xa+3y-2-=3
+9x+ty+11=-5
+q) x-3y+22=3
+—2x + 6y - 42=-6
+3x-9y+6z=9
+h) 3x+5y -z=-11
+2x-y+3z-22
+Í Resuelve lossísistema que es en cada caso.
+a) x+y+z=2
+x—-2y+32=-1
+2x+y-57-=0
+bi 3x-2y+z=-7
+-2x+y-32=-1
+dx+5y-22=7
+e) 5x—
+x+y
+15x—y -9z =1381
+di x-y+52=3
+2x+5y+2=1
+5x+2y+2=4
+:8)(8/23, 29/23, 9/23) b)C
+d) (4/5,
+2x+y-z=-10
+ES 2+3t )
+13,2 2. +
+8 8
+1/5, 2/5) edC-3/2, 3,1712)
+10,0, -2) 93 - 2t+3s,s,1) h)(-1, 0,8)
+E Resuelve estos sistemas de ecuaciones no lineales.
+al xy=2
+xt14 3y-=4
+b) 2x+y=5
+log(3 — x) + 2logy = 0
+e) logíx— 3) +logly +2)=1
+2logí(3x — 9) + logly +2) = 1+logl8
+d) logx +9" = 731
+3logx+2-3" =60
+O 5-39 7
+2.3423
+2 3+ 46
+so[»2)[s +2/5, e | b)2,0 65,3)
+3 J
+,
+': E Averigua el valor de los
+radios que faltan para que
+el triángulo sea rectángulo r:=y
+sabiendo que la razón de e
+estos radios es 2/3.
+3
+d) (100,3) el (1,2)
+n=20n 7
+5:x=4em, y = 6cm
+BLOQUE. ÁLGEBRA
+qm.E-
+hos
+15)
+¿ Halla las dimensiones de un rectángulo cuya diagonal
+mide 5 cm y cuya base mide el doble que su altura.
+5 om, 25 cm
+, Una sudadera, un pantalón y dos camisetas cuestan
+90 €. En rebajas, la sudadera está rebajada un 20 %, el
+lón un 40 % y las un 50% do por
+todo 57 €.
+Si el preciode una camisetaes la mitad del precio de la
+sudadera, ¿cuánto costaba cada prenda?
+S: (30 €, 30 €,15 €)
+£ Aprincipios de año inverti10 000 € entres productos.
+Despuésde un año el prod ¡Ahadadounas i
+del 2%, el B5 % y el C un 3 %, obteniendo 340 €. Si
+invertien C la misma cantidadde dinero que en A y B
+juntos, ¿cuánto dinero inverti en cada producto?
+S: (2000 €, 3000 E, 5000 €)
+2 Halla un número de 3 cifras que cumpla que la suma
+de sus cifras es 12, que si inviertes el orden de sus cifras
+el número disminuye en 198 unidades y que la cifra de
+las decenases el doble que la suma de las otras dos.
+5: 381
+z Leo, Carmen y Axel trabajan en la misma empresa
+pero llevan distinto tiempo en ella. Averigua el número
+de días de vacaciones que le corresponden a cada uno si
+entre los tres tienen en total 60 días de vacaciones y si:
+* Carmen tiene dos dias menos que los que tienen
+Leo y Axel juntos.
+= entre Carmen y Axel tienen 24 dias más que Leo.
+S: (18 días, 29 días, 13 días)
+2 En un hotel alojarse una noche cuesta 30 € para
+cada adulto, un 30 % menos para los niños y hacen
+una rebaja del 20 % a los jubilados. Si la recaudación
+ha sido de 7068 E, ¿cuántos adultos, niños y jubilados
+hay en el hotel si estaba al completo con sus 258 camas
+y sabemos que hay el doble de adultos que de niños y
+jubilados juntos?
+S: 172 adultos, 52 niños, 34 jubilados
+109)puo
+Inecuaci
+de
+o
+E En un partido de fútbol del equipo A contra el B se
+han vendido todas las entradas, de 65000 localidades,
+entre los abonados del equipo A, los del B y los no
+abonados a ninguno de los dos equipos. Para que los
+aficionados vayan, los equipos subvencionan parte de
+la entrada, asi los aficionados del A pagan 15 €, los del
+B 20 € y la entrada sin abono cuesta 35 €. ¿Cuántos
+aficionados hay de cada equipo y sin abono si la
+recaudación es de 1395000 € y la diferencia entre los
+abonados de ambos equipos es de 23000 personas?
+5: 35000 del equipo A, 12000 del B,
+18 000 sin abono
+£ Una empresa compra 3000 unidades entre
+ordenadores, móviles y tabletas por 400 €, 300 € y
+250 € cada unidad respectivamente y los vende con un
+beneficio de 200 €, 150 € y 100 € respectivamente.
+Gastó 990000 E y lo h
+vendió todo obteniendo
+unos beneficios de
+435000 £ tras quitar los
+50000 € de transporte.
+¿Cuántos dispositivos de
+cada tipo compró?
+Pa 4
+5: 1100 ordenadores, 1500 móviles,
+400 tabletas
+E Un agente de bolsa compra acciones por valor de
+10 000 € de tres compañias A, B y C, tras un mes, las
+acciones deA y las de B se han revalorizado un 10 %
+y las de € han caido un 15 %, Si el agente de bolsa ha
+obtenido un beneficio de 500 €. ¿Cuánto dinero
+invirtió inicialmente en cada compañia si las de B suman
+lo mismo de las de A y C juntas?
+5: (3000 €, 5000 €, 2000 €)
+nes y siste
+ecuaciones
+¡ Halla la solución de las siguientes inecuaciones.
+2x x 3+2x 3x 2x
+a) -— +3 0) 4- —(x-2)5-—
+4 12 2 4
+2x x 3+x 5
+b) —(1-312>=-—— di ——-* >2x(1-x)
+3 15 6 2
+3-434 34434
+Salx< 712 bx] ————,
+5 5
+Ixe E. Luar) IR
+3
+É Resuelve las Ñ
+1 3x
+a <2 E] 2
+9 x+2 0 (x+2Y
+1 1 1
+b) +1>x a He
+x+5 o dar dex
+v38 | E ]5:a)x€ | 00, — fUC-3,3)U| —-,00
+2) 25)
+b)xel 00,2 Ho) 5, 2+410)
+1
+dx lo, 2U0 21 axe, 1)
+(114) 3 Resuelve estos sistemas de inecuaciones con una
+incógnita.
+3-x
+a) 3-2x2x-2MA+xd| db) 2x2 -——
+2
+A al xlx+2)3x
+5
+115) a Representa la solución de los siguientes sistemas de
+inecuaciones con dos incógnitas.
+x
+a x+y<2 b) --y>-2
+2x-3y<6 Fx <p
+x20 x+8By>-4
+yz0
+1116) E Una aerolínea quiere instalar en sus aviones dos tipos
+de filas de asientos, unos más anchos para la primera
+clase y otros más estrechos para la clase turista. Se
+necesitan 2 m para cada fila de primera clase y 1,5 m
+para las de elase turista. El espacio disponible en el avión
+para instalar los asientos tiene una longitud de 104 m.
+Además, quieren poneral menos 3 filas de asientos de
+primera clase y la cantidad de filas de asientos de clase
+turista ha de ser al menos el triple que la de asientos de
+primera clase.
+Representa en el plano la región que representa
+la solución.
+2. Álgebra [es]
+
+--- Página 14 ---
+A
+Conocimientos básicose > 3 eEvaluación
+Polinomios. Fracciones algebraicas E) Una raiz del polinomio PG =x2+3x7 —x — 3 050 =3.
+Un polinomio es una suma de dos o más monomios de distinto grado. Es de la forma: PLO=a +0, 7 1+-+0X+0, a) Verdadero b) Falso
++ Suma y resta: solo podemos sumar o restar términos semejantes, y dejamos indicada la operación de los no semejantes. 12] Las raices del polinomio PL) = (x — 1P(x+ DG + ad d+ a) son:
+. a] 1,2,3y7 b) —7,-3,-2 y1 «cd -1,2,3y7 d) —7,-3y1 el -7,-3,1y1Multiplicación: multiplicamos cada término de uno de los factores por todos los términos del otro factor, y después,
+sumamos los términos semejantes. Las soluciones de la ecuación y 3 — x +x = 1 son:
++ División: utilizamos el algoritmo de la división o si el denominadores de la forma x — a, aplicamos la regla de Ruffini. a) -1y2 b) -2y1 d d 3 e) ninguna de las anteriores.
+. a CA = A 1 3 1
+* Binomio de Newton: (a +bY = 2); ] b lab = Deal; je b (E) ¿Cuántas soluciones tiene la ecuación— = 7 >
+an =a x—1 x
++ Teorema del resto. El resto dela división de PG0 : (x — a) coincide con Pía). a) Ninguna b) 1 d2 3 e) Más de tres
++ Teorema del factor. Si x=a es una raiz de P(x),x — a es un factor del polinomio. 15] La solución de la ecuación log (1 — x) +log "log 2 esx=-1
++ Factorizamos un polinomio cuando lo descomponemos como producto de polinomios irreducibles. a) Verdadero b) Falso
+P(x) e
+Una fracción algebraica es un cociente indicado de dos polinomios ——, siendo Q() de grado mayor que O. O La ecuación A+ 1er
+Qu) a] tieneuna única solución. €) sussoluciones son potencias de €. €) no cumple ninguna de las anteriores.
++ Suma y resta: reducimos las fracciones algebraicas a común denominador hallando el mínimo común múltiplo de los
+denominadores y operamos los numeradores.
+AGd CO) AGO-CL0 AGO C00 - AG0d-DG0
+BG0 DGO B00-DG0 860 DG) BG)-C(x) 18)
+b) tiene soluciones racionales. — d) notiene solución.
+o ¿Cuántas soluciones puede tener un sistema lineal de tres ecuaciones con tres incógnitas?
+a) 0,1,20infinitas b) 0,1oinfinitas Cc] 1,203 dj 0,30 infinitas e) Nose cumple ninguna de las anteriores.+ Multiplicación y división:
+Elige la afirmación correspondiente al sistema no lineal representado en la gráfica. Ñ Y /
+. 22 - - | |
+Ecuaciones. Sistemas de ecuaciones a) Las soluciones son (-1, -1)y (2,4). — di Las ecuaciones que lo forman son: y> 22) X Í !
+Dependiendo del tipo de ecuación o sistema, utilizamos diferentes métodos de resolución. b) 7 2 del y=x+ + ;
++ Ecuaciones polinómicas: en general, las escribimos como PG) =0 y calculamos las raices de PG). menea amics noe umple mun de les anteriores 17
+=e A 7
+—bivb' —- 4oc €) Las ecuaciones que lo forman sen: Y — * Y
+) Ecuaciones de segundo grado, ox + bx +00, utili la fórmula: x = y=x+2
+2a
+o Ecuaciones bicuadradas, x” +1" +k= 0, realizamos el cambio de variable t =x" y las resolvemos como ecuaciones o La solución de la il 3 2x1 Des:
+polinómicas de segundo grado. Después, deshacemos el cambio de variable. Solución de la Inecuación 6 4 <0es
+«E ii jonales: las multiple por el minimo común múltiplo de los denominadores, para eliminarlos y obtener 3 3 3 3
+ecuaciones polinómicas. Después, comprobamos las soluciones. al x6|-o00, -—| bi x€6|-00, -— e xe|-—,+00| di xe|-—, +00| el ningunade las anteriores.
++ Ecuaciones con radicales: aislamosel radical en un miembroy elevamos al cuadrado, para eliminarlo,y obtener ecuaciones 4 4 4 4
+polinómicas. Si contienen más de un radical, repetimos el proceso. Después, comprobamos las soluciones. D La inecuación (x — 1F +1 > O tiene por solución todos los números reales.
++ Ecuaciones logarítmicas: aplicamos las propiedades de los logaritmos para eliminarlos y obtener ecuaciones polinómicas. a) Verdadero b) Falso
+Si además hay números, los expresamos como logaritmos o los aislamos en un miembro para aplicarla definición. Después,
+na N áti igi | SITUACIÓN DE APRENDIZAJE |
+E E Ss gital O [E][La | SITUACIÓN DE APRENDIZAJE
+«E ii al li las propied de las potenciaso hacemos un cambio de variable, transformándolas latemáticas en digit alp
+en ecuaciones polinómicas. En Arizona está la Meseta de Kaibab, la cual alberga una gran población de ciervos. Debido a la caza incontrolada
+a Sist de ii lineales: apli los métodos de sustitución, reducción, igualación y el métodode Gauss, que de depredadores y a otros factores, la población se disparó durante 25 años, pero el consumo de los recursos
+consiste en conseguir un sistema escalonado equivalente al inicial y despejar las incógnitas de una en una. ionó un del número de nacimi, Se estos datos con el siguiente polinomio
+. . - -- . . P(t) = 4 +4,48 — 31,4t — 12,8 siendo P(t) el o disminución (si es ivo) dela población el año t yt=0
++ Sistemas de ecuaciones no lineales: aplicamos los métodos de resolución de las ecuaciones no lineales. el pri a A
+primer año de recogida de datos.
+Inecuaciones. Sistemas de inecuaciones 10) 2 Explica si entre el primer año y segundo año de recogida de datos hubo aumento o disminución de la población
+de ciervos.
++ Inecuaciones: hallamos las soluciones de la ecuación correspondiente, y estudiamos el signo de cada uno de los intervalos
+cuyos extremos son los que forman la solución, y elegiremos de entre esos intervalos cuáles son la solución. 2 Averigua si hubo años sin ni inuciones en los nacimi e indica cuáles fueron.
+(o) 2 Halla los valores de P(t) para t= 0, 1, 2... 25 y representa esos datos en una gráfica. ¿Qué observas?+ Sistemas de inecuaciones: resolvemos cada inecuación y hallamos la intersección de sus soluciones.
+[6s) BLOQUE. ÁLGEBRA 2. Álgebra [67]

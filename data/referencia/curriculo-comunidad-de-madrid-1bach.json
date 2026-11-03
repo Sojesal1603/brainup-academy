@@ -1,0 +1,155 @@
+{
+  "curso": "1º de Bachillerato",
+  "comunidad": "Comunidad de Madrid",
+  "fuente": "Currículo LOMLOE: Real Decreto 243/2022 (BOE-A-2022-5521) y Decreto 64/2022 de la Comunidad de Madrid. Los bloques oficiales son conjuntos de saberes básicos: la lista de unidades es una traducción a temas de estudio y la secuencia por evaluaciones es la habitual en institutos madrileños, no una imposición de la norma. Tu centro puede ordenarla de otro modo.",
+  "actualizado": "2026-10-12",
+  "asignaturas": {
+    "Matemáticas I": {
+      "origen": "curriculo",
+      "unidades": [
+        { "term": 1, "difficulty": 3, "title": "Números reales: conjuntos, radicales y logaritmos" },
+        { "term": 1, "difficulty": 3, "title": "Ecuaciones, inecuaciones y sistemas" },
+        { "term": 1, "difficulty": 4, "title": "Números complejos: forma binómica, polar y ecuaciones" },
+        { "term": 1, "difficulty": 4, "title": "Trigonometría: razones, identidades y ecuaciones" },
+        { "term": 2, "difficulty": 3, "title": "Resolución de triángulos y aplicaciones" },
+        { "term": 2, "difficulty": 3, "title": "Vectores en el plano: operaciones y producto escalar" },
+        { "term": 2, "difficulty": 3, "title": "Geometría analítica: rectas, distancias y lugares geométricos" },
+        { "term": 2, "difficulty": 4, "title": "Sucesiones, límites y continuidad" },
+        { "term": 2, "difficulty": 5, "title": "Derivadas: reglas de derivación y regla de la cadena" },
+        { "term": 3, "difficulty": 4, "title": "Aplicaciones de la derivada: tangente, crecimiento y extremos" },
+        { "term": 3, "difficulty": 4, "title": "Funciones: dominio, representación y tipos (exponencial, logarítmica, a trozos)" },
+        { "term": 3, "difficulty": 3, "title": "Estadística bidimensional y regresión" },
+        { "term": 3, "difficulty": 4, "title": "Combinatoria y probabilidad: condicionada y Bayes" },
+        { "term": 3, "difficulty": 4, "title": "Distribuciones de probabilidad: binomial y normal" }
+      ]
+    },
+    "Física y Química": {
+      "origen": "curriculo",
+      "unidades": [
+        { "term": 1, "difficulty": 3, "title": "Estructura de la materia: configuración electrónica" },
+        { "term": 1, "difficulty": 3, "title": "Tabla periódica y propiedades periódicas" },
+        { "term": 1, "difficulty": 4, "title": "Enlace químico y propiedades de las sustancias" },
+        { "term": 1, "difficulty": 3, "title": "Formulación y nomenclatura inorgánica" },
+        { "term": 2, "difficulty": 4, "title": "Estequiometría y leyes fundamentales" },
+        { "term": 2, "difficulty": 3, "title": "Disoluciones: concentración y propiedades" },
+        { "term": 2, "difficulty": 3, "title": "Gases ideales" },
+        { "term": 2, "difficulty": 4, "title": "Termoquímica: calor, entalpía y ley de Hess" },
+        { "term": 2, "difficulty": 3, "title": "Química orgánica: grupos funcionales y formulación" },
+        { "term": 3, "difficulty": 3, "title": "Isomería y series homólogas" },
+        { "term": 3, "difficulty": 4, "title": "Cinemática: MRU, MRUA y movimiento circular" },
+        { "term": 3, "difficulty": 4, "title": "Movimiento compuesto: tiro parabólico" },
+        { "term": 3, "difficulty": 5, "title": "Dinámica: leyes de Newton y tipos de fuerzas" },
+        { "term": 3, "difficulty": 4, "title": "Estática y momento de fuerzas" },
+        { "term": 3, "difficulty": 4, "title": "Impulso, cantidad de movimiento y choques" },
+        { "term": 3, "difficulty": 4, "title": "Trabajo, energía y potencia: conservación" }
+      ]
+    },
+    "Tecnología e Ingeniería I": {
+      "origen": "curriculo",
+      "unidades": [
+        { "term": 1, "difficulty": 3, "title": "Proyectos de I+D: planificación, Gantt y metodologías ágiles" },
+        { "term": 1, "difficulty": 2, "title": "Investigación, Design Thinking y trabajo en equipo" },
+        { "term": 1, "difficulty": 3, "title": "Dibujo y documentación técnica: croquis, esquemas y CAD" },
+        { "term": 1, "difficulty": 3, "title": "Metrología, normalización y control de calidad" },
+        { "term": 1, "difficulty": 3, "title": "Materiales técnicos: propiedades, familias y selección" },
+        { "term": 2, "difficulty": 3, "title": "Fabricación digital y prototipado rápido" },
+        { "term": 2, "difficulty": 2, "title": "Seguridad e higiene en el taller" },
+        { "term": 2, "difficulty": 4, "title": "Máquinas y mecanismos: transmisión y transformación del movimiento" },
+        { "term": 2, "difficulty": 4, "title": "Cálculo, montaje y simulación de sistemas mecánicos" },
+        { "term": 2, "difficulty": 4, "title": "Sistemas eléctricos: circuitos de corriente continua" },
+        { "term": 2, "difficulty": 4, "title": "Electrónica básica y máquinas eléctricas" },
+        { "term": 2, "difficulty": 3, "title": "Programación: variables, operadores, condicionales y bucles" },
+        { "term": 3, "difficulty": 4, "title": "Estructuras de datos, modularización y depuración" },
+        { "term": 3, "difficulty": 3, "title": "Internet de las cosas y protocolos de comunicación" },
+        { "term": 3, "difficulty": 4, "title": "Sistemas automáticos: control y automatización programada" },
+        { "term": 3, "difficulty": 3, "title": "Robótica y tecnologías emergentes" },
+        { "term": 3, "difficulty": 3, "title": "Tecnología sostenible: energía, consumo e instalaciones" }
+      ]
+    },
+    "Dibujo Técnico I": {
+      "origen": "curriculo",
+      "unidades": [
+        { "term": 1, "difficulty": 2, "title": "Fundamentos del dibujo técnico y trazados básicos" },
+        { "term": 1, "difficulty": 3, "title": "Lugares geométricos y arco capaz" },
+        { "term": 1, "difficulty": 3, "title": "Polígonos: triángulos, cuadriláteros y regulares" },
+        { "term": 1, "difficulty": 3, "title": "Proporcionalidad, semejanza, equivalencia y escalas" },
+        { "term": 1, "difficulty": 4, "title": "Tangencias y enlaces" },
+        { "term": 1, "difficulty": 3, "title": "Curvas técnicas: óvalos, ovoides y espirales" },
+        { "term": 2, "difficulty": 4, "title": "Transformaciones geométricas: homotecia, homología y afinidad" },
+        { "term": 2, "difficulty": 4, "title": "Sistema diédrico: punto, recta y plano" },
+        { "term": 2, "difficulty": 5, "title": "Diédrico: intersecciones, paralelismo y perpendicularidad" },
+        { "term": 2, "difficulty": 5, "title": "Diédrico: abatimientos, distancias, secciones y verdadera magnitud" },
+        { "term": 2, "difficulty": 4, "title": "Planos acotados" },
+        { "term": 3, "difficulty": 4, "title": "Sistema axonométrico: isométrica y caballera" },
+        { "term": 3, "difficulty": 4, "title": "Perspectiva cónica" },
+        { "term": 3, "difficulty": 3, "title": "Normalización: formatos, vistas, líneas y acotación" },
+        { "term": 3, "difficulty": 3, "title": "Cortes y secciones normalizados" },
+        { "term": 3, "difficulty": 3, "title": "Sistemas CAD: dibujo vectorial 2D y 3D" }
+      ]
+    },
+    "Lengua Castellana y Literatura I": {
+      "origen": "curriculo",
+      "unidades": [
+        { "term": 1, "difficulty": 2, "title": "Las lenguas de España y sus variedades" },
+        { "term": 1, "difficulty": 2, "title": "El español en el mundo: bilingüismo y contacto de lenguas" },
+        { "term": 1, "difficulty": 3, "title": "El texto: adecuación, coherencia y cohesión" },
+        { "term": 1, "difficulty": 3, "title": "Géneros académicos y periodísticos; alfabetización informacional" },
+        { "term": 1, "difficulty": 3, "title": "Morfología y formación de palabras" },
+        { "term": 1, "difficulty": 4, "title": "Sintaxis: la oración simple y sus funciones" },
+        { "term": 1, "difficulty": 3, "title": "Literatura medieval: lírica, mester de clerecía y el Cantar de mio Cid" },
+        { "term": 1, "difficulty": 3, "title": "Prerrenacimiento: Jorge Manrique y La Celestina" },
+        { "term": 2, "difficulty": 3, "title": "Renacimiento: Garcilaso, Fray Luis de León y san Juan de la Cruz" },
+        { "term": 2, "difficulty": 3, "title": "El Lazarillo de Tormes y la novela picaresca" },
+        { "term": 2, "difficulty": 4, "title": "Cervantes y el Quijote" },
+        { "term": 2, "difficulty": 4, "title": "Sintaxis: la oración compuesta (coordinación y subordinación)" },
+        { "term": 2, "difficulty": 4, "title": "Barroco: Góngora, Quevedo y Lope de Vega" },
+        { "term": 3, "difficulty": 3, "title": "Teatro del Siglo de Oro: Lope, Calderón y Sor Juana Inés de la Cruz" },
+        { "term": 3, "difficulty": 3, "title": "Neoclasicismo y Prerromanticismo: Feijoo, Cadalso y Moratín" },
+        { "term": 3, "difficulty": 4, "title": "Romanticismo: Espronceda, Bécquer, Larra y Zorrilla" }
+      ]
+    },
+    "Inglés I": {
+      "origen": "orientativo",
+      "nota": "El currículo de Inglés I se organiza por destrezas (comprensión, producción, interacción y mediación), no por contenidos gramaticales. Esta lista es la progresión gramatical típica de 1º de Bachillerato: úsala como guía y sustitúyela por las unidades de tu libro en cuanto las tengas.",
+      "unidades": [
+        { "term": 1, "difficulty": 2, "title": "Present and past tenses: contrast and revision" },
+        { "term": 1, "difficulty": 2, "title": "Future forms and time clauses" },
+        { "term": 1, "difficulty": 3, "title": "Perfect tenses: present, past and future perfect" },
+        { "term": 1, "difficulty": 3, "title": "Modals: ability, obligation, deduction" },
+        { "term": 1, "difficulty": 3, "title": "Gerunds and infinitives" },
+        { "term": 2, "difficulty": 3, "title": "Relative clauses" },
+        { "term": 2, "difficulty": 4, "title": "Passive voice and causatives" },
+        { "term": 2, "difficulty": 4, "title": "Conditionals, wish and if only" },
+        { "term": 2, "difficulty": 3, "title": "Reported speech" },
+        { "term": 2, "difficulty": 2, "title": "Comparative and superlative structures" },
+        { "term": 3, "difficulty": 3, "title": "Connectors and discourse markers" },
+        { "term": 3, "difficulty": 3, "title": "Phrasal verbs and collocations" },
+        { "term": 3, "difficulty": 3, "title": "Writing: opinion essay, formal email and review" },
+        { "term": 3, "difficulty": 3, "title": "Oral: presentation, debate and mediation" },
+        { "term": 3, "difficulty": 3, "title": "Listening and reading strategies: PAU practice" }
+      ]
+    },
+    "Filosofía": {
+      "origen": "curriculo",
+      "unidades": [
+        { "term": 1, "difficulty": 2, "title": "Qué es la filosofía: ramas, método y utilidad" },
+        { "term": 1, "difficulty": 3, "title": "Del mito al logos: los presocráticos" },
+        { "term": 1, "difficulty": 3, "title": "Sofistas y Sócrates" },
+        { "term": 1, "difficulty": 4, "title": "Platón: teoría de las ideas y conocimiento" },
+        { "term": 1, "difficulty": 4, "title": "Aristóteles: metafísica, naturaleza y ciencia" },
+        { "term": 1, "difficulty": 3, "title": "Naturaleza y cultura: hominización y humanización" },
+        { "term": 1, "difficulty": 3, "title": "Concepciones del ser humano: identidad y transhumanismo" },
+        { "term": 2, "difficulty": 4, "title": "Racionalismo: Descartes" },
+        { "term": 2, "difficulty": 5, "title": "Empirismo (Locke y Hume) y Kant: los límites del conocimiento" },
+        { "term": 2, "difficulty": 3, "title": "Verdad, relativismo y posverdad" },
+        { "term": 2, "difficulty": 3, "title": "Lógica: razonamiento, falacias y sesgos" },
+        { "term": 2, "difficulty": 3, "title": "Filosofía de la ciencia: método y demarcación" },
+        { "term": 3, "difficulty": 3, "title": "Ética: libertad, responsabilidad y juicio moral" },
+        { "term": 3, "difficulty": 4, "title": "Éticas del deber, consecuencialistas y de la virtud" },
+        { "term": 3, "difficulty": 4, "title": "Nietzsche y la crítica de la moral" },
+        { "term": 3, "difficulty": 4, "title": "Filosofía política: justicia, Estado y contrato social" },
+        { "term": 3, "difficulty": 3, "title": "Estética: arte, belleza y cultura audiovisual" }
+      ]
+    }
+  }
+}

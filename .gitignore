@@ -1,0 +1,24 @@
+# Dependencias y compilación
+node_modules/
+.next/
+out/
+
+# Copias temporales que generan los scripts (compilan código a JS para poder
+# ejecutarlo, como hace el vigilante): no son código del proyecto.
+.tmp-*/
+
+# Secretos: las claves de IA y de Moodle viven solo aquí, nunca en el repositorio.
+.env
+.env.local
+
+# Datos y registros locales (tu base, tus apuntes, los logs del vigilante)
+prisma/dev.db
+prisma/dev.db-journal
+data/logs/
+data/backups/
+
+# Basura del sistema
+*.log
+.DS_Store
+Thumbs.db
+

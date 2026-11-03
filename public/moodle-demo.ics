@@ -1,0 +1,29 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Moodle//NONSGML Calendar Export//ES
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+UID:demo-assign-1@brainup.local
+DTSTART;VALUE=DATE:20261014
+SUMMARY:Entrega: Boletín 4 de Cinemática
+DESCRIPTION:Subir en PDF los ejercicios 1 al 10 resueltos con diagramas de cuerpo libre.
+CATEGORIES:Física y Química
+URL:https://moodle.ejemplo.local/mod/assign/view.php?id=2001
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-assign-2@brainup.local
+DTSTART:20261020T140000Z
+SUMMARY:Cuestionario online: Mecanismos y Transmisiones
+DESCRIPTION:Test cronometrado de 30 minutos sobre engranajes, poleas y relaciones de transmisión.
+CATEGORIES:Tecnología e Ingeniería I
+URL:https://moodle.ejemplo.local/mod/quiz/view.php?id=2002
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-exam-1@brainup.local
+DTSTART;VALUE=DATE:20261023
+SUMMARY:Examen de Filosofía: temas 1-3
+DESCRIPTION:Disertación y comentario de texto. Traer el cuaderno de apuntes.
+CATEGORIES:Filosofía
+URL:https://moodle.ejemplo.local/mod/quiz/view.php?id=2003
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,202 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Obsidian Glass: negro absoluto y tarjetas de cristal pulido que viven un
+     paso por encima, con borde translúcido en vez de una línea sólida. */
+  --background: #0a0a0c;
+  --surface: rgba(255, 255, 255, 0.03);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.08);
+  --foreground: #f8fafc;
+  --accent-blue: #3b82f6;
+  --accent-violet: #8b5cf6;
+  --accent-emerald: #10b981;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Barras de desplazamiento: finas, azules en reposo y púrpuras al pasar el
+   ratón. Sirven para la barra lateral y para cualquier contenedor con scroll. */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(10, 10, 12, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.3);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.6);
+}
+
+/* Firefox no entiende ::-webkit-scrollbar: esto es su equivalente. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(59, 130, 246, 0.35) rgba(10, 10, 12, 0.5);
+}
+
+/* Tarjeta de cristal: fondo translúcido, borde suave y desenfoque del fondo.
+   `glass-card` es la clase canónica del rediseño; `card-glass` se mantiene como
+   alias porque ya estaba repartida por toda la app (mismos valores, un solo
+   sitio donde cambiarlos). */
+.glass-card,
+.card-glass {
+  background: rgba(255, 255, 255, 0.03);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* Reflejo de luz en el canto superior: es lo que hace que la tarjeta se lea
+     como una lámina de cristal y no como un rectángulo pintado. */
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 1rem;
+}
+
+/* Halo de hover por materia: azul (asignaturas base), púrpura (IA) y verde
+   neón (progreso). Solo iluminan borde y sombra, nunca el fondo. */
+.glow-blue:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 14px 40px -12px rgba(59, 130, 246, 0.5);
+}
+
+.glow-violet:hover {
+  border-color: rgba(139, 92, 246, 0.45);
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.25), 0 14px 40px -12px rgba(139, 92, 246, 0.5);
+}
+
+.glow-emerald:hover {
+  border-color: rgba(16, 185, 129, 0.45);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.25), 0 14px 40px -12px rgba(16, 185, 129, 0.5);
+}
+
+/* Glow con el color exacto de la materia: la tarjeta define `--glow` en línea y
+   el hover ilumina borde y sombra con ese mismo color. */
+.glow-subject:hover {
+  border-color: color-mix(in srgb, var(--glow, #3b82f6) 50%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--glow, #3b82f6) 28%, transparent),
+    0 16px 44px -14px color-mix(in srgb, var(--glow, #3b82f6) 65%, transparent);
+}
+
+/* Cifras destacadas: brillo del propio color, sin caja ni fondo. */
+.metric-glow {
+  text-shadow: 0 0 14px currentColor;
+}
+
+/* Filo superior luminoso para cabeceras tácticas. */
+.glass-edge::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.55), rgba(59, 130, 246, 0.45), transparent);
+  pointer-events: none;
+}
+
+/* Entrada de tarjetas: un desplazamiento corto, nunca un rebote. */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-up {
+  animation: fadeUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Brillo fluido de la barra del Neural Loader (indeterminada a propósito). */
+@keyframes shimmerSweep {
+  from {
+    transform: translateX(-150%);
+  }
+  to {
+    transform: translateX(450%);
+  }
+}
+
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: shimmerSweep 1.8s ease-in-out infinite;
+}
+
+/* Microinteracción de hover: 1.02 y borde que se ilumina, sin saltos. */
+.hover-lift {
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px) scale(1.02);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Tactical Pulse for active focus mode */
+@keyframes tacticalPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.02);
+  }
+}
+
+.tactical-pulse {
+  animation: tacticalPulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Quien pide menos movimiento, no recibe animaciones decorativas. */
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .tactical-pulse {
+    animation: none !important;
+  }
+
+  .shimmer::after {
+    animation: none !important;
+    opacity: 0.35;
+  }
+
+  .hover-lift {
+    transition: none !important;
+  }
+
+  .hover-lift:hover {
+    transform: none;
+  }
+
+  .metric-glow {
+    text-shadow: none;
+  }
+
+  .glow-blue:hover,
+  .glow-violet:hover,
+  .glow-emerald:hover,
+  .glow-subject:hover {
+    box-shadow: none;
+  }
+}

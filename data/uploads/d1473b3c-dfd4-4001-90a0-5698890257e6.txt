@@ -1,0 +1,223 @@
+--- Página 1 ---
+La energía y su
+transformación
+Tecnología e ingeniería
+1 Bachillerato
+Unidad 3
+
+--- Página 2 ---
+Sistemas de unidades
+Coexistencia de sistemas
+Sistema Internacional (SI) y Sistema
+Técnico (ST).
+Las unidades derivadas se obtienen a partir de las fundamentales.
+Magnitudes fundamentales básicas:
+Longitud (e), masa (m) y tiempo (t).
+
+--- Página 3 ---
+Unidades de fuerza y trabajo
+Fuerza: F = m · a
+• SI: newton (N).
+• ST: kilogramo-fuerza (kgf) o
+kilopondio (kp).
+Trabajo / Energía: W = F · e
+• SI: julio (J).
+• ST: kilográmetro (kgm).
+
+--- Página 4 ---
+Potencia y equivalencias de energía y trabajo
+Potencia: trabajo realizado por unidad de
+tiempo.
+• SI: vatio (W).
+Equivalencias clave:
+• 1 kp = 9,8 N
+• 1 CV (caballo de vapor) ≈ 735 W
+• 1 Wh = 3600 J
+
+--- Página 5 ---
+Evolución del consumo energético
+Evolución de las formas de energía utilizadas por el ser humano.
+El consumo energético por habitante ha crecido exponencialmente.
+Prehistoria:
+3000 kcal/día.
+Siglo XIX (carbón): 60
+000 kcal/día.
+Edad Media:
+10 000 kcal/día.
+Finales del siglo XX:
+300 000 kcal/día.
+
+--- Página 6 ---
+Concepto y
+origen de la
+energía
+La energía es la capacidad de un cuerpo para transformar un sistema o
+realizar un trabajo.
+Fuentes
+Sol
+Origen directo o indirecto de la
+mayoría de energías.
+Interior terrestre
+Manifestada en volcanes y géiseres.
+
+--- Página 7 ---
+Unidades específicas de energía
+Caloría (cal): energía para elevar 1 °C un
+gramo de agua.
+• Q = Ce · m · (Tf - Ti)
+• Equivalencia: 1 cal = 4,18 J
+Kilovatio hora (kWh): energía consumida
+por una máquina de 1 kW durante una
+hora.
+
+--- Página 8 ---
+Energía mecánica (I)
+Energía mecánica (Em)
+Suma de la cinética y la potencial.
+Em =
+Ec +
+Ep
+Energía potencial (Ep)
+Debida a la altura en el campo
+gravitatorio.
+Ep =
+m ·
+g ·
+h
+
+--- Página 9 ---
+Energía mecánica (II)
+Transformación
+Al soltar un cuerpo, la Ep se transforma
+en Ec.
+Cálculo de la velocidad de caída:
+Donde g (gravedad) =
+9,8 m · s⁻²
+
+--- Página 10 ---
+Energía calorífica o térmica
+Energía térmica
+Contenida en un cuerpo por el movimiento de sus partículas.
+Calor (Q)
+Energía térmica en tránsito.
+Temperatura
+Indica el grado o la intensidad de dicha energía.
+El calor se transmite por conducción, convección y radiación.
+
+--- Página 11 ---
+Transmisión por
+conducción
+Coeficientes de
+conductividad térmica (λ)
+Propio de cada material (alto en
+metales, bajo en aislantes).
+Paso de calor entre cuerpos por choques moleculares.
+
+--- Página 12 ---
+Transmisión por convección
+Propia de fluidos (líquidos/gases). El fluido caliente pierde densidad y
+asciende.
+Coeficientes de convección
+
+--- Página 13 ---
+Transmisión por
+radiación
+Coeficientes de radiación
+Calor transmitido por ondas electromagnéticas
+(incluso en el vacío).
+Se usa la temperatura absoluta (T en Kelvin):
+T(K)
+= 273 +
+t (°C)
+
+--- Página 14 ---
+Acumulación de
+energía térmica
+Fórmula
+Q = Ce · m · (Tf - Ti)
+Los cuerpos acumulan calor
+según su masa y naturaleza.
+Calor específico (Ce)
+Calor necesario para elevar 1 °C
+la temperatura de 1 kg de masa.
+
+--- Página 15 ---
+Energía
+química
+(combustión)
+Cálculo del calor (Q):
+• Sólidos y líquidos:
+Q =
+Pc ·
+m
+• Gases:
+Q =
+Pc ·
+V
+Poder calorífico (Pc): energía liberada por kg
+o m³ de combustible.
+Se libera en reacciones exotérmicas (combustión).
+
+--- Página 16 ---
+Energía nuclear
+Fisión: rotura de núcleos pesados (Uranio, Plutonio).
+Fusión: unión de núcleos ligeros (Deuterio, Tritio) para formar Helio.
+Ecuación de equivalencia masa-energía:
+E =
+m ·
+c²
+Energía del núcleo de los átomos.
+
+--- Página 17 ---
+Energía
+eléctrica
+Energía de transporte generada a partir de otras fuentes.
+Potencia eléctrica (P):
+P =
+V ·
+I
+Fórmulas de energía (Ee):
+Ee =
+V ·
+I ·
+t
+Ee =
+I² ·
+R ·
+t
+Ley de Ohm:
+V =
+I ·
+R
+
+--- Página 18 ---
+Transformaciones de la energía
+Las máquinas transforman una forma
+de energía en otra.
+Alternador
+Mecánica → Eléctrica
+Motor
+Eléctrica → Mecánica
+Reactor
+Nuclear → Térmica
+Cuerpo incandescente
+Térmica → Radiante
+
+--- Página 19 ---
+1er principio de la
+termodinámica
+Expresión matemática:
+ΔE =
+Ef -
+Ei =
+Q -
+W
+ΔE es la variación de energía interna.
+"La energía no se crea ni se destruye, solo se
+transforma".
+
+--- Página 20 ---
+Rendimiento
+energético
+Ninguna máquina aprovecha el 100 %
+de la energía suministrada.
