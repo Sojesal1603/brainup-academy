@@ -51,8 +51,18 @@ export function resolveDatabaseUrl(rawInput?: string): string | undefined {
     const url = new URL(raw);
     const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
 
-    if (!local && !url.searchParams.has('sslmode')) {
-      url.searchParams.set('sslmode', 'require');
+    if (!local) {
+      if (!url.searchParams.has('sslmode')) {
+        url.searchParams.set('sslmode', 'require');
+      }
+      // Sin un tope de conexión, una URL que no es alcanzable (el host directo
+      // de Supabase solo responde por IPv6 y las funciones de Netlify no lo
+      // tienen) deja la consulta colgada: el render nunca termina y la vista se
+      // queda «cargando» para siempre. Con `connect_timeout` el fallo llega en
+      // segundos, se registra y la pantalla de error explica qué cambiar.
+      if (!url.searchParams.has('connect_timeout')) {
+        url.searchParams.set('connect_timeout', '10');
+      }
     }
 
     if (url.hostname.endsWith('pooler.supabase.com')) {
@@ -137,8 +147,8 @@ export function databaseHint(detail: string, code?: string | null): string {
   if (code === 'P2021' || code === 'P2010' || text.includes('does not exist')) {
     return 'La base responde pero faltan las tablas: aplica las migraciones con `npx prisma migrate deploy` usando la conexión directa (5432) de Supabase.';
   }
-  if (text.includes('timeout')) {
-    return 'La conexión se agota: con serverless, usa la URL del pooler con connection_limit=1 y comprueba que el proyecto de Supabase no esté pausado.';
+  if (text.includes('timeout') || code === 'P1008') {
+    return 'La conexión se agota: con serverless, usa la URL del POOLER de Supabase (puerto 6543) con connection_limit=1 y comprueba que el proyecto no esté pausado.';
   }
   return 'Revisa el detalle de arriba y el parte de /api/salud.';
 }

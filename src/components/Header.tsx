@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Flame, Target, Zap, Play } from 'lucide-react';
-import { prisma } from '@/lib/prisma';
+import { ensureUserProfile } from '@/lib/userProfile';
 import PwaRegister from './PwaRegister';
 
 /**
@@ -22,7 +22,11 @@ async function loadProfile() {
       console.warn('[header] DATABASE_URL no está definida: cabecera con valores por defecto.');
       return null;
     }
-    return await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+    // La cabecera se pinta en TODAS las páginas: es el sitio natural para
+    // asegurar que el perfil existe aunque la base se acabe de migrar y nadie
+    // haya lanzado el seed. Sin esto, la primera acción que guardara ajustes
+    // fallaba con «Record to update not found».
+    return await ensureUserProfile();
   } catch (error) {
     console.error(
       '[header] no se ha podido leer el perfil:',

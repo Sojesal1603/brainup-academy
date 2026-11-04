@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { updateDefaultProfile } from './userProfile';
 import { effectiveMastery } from './knowledge';
 import { estimateRetention, isDue, overdueDays, startOfDay } from './srs';
 import {
@@ -644,7 +645,7 @@ export async function regenerateWeekPlan(mode?: StudyMode): Promise<{
 }> {
   const now = new Date();
   if (mode) {
-    await prisma.userProfile.update({ where: { id: 'user_default' }, data: { studyMode: mode } });
+    await updateDefaultProfile({ studyMode: mode });
   }
 
   // Una primera pasada guarda hoy (con el tiempo que queda de verdad); las
@@ -1053,10 +1054,7 @@ export async function replanToday(
 ): Promise<ReplanResult> {
   const now = options.now ?? new Date();
   if (options.mode) {
-    await prisma.userProfile.update({
-      where: { id: 'user_default' },
-      data: { studyMode: options.mode },
-    });
+    await updateDefaultProfile({ studyMode: options.mode });
   }
 
   const persisted = await persistDayPlan({

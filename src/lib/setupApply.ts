@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { updateDefaultProfile } from './userProfile';
 import { regenerateWeeklyPlan } from './planner';
 import { normalizeTopicTitle } from './temarioImport';
 import { writeTemarioBackup } from './temarioBackup';
@@ -667,10 +668,7 @@ export async function applySetupActions(
         // Cualquier cambio en el horario reabre su confirmación: si se añade
         // una clase después de haberlo dado por cerrado, el «completo» deja de
         // ser cierto y el coordinador tiene que volver a repasarlo.
-        await prisma.userProfile.update({
-          where: { id: 'user_default' },
-          data: { timetableComplete: false },
-        });
+        await updateDefaultProfile({ timetableComplete: false });
         changed = true;
         playlistDirty = true;
         break;
@@ -704,10 +702,7 @@ export async function applySetupActions(
           where: { id: { in: doomed.map((period) => period.id) } },
         });
         // El horario ha cambiado: la confirmación de «está completo» ya no vale.
-        await prisma.userProfile.update({
-          where: { id: 'user_default' },
-          data: { timetableComplete: false },
-        });
+        await updateDefaultProfile({ timetableComplete: false });
         applied.push(
           action.day === null
             ? `Fuera del horario: ${subject.name} (${doomed.length} ${doomed.length === 1 ? 'clase' : 'clases'})`
@@ -786,19 +781,16 @@ export async function applySetupActions(
 
       /** El alumno confirma que el horario de los cinco días está repasado. */
       case 'timetable-complete': {
-        await prisma.userProfile.update({
-          where: { id: 'user_default' },
-          data: { timetableComplete: true },
-        });
+        await updateDefaultProfile({ timetableComplete: true });
         applied.push('Horario de clases repasado: completo');
         changed = true;
         break;
       }
 
       case 'hours': {
-        await prisma.userProfile.update({
-          where: { id: 'user_default' },
-          data: { weeklyHoursCap: action.weekly, weeklyHoursDeclared: true },
+        await updateDefaultProfile({
+          weeklyHoursCap: action.weekly,
+          weeklyHoursDeclared: true,
         });
         applied.push(`Horas disponibles: ${action.weekly} h/semana`);
         changed = true;
@@ -807,10 +799,7 @@ export async function applySetupActions(
       }
 
       case 'mode': {
-        await prisma.userProfile.update({
-          where: { id: 'user_default' },
-          data: { studyMode: action.mode },
-        });
+        await updateDefaultProfile({ studyMode: action.mode });
         applied.push(action.mode === 'athlete' ? 'Ritmo: Modo Atleta' : 'Ritmo: Zona de Consuelo');
         changed = true;
         playlistDirty = true;
@@ -818,10 +807,7 @@ export async function applySetupActions(
       }
 
       case 'pau-target': {
-        await prisma.userProfile.update({
-          where: { id: 'user_default' },
-          data: { targetGradePau: action.value },
-        });
+        await updateDefaultProfile({ targetGradePau: action.value });
         applied.push(`Nota PAU objetivo: ${action.value}/14`);
         changed = true;
         break;
@@ -848,16 +834,10 @@ export async function applySetupActions(
 
 /** Cierra la puesta a punto (la marca como terminada). */
 export async function markSetupCompleted(at: Date = new Date()) {
-  await prisma.userProfile.update({
-    where: { id: 'user_default' },
-    data: { setupCompletedAt: at },
-  });
+  await updateDefaultProfile({ setupCompletedAt: at });
 }
 
 /** Reabre la puesta a punto para seguir añadiendo datos. */
 export async function reopenSetup() {
-  await prisma.userProfile.update({
-    where: { id: 'user_default' },
-    data: { setupCompletedAt: null },
-  });
+  await updateDefaultProfile({ setupCompletedAt: null });
 }

@@ -25,6 +25,10 @@
   # Next 16 necesita Node 20 o superior; el runtime por defecto puede ser menor.
   NODE_VERSION = "20"
 
+# El adaptador de Next (OpenNext) va fijado en `package.json`: si solo se declara
+# aquí y Netlify no lo instala, publica `.next` tal cual, no hay `index.html` y
+# la web se queda en blanco. Con la dependencia instalada, el plugin convierte
+# la salida de Next en funciones y sirve cada ruta.
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
