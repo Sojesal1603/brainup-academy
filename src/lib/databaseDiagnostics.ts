@@ -66,11 +66,31 @@ export function resolveDatabaseUrl(rawInput?: string): string | undefined {
     }
 
     if (url.hostname.endsWith('pooler.supabase.com')) {
-      if (url.port === '6543' && !url.searchParams.has('pgbouncer')) {
+      /**
+       * El pooler tiene dos modos: sesión (5432) y transacción (6543). En modo
+       * sesión cada cliente se queda una conexión del servidor mientras viva y
+       * Supabase acaba cerrando las que sobran; en una función serverless eso
+       * llega como **P1017** («el servidor ha cerrado la conexión») en mitad de
+       * un turno, y el turno se pierde. En modo transacción cada consulta toma
+       * una conexión del pool y la devuelve, que es lo que aguanta Netlify.
+       *
+       * Se respeta el puerto si ya es el 6543. Las migraciones no pasan por
+       * aquí (`prisma migrate deploy` usa DATABASE_URL tal cual), así que pueden
+       * seguir usando la conexión directa o la de sesión.
+       */
+      if (!url.port || url.port === '5432') {
+        url.port = '6543';
+      }
+      if (!url.searchParams.has('pgbouncer')) {
         url.searchParams.set('pgbouncer', 'true');
       }
       if (!url.searchParams.has('connection_limit')) {
         url.searchParams.set('connection_limit', '1');
+      }
+      // Sin tope, una conexión que no responde deja la consulta esperando y la
+      // página se queda cargando para siempre.
+      if (!url.searchParams.has('pool_timeout')) {
+        url.searchParams.set('pool_timeout', '10');
       }
     }
 
@@ -102,7 +122,10 @@ export function databaseTarget(): DatabaseTarget {
     return { configured: false, host: null, port: null, pooled: false, supabaseDirect: false };
   }
   try {
-    const url = new URL(raw);
+    // Se mira la cadena YA normalizada: el parte de salud debe decir el puerto
+    // por el que conecta la app de verdad (6543 en el pooler de Supabase), no el
+    // que esté escrito en el archivo.
+    const url = new URL(resolveDatabaseUrl(raw) ?? raw);
     return {
       configured: true,
       host: url.hostname || null,
@@ -140,6 +163,13 @@ export function databaseHint(detail: string, code?: string | null): string {
   }
   if (code === 'P1001' || text.includes("can't reach database server")) {
     return 'El servidor de la base no es alcanzable desde Netlify: revisa el host y el puerto (pooler 6543), que el proyecto de Supabase no esté pausado y que la IP no esté restringida.';
+  }
+  if (
+    code === 'P1017' ||
+    text.includes('server has closed the connection') ||
+    text.includes('connection closed')
+  ) {
+    return 'La conexión con la base se ha cortado (el pooler de Supabase cierra las conexiones que quedan inactivas). La app la descarta y reintenta sola; si insiste, usa la cadena del pooler en modo transacción (puerto 6543) con pgbouncer=true y connection_limit=1.';
   }
   if (code === 'P1000' || text.includes('authentication failed')) {
     return 'Usuario o contraseña incorrectos en DATABASE_URL. Si la contraseña tiene caracteres especiales (@, #, /), van escapados en la URL.';

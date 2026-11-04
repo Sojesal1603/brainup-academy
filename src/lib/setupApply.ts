@@ -13,6 +13,8 @@ import {
 } from './setup';
 import { consumePendingReplace, hasPendingReplace } from './setupReplaceIntent';
 import { auditSetup } from './setupAudit';
+import { prismaErrorCode } from './databaseDiagnostics';
+import { withDbRetry } from './prismaRetry';
 
 /** Opciones de aplicación de un turno. */
 export interface SetupApplyOptions {
@@ -845,10 +847,13 @@ export async function applySetupActions(
                 }`
           );
         } catch (error) {
+          // El mensaje crudo de Prisma («Server has closed the connection…») no le
+          // dice nada al alumno: se cuenta qué ha pasado y qué hacer.
+          const code = prismaErrorCode(error);
           problems.push(
-            `He intentado revisarlo pero la base de datos no ha respondido: ${
-              error instanceof Error ? error.message : String(error)
-            }`
+            code
+              ? `No he podido revisarlo ahora mismo: la base de datos no ha respondido (${code}) ni siquiera tras reintentar. Dímelo otra vez en un momento y lo repaso.`
+              : `No he podido revisarlo: ${error instanceof Error ? error.message : String(error)}`
           );
         }
         break;
@@ -1033,7 +1038,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
   const classIds = snapshot.classes.map((row) => row.id);
 
   try {
-    const outcome = await prisma.$transaction(
+    const outcome = await withDbRetry(() => prisma.$transaction(
       async (tx) => {
         // 1. Fuera lo que se creó en este turno.
         const removedTopics = await tx.topic.deleteMany({
@@ -1102,7 +1107,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
         };
       },
       { timeout: 20_000 }
-    );
+    ), { label: 'deshacer el último cambio' });
 
     lastUndo = null;
 
@@ -1130,12 +1135,15 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
 
     return { restored, problems: [] };
   } catch (error) {
+    const code = prismaErrorCode(error);
     return {
       restored: [],
       problems: [
-        `No he podido volver atrás porque la base de datos ha fallado: ${
-          error instanceof Error ? error.message : String(error)
-        }. No se ha tocado nada más; dime qué corregimos.`,
+        code
+          ? `No he podido volver atrás: la base de datos no ha respondido (${code}) ni siquiera tras reintentar. No se ha tocado nada más; dímelo otra vez en un momento y lo deshago.`
+          : `No he podido volver atrás porque la base de datos ha fallado: ${
+              error instanceof Error ? error.message : String(error)
+            }. No se ha tocado nada más; dime qué corregimos.`,
       ],
     };
   }

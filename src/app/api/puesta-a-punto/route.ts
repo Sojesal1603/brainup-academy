@@ -25,6 +25,8 @@ import {
   LOCAL_MODE_PROVIDER,
   stripLocalModeNotice,
 } from '@/lib/setupFallback';
+import { prismaErrorCode } from '@/lib/databaseDiagnostics';
+import { isTransientDbError, withDbRetry } from '@/lib/prismaRetry';
 
 /**
  * Un turno de la puesta a punto: el coordinador pregunta, el alumno responde y
@@ -309,7 +311,9 @@ export async function POST(request: Request) {
     let assistantId = `local-${Date.now()}`;
     let assistantCreatedAt = new Date();
     try {
-      const [, assistantMessage] = await prisma.$transaction([
+      // Guardar el turno se reintenta: con el pooler de Supabase una conexión
+      // puede cerrarse a mitad (P1017) y el chat no debe perder lo hablado.
+      const [, assistantMessage] = await withDbRetry(() => prisma.$transaction([
         prisma.aiMessage.create({
           data: { conversationId: activeConversation.id, role: 'user', content: message },
         }),
@@ -320,7 +324,7 @@ export async function POST(request: Request) {
             content: assistantText,
           },
         }),
-      ]);
+      ]), { label: 'puesta-a-punto: guardar turno' });
       assistantId = assistantMessage.id;
       assistantCreatedAt = assistantMessage.createdAt;
     } catch (persistError) {
@@ -404,15 +408,19 @@ export async function POST(request: Request) {
     // Un fallo de base de datos tiene un mensaje propio y accionable: el genérico
     // («Revisa la consola del servidor») no le dice nada a quien está montando
     // el curso desde el móvil.
-    const prismaCode =
-      typeof (error as { code?: unknown })?.code === 'string'
-        ? (error as { code: string }).code
-        : '';
-    if (prismaCode.startsWith('P')) {
+    // El código se busca también en `errorCode`: un fallo de conexión llega como
+    // `PrismaClientInitializationError`, que NO lo pone en `.code`. Mirando solo
+    // `.code` el error salía como «inesperado» y sin pista de qué arreglar.
+    const prismaCode = prismaErrorCode(error);
+    if (prismaCode) {
       console.error('[puesta-a-punto] error de base de datos:', prismaCode, error);
       return NextResponse.json(
         {
-          error: `La base de datos no ha respondido (${prismaCode}). No se ha guardado nada de este turno: revisa DATABASE_URL y que Supabase esté accesible, y vuelve a intentarlo.`,
+          error: isTransientDbError(error)
+            ? 'Se ha cortado la conexión con la base de datos en este turno y no se ha recuperado tras reintentar. No se ha guardado nada: vuelve a enviar el mensaje y lo aplico (el reintento suele funcionar al segundo).'
+            : `La base de datos ha rechazado la operación (${prismaCode}) y no se ha guardado nada de este turno. El detalle está en /diagnostico y en la consola del servidor.`,
+          /** El turno no se ha guardado: el mensaje se puede reenviar sin miedo. */
+          retryable: isTransientDbError(error),
         },
         { status: 503 }
       );

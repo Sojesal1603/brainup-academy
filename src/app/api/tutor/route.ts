@@ -15,6 +15,7 @@ import {
 } from '@/lib/tutor';
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
+import { withDbRetry } from '@/lib/prismaRetry';
 import { isLocalModeReply } from '@/lib/setupFallback';
 import {
   ATTACHMENT_LIVE_TURNS,
@@ -614,7 +615,10 @@ export async function POST(request: Request) {
       })),
     ];
 
-    const [userMessage, assistantMessage] = await prisma.$transaction(async (tx) => {
+    // El turno se reintenta si la conexión con la base se corta (P1017 con el
+    // pooler de Supabase): perder la respuesta ya cobrada al modelo es lo peor
+    // que puede pasar aquí.
+    const [userMessage, assistantMessage] = await withDbRetry(() => prisma.$transaction(async (tx) => {
       const user = await tx.aiMessage.create({
         data: { conversationId: activeConversation.id, role: 'user', content: message },
       })
@@ -655,7 +659,7 @@ export async function POST(request: Request) {
       })
 
       return [user, assistant] as const;
-    })
+    }), { label: 'tutor: guardar turno' })
 
     // Medición real que aporta el catedrático: [[nivel:U4=55]] al final del
     // mensaje. Se anota como nivel diagnosticado, nunca como valor de fábrica.
