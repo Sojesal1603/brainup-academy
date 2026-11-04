@@ -16,7 +16,12 @@ import {
 import { buildSetupSystemPrompt, parseSetupTags, SETUP_CONVERSATION_TITLE } from '@/lib/setup';
 import { armPendingReplace, hasReplaceIntent, matchSubjectInMessage } from '@/lib/setupReplaceIntent';
 import { applySetupActions, getSetupState } from '@/lib/setupApply';
-import { buildLocalSetupReply, LOCAL_MODE_PROVIDER } from '@/lib/setupFallback';
+import {
+  buildLocalSetupReply,
+  isLocalModeReply,
+  LOCAL_MODE_PROVIDER,
+  stripLocalModeNotice,
+} from '@/lib/setupFallback';
 
 /**
  * Un turno de la puesta a punto: el coordinador pregunta, el alumno responde y
@@ -41,6 +46,11 @@ interface SetupRequestBody {
 function toChatMessages(rows: Array<{ role: string; content: string }>): ChatMessage[] {
   return rows
     .filter((row) => row.role === 'user' || row.role === 'assistant')
+    // Los turnos que contestó el respaldo local NO se le reenvían al modelo: los
+    // imitaba y acababa diciendo «⚠️ Sin IA ahora mismo…» con la IA funcionando
+    // (`provider: groq`, `degraded: false`). El alumno veía «sin IA», y encima
+    // esa respuesta no traía etiquetas, así que tampoco guardaba nada.
+    .filter((row) => row.role !== 'assistant' || !isLocalModeReply(row.content))
     .map((row) => ({
       role: row.role === 'user' ? ('user' as const) : ('assistant' as const),
       content: row.content,
@@ -146,7 +156,10 @@ export async function POST(request: Request) {
           messages: toChatMessages(recent),
           message,
         });
-        replyText = reply.text;
+        // Si el modelo copia el aviso de modo local de algún turno viejo, se
+        // quita: la IA SÍ ha contestado y decir lo contrario es mentirle.
+        const cleaned = stripLocalModeNotice(reply.text);
+        replyText = cleaned.length > 0 ? cleaned : reply.text;
         provider = reply.provider;
         model = reply.model;
       } catch (error) {
@@ -221,7 +234,14 @@ export async function POST(request: Request) {
 
     // Guardar el turno es importante (es la memoria del chat) pero no puede
     // tumbar la respuesta: si falla, se sigue con el texto ya generado.
-    const assistantText = parsed.text;
+    // Si el modelo contesta SOLO con etiquetas, el chat se quedaría con una
+    // burbuja vacía. Se confirma lo aplicado en una línea y se sigue.
+    const assistantText =
+      parsed.text.trim().length > 0
+        ? parsed.text
+        : applied.applied.length > 0
+          ? `Anotado: ${applied.applied.join(' · ')}`
+          : 'Entendido. Dime cuál es el siguiente dato y lo anoto.';
     let assistantId = `local-${Date.now()}`;
     let assistantCreatedAt = new Date();
     try {
@@ -233,7 +253,7 @@ export async function POST(request: Request) {
           data: {
             conversationId: activeConversation.id,
             role: 'assistant',
-            content: parsed.text,
+            content: assistantText,
           },
         }),
       ]);

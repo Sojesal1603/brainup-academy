@@ -33,6 +33,42 @@ export const LOCAL_MODE_PROVIDER = 'local';
 export const LOCAL_MODE_NOTICE =
   '⚠️ **Sin IA ahora mismo**: los modelos gratuitos están saturados, así que te contesto en modo local.';
 
+/**
+ * La marca que comparten TODAS las respuestas de respaldo (coordinador y
+ * catedráticos): el texto del aviso, no el proveedor.
+ */
+const LOCAL_NOTICE_MARKER = 'Sin IA ahora mismo';
+
+/**
+ * ¿Este mensaje del chat lo escribió el respaldo local (no el modelo)?
+ *
+ * Importa porque esos turnos se guardan como mensajes del asistente igual que
+ * los demás, y al reenviar el historial el modelo los IMITA: acabó contestando
+ * «⚠️ Sin IA ahora mismo…» con Groq funcionando y `degraded: false`. El alumno
+ * veía «sin IA» teniendo IA, y sin una sola etiqueta (no guardaba nada).
+ */
+export function isLocalModeReply(content: string): boolean {
+  return String(content ?? '').includes(LOCAL_NOTICE_MARKER);
+}
+
+/**
+ * Quita el aviso de modo local de una respuesta del modelo.
+ *
+ * Red de seguridad para conversaciones ya contaminadas: si el modelo copia el
+ * aviso, no se le enseña al alumno una mentira («no hay IA» con el proveedor
+ * contestando).
+ */
+export function stripLocalModeNotice(text: string): string {
+  const value = String(text ?? '');
+  if (!value.includes(LOCAL_NOTICE_MARKER)) return value.trim();
+  return value
+    .split('\n')
+    .filter((line) => !line.includes(LOCAL_NOTICE_MARKER))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /** «la unidad 4», «los exámenes», «cuántas horas»… */
 function nextStepHint(checklist: SetupChecklist): string | null {
   const next = checklist.nextQuestion;

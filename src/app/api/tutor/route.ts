@@ -15,6 +15,7 @@ import {
 } from '@/lib/tutor';
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
+import { isLocalModeReply } from '@/lib/setupFallback';
 import {
   ATTACHMENT_LIVE_TURNS,
   loadAttachmentParts,
@@ -367,6 +368,19 @@ export async function POST(request: Request) {
 
     const recentHistory = trimHistory(historyRows as StoredMessage[]);
 
+    /**
+     * El historial que viaja al modelo, sin los turnos del respaldo local.
+     *
+     * Esos mensajes se guardan como del asistente igual que los demás y el modelo
+     * los imita: acababa contestando «⚠️ Sin IA ahora mismo…» con el proveedor
+     * funcionando (pasó en la puesta a punto: `provider: groq`, `degraded: false`
+     * y el texto del respaldo). Al catedrático le pasaría lo mismo en cuanto
+     * hubiera un turno degradado en su conversación.
+     */
+    const modelHistory = recentHistory.filter(
+      (row) => row.role !== 'assistant' || !isLocalModeReply(row.content)
+    );
+
     // Lo que el catedrático va a poder **leer** de verdad en este turno. El texto
     // de cada documento viene troceado con su página, y de ahí se sacan el mapa
     // del documento y los extractos que le tocan a la pregunta. Si en su
@@ -441,7 +455,7 @@ export async function POST(request: Request) {
       console.log(`[tutor] memoria del catedrático: ${memoryBlock.length} caracteres`);
     }
 
-    const history = await toHistorySteps(recentHistory, liveAttachmentMessageIds(recentHistory));
+    const history = await toHistorySteps(modelHistory, liveAttachmentMessageIds(modelHistory));
 
     // Al modelo solo le viajan los **bytes de lo que hay que mirar** —capturas y
     // escaneos— y solo si caben en la petición. Un tema de 300 páginas no se le
@@ -514,7 +528,7 @@ export async function POST(request: Request) {
       }
       const result = await runAiText({
         systemInstruction,
-        messages: toChatMessages(recentHistory),
+        messages: toChatMessages(modelHistory),
         message: questionForModel,
         attachments: attachmentParts,
         history,
