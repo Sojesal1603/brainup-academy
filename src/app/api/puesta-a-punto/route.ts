@@ -136,6 +136,8 @@ export async function POST(request: Request) {
     let provider: string;
     let model: string;
     let degraded = false;
+    /** Por qué se ha respondido en local (se le enseña al alumno, no se calla). */
+    let degradeReason: string | null = null;
 
     if (aiAvailable) {
       try {
@@ -158,6 +160,9 @@ export async function POST(request: Request) {
         provider = LOCAL_MODE_PROVIDER;
         model = 'coordinador local';
         degraded = true;
+        // El motivo real, corto: sin esto «Sin IA» no dice si es cupo, red o un
+        // modelo que ya no existe, y arreglarlo se convierte en adivinar.
+        degradeReason = error.message;
       }
     } else {
       replyText = [
@@ -275,7 +280,11 @@ export async function POST(request: Request) {
       changed: applied.changed,
       blocks: applied.blocks,
       applied: applied.applied,
-      problems: [...applied.problems, ...parsed.rejected.map((tag) => `Etiqueta que no entendí: ${tag}`)],
+      problems: [
+        ...applied.problems,
+        ...parsed.rejected.map((tag) => `Etiqueta que no entendí: ${tag}`),
+        ...(degradeReason ? [`Modo local: ${degradeReason}`] : []),
+      ],
       checklist: applied.checklist,
       snapshot: applied.snapshot,
       reply: {

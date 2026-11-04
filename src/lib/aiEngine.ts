@@ -406,8 +406,12 @@ const CATALOG_TTL_MS = 10 * 60 * 1000;
 /** Enfriamientos según el tipo de fallo. */
 const COOLDOWN_QUOTA_MS = 3 * 60 * 1000;
 const COOLDOWN_QUOTA_DAILY_MS = 6 * 60 * 60 * 1000;
-const COOLDOWN_MISSING_MS = 30 * 60 * 1000;
-const COOLDOWN_ERROR_MS = 20 * 1000;
+// Un 404 de «este modelo ya no existe» no se arregla solo: se aparta una hora.
+const COOLDOWN_MISSING_MS = 60 * 60 * 1000;
+// «High demand» de un modelo concreto dura minutos, no segundos. Con 20 s se
+// volvía a probar el mismo modelo saturado en el turno siguiente y otra vez se
+// comía el presupuesto antes de llegar a los que sí responden.
+const COOLDOWN_ERROR_MS = 3 * 60 * 1000;
 const COOLDOWN_AUTH_MS = 10 * 60 * 1000;
 
 /** Cadena estática de respaldo si el catálogo de Gemini no se puede consultar. */
@@ -457,6 +461,12 @@ function keyEnvNames(provider: AiProvider): string[] {
   if (provider === 'gemini') {
     return [
       'GEMINI_API_KEY',
+      // Las dos formas que usan los SDK de Google. El `.env` de este proyecto
+      // tenía la clave guardada como `GOOGLE_GENERATIVE_AI_API_KEY` y el motor
+      // solo miraba `GEMINI_API_KEY`: si esa faltara, la clave existiría en el
+      // entorno y la app seguiría diciendo «sin IA».
+      'GOOGLE_GENERATIVE_AI_API_KEY',
+      'GOOGLE_GENAI_API_KEY',
       'GOOGLE_API_KEY',
       'GEMINI_API_KEY_2',
       'GEMINI_API_KEY_3',
@@ -1199,8 +1209,16 @@ export class TutorError extends Error {
  * roto: significa que la petición ha llegado en mal momento. Los cupos agotados
  * (429) NO se reintentan: esperar un segundo no devuelve la cuota.
  */
-const TRANSIENT_RETRIES = 2;
-const TRANSIENT_BACKOFF_MS = [700, 1800];
+/**
+ * Intentos por modelo.
+ *
+ * Tres huecos, pero solo UNO espera y reintenta: insistir a un 5xx saturado no
+ * lo descongestiona y le quita el turno a los modelos que sí están sanos. El
+ * hueco extra es para el recorte de prompt (413/ITPM), que no necesita esperar.
+ */
+const MAX_ATTEMPTS_PER_MODEL = 3;
+const TRANSIENT_RETRIES = 1;
+const TRANSIENT_BACKOFF_MS = [600];
 
 /**
  * El presupuesto de tiempo de un turno de IA (toda la cadena de modelos).
@@ -1216,17 +1234,29 @@ const TRANSIENT_BACKOFF_MS = [700, 1800];
 function aiTurnBudgetMs(): number {
   const raw = Number(process.env.AI_BUDGET_MS);
   if (Number.isFinite(raw) && raw >= 2_000) return raw;
-  if (process.env.NETLIFY) return 7_000;
+  if (process.env.NETLIFY) return 8_000;
   return 30_000;
 }
 
 export const AI_TEXT_BUDGET_MS = aiTurnBudgetMs();
 
-/** Tope de un solo intento, aunque al turno le quede presupuesto de sobra. */
-export const AI_ATTEMPT_MAX_MS = Math.min(16_000, AI_TEXT_BUDGET_MS);
+/**
+ * Tope de UN intento (un modelo con una clave).
+ *
+ * Antes eran 16 s: un modelo saturado que no contesta se comía el turno entero
+ * y los modelos sanos que venían detrás no llegaban a probarse nunca. Ahora un
+ * intento callado se corta pronto para que la cadena siga.
+ */
+export const AI_ATTEMPT_MAX_MS = Math.min(process.env.NETLIFY ? 4_000 : 7_000, AI_TEXT_BUDGET_MS);
 
-/** Por debajo de esto no se empieza un intento nuevo: no daría tiempo a nada. */
-const MIN_ATTEMPT_MS = 4_000;
+/**
+ * Por debajo de esto no se empieza un intento nuevo: no daría tiempo a nada.
+ *
+ * Con 4 s, en Netlify (presupuesto de 8 s) un modelo lento dejaba el turno sin
+ * margen para el proveedor de al lado y la cadena se rendía. Un proveedor sano
+ * contesta en medio segundo, así que basta con 1,5 s para intentarlo.
+ */
+const MIN_ATTEMPT_MS = 1_500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1366,7 +1396,10 @@ interface TransportParams {
 }
 
 interface OpenAiChatPayload {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{
+    message?: { content?: string; reasoning?: string };
+    finish_reason?: string;
+  }>;
   error?: { message?: string } | string;
 }
 interface GeminiPayload {
@@ -1507,6 +1540,13 @@ async function callOpenAiCompatible(
         messages: openAiMessages(params, provider),
         temperature: 0.4,
         max_tokens: params.maxTokens ?? 2048,
+        // Los gpt-oss de Groq son modelos de razonamiento: con `reasoning_effort`
+        // alto se gastan el cupo de salida pensando y devuelven `content` vacío
+        // (el log estaba lleno de «Respuesta vacía del proveedor»). En una app
+        // de tutoría no hace falta razonar tan profundo para contestar.
+        ...(provider !== 'ollama' && /gpt-oss/i.test(params.model)
+          ? { reasoning_effort: 'low' }
+          : {}),
       }),
       signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
     });
@@ -1534,7 +1574,12 @@ async function callOpenAiCompatible(
       provider === 'ollama'
         ? 'Ollama no ha devuelto ninguna respuesta. Reinténtalo.'
         : 'El modelo no ha devuelto ninguna respuesta. Reinténtalo.';
-    throw new TutorError(emptyMessage, 502, 'Respuesta vacía del proveedor');
+    const finish = payload?.choices?.[0]?.finish_reason ?? 'desconocido';
+    throw new TutorError(
+      emptyMessage,
+      502,
+      `Respuesta vacía del proveedor (finish_reason: ${finish})`
+    );
   }
   return { text };
 }
@@ -1637,6 +1682,12 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
   let lastError: TutorError | null = null;
   // Copia mutable: el orden puede cambiar sobre la marcha.
   const queue = [...chain];
+  /**
+   * Fallos seguidos de cada proveedor en ESTE turno. Sirve para distinguir un
+   * modelo saturado (se prueba el siguiente del mismo proveedor, que suele ir
+   * bien) de un proveedor caído (ahí sí conviene saltar al otro).
+   */
+  const providerFailures = new Map<AiProvider, number>();
 
   for (let index = 0; index < queue.length; index++) {
     const candidate = queue[index];
@@ -1677,7 +1728,7 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
       /** Nivel de recorte del prompt de sistema (0 = sin apretar). */
       let compactLevel = 0;
 
-      for (let attempt = 0; attempt <= TRANSIENT_RETRIES; attempt++) {
+      for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt++) {
         const remainingMs = deadline - Date.now();
         if (remainingMs <= MIN_ATTEMPT_MS) {
           attempts.push({
@@ -1695,7 +1746,6 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
         );
         // Un PDF enorme no se manda entero: se recorta lo justo para que quepa.
         const systemInstruction = compactSystemInstruction(params.systemInstruction, compactLevel);
-        const systemWasCompacted = systemInstruction !== params.systemInstruction;
 
         try {
           let result: { text: string; steps?: unknown[] };
@@ -1750,6 +1800,7 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
             });
           }
 
+          providerFailures.delete(candidate.provider);
           markHealth(candidate.key, 'ok');
           markKeyHealth(candidate.provider, keyEntry.envVar, 'ok');
           lastGoodKey = candidate.key;
@@ -1785,12 +1836,19 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
           // La petición no cabía: si el recorte ha cambiado algo, se aprieta y se
           // reintenta el MISMO modelo. Si ya venía recortada y aun así no cabe, no
           // se insiste: el problema es del modelo, no del tamaño.
+          // La petición no cabía (413/ITPM). ANTES se exigía que ya viniera
+          // recortada, así que el primer 413 —el caso normal: Groq mide 7 000
+          // tokens por minuto y el prompt del tutor ronda 4 500— se rendía sin
+          // recortar nada y el alumno acababa en modo local. Ahora se recorta y
+          // se reintenta siempre que quede un nivel de recorte.
           if (
             statusKind === 'too_large' &&
-            systemWasCompacted &&
             compactLevel < 2 &&
-            attempt < TRANSIENT_RETRIES &&
-            hasRoomToRetry(deadline, 0, othersLeft + keysLeft)
+            attempt < MAX_ATTEMPTS_PER_MODEL - 1 &&
+            // Recortar no es reintentar a ciegas: cuesta una llamada y suele
+            // acertar. Se exige solo tiempo para ESE intento, no para toda la
+            // cola (que era lo que en Netlify lo bloqueaba siempre).
+            deadline - Date.now() > MIN_ATTEMPT_MS
           ) {
             compactLevel += 1;
             continue;
@@ -1842,10 +1900,16 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
           lastError = tutorError instanceof TutorError ? tutorError : null;
           attempts.push({ key: attemptKey, outcome: statusKind, note: detail.slice(0, 160) });
           noteCall(candidate.provider, false);
-          // Fallo del modelo o del proveedor entero: el de al lado pasa delante
-          // y no se prueban más claves de este (el problema no está en la clave).
+          // Un modelo saturado NO significa que el proveedor esté caído: casi
+          // siempre el modelo de al lado responde. Por eso no se adelanta el
+          // otro proveedor hasta que este lleve TRES fallos seguidos. Antes
+          // bastaba uno: Gemini devolvía 503 en `3.8-flash`, el turno saltaba a
+          // Groq (con su cupo por minuto mucho más estrecho), Groq devolvía 413
+          // y el alumno veía «Sin IA» teniendo `3.6-flash` disponible.
           if (statusKind === 'error') {
-            promoteOtherProvider(queue, index);
+            const streak = (providerFailures.get(candidate.provider) ?? 0) + 1;
+            providerFailures.set(candidate.provider, streak);
+            if (streak >= 3) promoteOtherProvider(queue, index);
           }
           return 'stop';
         }
