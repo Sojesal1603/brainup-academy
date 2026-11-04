@@ -52,6 +52,27 @@ interface ApiResponse {
   error?: string;
 }
 
+/**
+ * Tope de espera de un turno en el cliente.
+ *
+ * El servidor contesta en segundos (y en Netlify se rinde a los 8 s para no morir
+ * con la función), así que a los 60 s lo que hay delante ya no es un turno lento:
+ * es un cuelgue, y el alumno tiene que saberlo en vez de mirar el spinner.
+ */
+const TURN_TIMEOUT_MS = 60_000;
+
+/** La respuesta del servidor es la que espera el componente (campos obligatorios). */
+function isSetupResponse(data: unknown): data is ApiResponse {
+  const value = data as ApiResponse | null;
+  return Boolean(
+    value &&
+      value.reply &&
+      typeof value.reply.content === 'string' &&
+      value.checklist &&
+      value.snapshot
+  );
+}
+
 /** Qué atajos tienen sentido según lo que toca preguntar ahora. */
 function quickReplies(checklist: SetupChecklist): string[] {
   switch (checklist.nextQuestion.about) {
@@ -129,17 +150,39 @@ export default function SetupChat({
     setMessages((previous) => [...previous, userMessage]);
     setIsSending(true);
 
+    // El turno puede quedarse sin respuesta (Netlify corta la función, se cae la
+    // red). Con este tope se deja de esperar y se dice qué pasa, en vez de dejar
+    // el chat girando para siempre.
+    const controller = new AbortController();
+    const stop = setTimeout(() => controller.abort(), TURN_TIMEOUT_MS);
+
     try {
       const response = await fetch('/api/puesta-a-punto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: clean, conversationId: conversation }),
+        signal: controller.signal,
       });
-      const data = (await response.json()) as ApiResponse;
 
-      if (!response.ok || data.error) {
-        setError(data.error ?? `El coordinador no ha podido responder (HTTP ${response.status}).`);
-        return;
+      // Se lee como texto y se intenta parsear: si el servidor muere a medias
+      // (cuerpo vacío o HTML de error), `response.json()` lanzaba «Unexpected end
+      // of JSON input», un error en inglés que al alumno no le dice nada.
+      const raw = await response.text();
+      let data: unknown = null;
+      try {
+        data = raw.length > 0 ? JSON.parse(raw) : null;
+      } catch {
+        data = null;
+      }
+
+      const failure = (data as { error?: string } | null)?.error;
+      if (!response.ok || failure || !isSetupResponse(data)) {
+        throw new Error(
+          failure ??
+            (response.status === 502 || response.status === 504
+              ? 'El servidor ha cortado la respuesta por tardar demasiado. Vuelve a enviarlo: este turno no se ha guardado.'
+              : `El coordinador no ha podido responder (HTTP ${response.status}). Vuelve a intentarlo.`)
+        );
       }
 
       setConversation(data.conversationId);
@@ -157,8 +200,19 @@ export default function SetupChat({
       ]);
       if (data.changed) router.refresh();
     } catch (caught) {
-      setError((caught as Error).message);
+      // Nada de este turno se ha guardado: se retira la burbuja optimista y el
+      // texto vuelve al cuadro para poder reenviarlo tal cual (antes el mensaje
+      // se perdía y había que volver a escribirlo).
+      setMessages((previous) => previous.filter((message) => message.id !== userMessage.id));
+      setInput(clean);
+      const failed = caught as Error;
+      setError(
+        failed.name === 'AbortError'
+          ? `El coordinador ha tardado más de ${Math.round(TURN_TIMEOUT_MS / 1000)} s y he dejado de esperar. Vuelve a enviarlo: no se ha guardado nada.`
+          : failed.message
+      );
     } finally {
+      clearTimeout(stop);
       setIsSending(false);
     }
   };

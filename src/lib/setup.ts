@@ -272,16 +272,41 @@ export function parseSetupTags(raw: string): SetupParseResult {
           return '';
         }
         case 'unidad': {
-          const title = clean(parts[0]);
+          /**
+           * El protocolo pide `[[unidad:Título|evaluación|dificultad]]`, pero el
+           * modelo escribe muchísimas veces el número delante, porque es lo
+           * natural al dictar una lista:
+           *
+           *     [[unidad:1|La comunicación|Lengua]]
+           *     [[unidad:1. La comunicación]]
+           *
+           * Antes eso se rechazaba entero (el «título» era «1», de un carácter),
+           * así que el coordinador respondía «anotadas las 3 unidades» mientras el
+           * sistema no guardaba NINGUNA, y al alumno le salía la etiqueta cruda
+           * como aviso. Las tres formas se aceptan aquí.
+           */
+          // El título puede venir en el primer campo (lo que pide el protocolo) o
+          // en el segundo, cuando el modelo escribe delante el número de la
+          // unidad: «[[unidad:1|La comunicación]]», «[[unidad:1. El sintagma]]».
+          // Se elige la lectura que da un título de verdad, así que
+          // «[[unidad:Tema 3|2|4]]» sigue siendo la unidad «Tema 3» y
+          // «[[unidad:1|La comunicación|Lengua]]» no se pierde.
+          const asTitle = (value: string | undefined) =>
+            clean(String(value ?? '').replace(/^\d{1,3}\s*[.)-]\s+/, ''));
+          const firstIsTitle = asTitle(parts[0]).length >= 2;
+          const title = firstIsTitle ? asTitle(parts[0]) : asTitle(parts[1]);
           if (title.length < 2) {
             rejected.push(whole);
             return '';
           }
+          // Con el número delante, la evaluación y la dificultad vienen detrás del
+          // título; con el formato del protocolo, en los campos 2 y 3.
+          const extra = firstIsTitle ? parts.slice(1) : parts.slice(2);
           actions.push({
             kind: 'unit',
             title,
-            term: parseTerm(parts[1]),
-            difficulty: parseDifficulty(parts[2]),
+            term: parseTerm(extra[0]),
+            difficulty: parseDifficulty(extra[1]),
           });
           return '';
         }

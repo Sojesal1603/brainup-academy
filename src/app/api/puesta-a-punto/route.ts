@@ -282,7 +282,16 @@ export async function POST(request: Request) {
       applied: applied.applied,
       problems: [
         ...applied.problems,
-        ...parsed.rejected.map((tag) => `Etiqueta que no entendí: ${tag}`),
+        // Las etiquetas son protocolo interno: «[[unidad:1|…]]» no le dice nada al
+        // alumno y parece que la app está rota. Se le cuenta qué ha pasado y qué
+        // hacer; el detalle crudo queda en el log de arriba para poder afinarlo.
+        ...(parsed.rejected.length > 0
+          ? [
+              `No he sabido anotar ${
+                parsed.rejected.length === 1 ? 'un dato' : `${parsed.rejected.length} datos`
+              } de este mensaje. Dímelo otra vez con tus palabras y lo guardo.`,
+            ]
+          : []),
         ...(degradeReason ? [`Modo local: ${degradeReason}`] : []),
       ],
       checklist: applied.checklist,

@@ -184,6 +184,43 @@ function protocolTests() {
     ok('Sin dificultad declarada no se inventa ninguna');
   }
 
+  /*
+   * EL NÚMERO DELANTE (el fallo que dejaba la puesta a punto vacía).
+   *
+   * El modelo escribe muchísimas veces «[[unidad:1|La comunicación|Lengua]]»
+   * aunque el protocolo pida el título primero. Antes eso se rechazaba entero
+   * (el «título» era «1»), así que el coordinador respondía «anotadas las 3
+   * unidades» mientras el sistema no guardaba ninguna. Ahora se acepta, y
+   * «[[unidad:Tema 3|2|4]]» sigue leyéndose como la unidad «Tema 3».
+   */
+  const numbered = S.parseSetupTags(
+    [
+      'Anotado:',
+      '[[unidad:1|La comunicación|Lengua]]',
+      '[[unidad:2. El sintagma]]',
+      '[[unidad:Tema 3|2|4]]',
+    ].join('\n')
+  );
+  const numberedUnits = numbered.actions.filter((action) => action.kind === 'unit');
+  if (
+    numberedUnits.length !== 3 ||
+    numbered.rejected.length !== 0 ||
+    numberedUnits[0]?.title !== 'La comunicación' ||
+    numberedUnits[1]?.title !== 'El sintagma' ||
+    numberedUnits[2]?.title !== 'Tema 3' ||
+    numberedUnits[2].term !== 2 ||
+    numberedUnits[2].difficulty !== 4
+  ) {
+    fail(
+      `La unidad con el número delante se sigue perdiendo (acciones=${JSON.stringify(numbered.actions)}, rechazadas=${JSON.stringify(numbered.rejected)})`
+    );
+  } else {
+    ok(
+      'La unidad se guarda con el número delante o detrás',
+      '1|La comunicación · 2. El sintagma · Tema 3 (2ª ev, dif 4)'
+    );
+  }
+
   const exam = parsed.actions.find((action) => action.kind === 'exam');
   if (!exam || exam.date !== '2026-11-14' || exam.weight !== 30 || exam.target !== 9) {
     fail(`El examen no se lee bien: ${JSON.stringify(exam)}`);
