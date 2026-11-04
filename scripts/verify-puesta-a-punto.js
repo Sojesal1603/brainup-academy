@@ -221,6 +221,83 @@ function protocolTests() {
     );
   }
 
+  /*
+   * OBEDECER DE VERDAD: revisar, deshacer y notas.
+   *
+   * El alumno pedía «revísame el temario» y el coordinador contestaba de
+   * memoria; y si algo quedaba mal montado, no había forma de volver atrás. Estas
+   * tres etiquetas son las que convierten «hazme caso» en algo que el sistema
+   * ejecuta: auditoría real, foto del turno anterior y nota declarada.
+   */
+  const control = S.parseSetupTags(
+    [
+      'Voy a revisarlo y a dejarlo como estaba.',
+      '[[revisar:temario]]',
+      '[[deshacer]]',
+      '[[nota:Lengua|8,5]]',
+      '[[nota:9|Matemáticas]]',
+      '[[revisar:loquesea]]',
+      '[[nota:97]]',
+    ].join('\n')
+  );
+  const controlKinds = control.actions.map((action) => action.kind);
+  const langs = control.actions.find((action) => action.kind === 'grade' && action.subject === 'Lengua');
+  const mates = control.actions.find((action) => action.kind === 'grade' && action.subject === 'Matemáticas');
+  const review = control.actions.find((action) => action.kind === 'audit');
+
+  if (
+    controlKinds.join(',') !== 'audit,undo,grade,grade' ||
+    review.area !== 'temario' ||
+    langs.value !== 8.5 ||
+    mates.value !== 9 ||
+    control.rejected.length !== 2 ||
+    /\[\[/.test(control.text)
+  ) {
+    fail(
+      `Revisar, deshacer o las notas no se leen bien: ${JSON.stringify(control.actions)} · rechazadas=${control.rejected.length}`
+    );
+  } else {
+    ok(
+      'El coordinador puede revisar, deshacer y anotar notas declaradas',
+      '[[revisar:temario]] · [[deshacer]] · Lengua 8,5 · Matemáticas 9'
+    );
+  }
+
+  const reviewIntent = loadPureModule('setupIntent');
+  if (
+    reviewIntent.reviewArea('¿Puedes revisarme el temario y decirme qué falta?') !== 'temario' ||
+    reviewIntent.reviewArea('Explícame la derivada de un polinomio') !== null ||
+    !reviewIntent.wantsUndo('Deshaz eso, que lo has montado mal') ||
+    reviewIntent.wantsUndo('No lo deshagas, está bien así')
+  ) {
+    fail('No se distingue una orden de revisar/deshacer de una pregunta normal');
+  } else {
+    ok('Se detecta cuándo pide revisar o deshacer (y cuándo no)', 'temario · deshacer · negación respetada');
+  }
+
+  /*
+   * LAS HORAS DICHAS SE APUNTAN, EMITA O NO LA ETIQUETA EL MODELO.
+   *
+   * «Puedo estudiar 3 horas al día entre semana» es un dato del alumno. Si el
+   * modelo no se acuerda de [[horas:15]], la app lo apunta igual: obedecer no
+   * puede depender del proveedor. Y lo que no es un dato («me cuesta estudiar»)
+   * no se convierte en horas inventadas.
+   */
+  if (
+    reviewIntent.hoursFromMessage('Puedo estudiar 3 horas al día entre semana') !== 15 ||
+    reviewIntent.hoursFromMessage('Unas 12 horas a la semana') !== 12 ||
+    reviewIntent.hoursFromMessage('2 h diarias también el fin de semana') !== 14 ||
+    reviewIntent.hoursFromMessage('Me cuesta mucho estudiar') !== null ||
+    reviewIntent.hoursFromMessage('Puedo estudiar 200 horas al día') !== null
+  ) {
+    fail('Las horas dichas con palabras no se traducen bien a horas semanales');
+  } else {
+    ok(
+      'Las horas dichas se apuntan aunque el modelo olvide la etiqueta',
+      '3 h/día → 15 h/sem · 12 h/sem · 2 h/día + finde → 14 h/sem · y nada de inventar'
+    );
+  }
+
   const exam = parsed.actions.find((action) => action.kind === 'exam');
   if (!exam || exam.date !== '2026-11-14' || exam.weight !== 30 || exam.target !== 9) {
     fail(`El examen no se lee bien: ${JSON.stringify(exam)}`);

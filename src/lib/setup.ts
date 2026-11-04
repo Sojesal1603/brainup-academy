@@ -23,6 +23,9 @@ export type SetupUnitSource = 'profesor' | 'libro' | 'ia' | 'entrevista';
 
 export const SETUP_SOURCES: SetupUnitSource[] = ['profesor', 'libro', 'ia', 'entrevista'];
 
+/** Qué áreas se pueden revisar con [[revisar:…]]. */
+export type SetupAuditArea = 'todo' | 'temario' | 'horario' | 'examenes' | 'horas';
+
 export type SetupAction =
   | { kind: 'focus'; subject: string }
   | { kind: 'source'; source: SetupUnitSource }
@@ -58,7 +61,13 @@ export type SetupAction =
   | { kind: 'timetable-complete' }
   | { kind: 'hours'; weekly: number }
   | { kind: 'mode'; mode: 'comfort' | 'athlete' }
-  | { kind: 'pau-target'; value: number };
+  | { kind: 'pau-target'; value: number }
+  /** Auditoría real del sistema: la ejecuta la app, no el modelo. */
+  | { kind: 'audit'; area: SetupAuditArea | null }
+  /** Deshacer el último cambio de la puesta a punto. */
+  | { kind: 'undo' }
+  /** Nota media actual de una materia, declarada por el alumno. */
+  | { kind: 'grade'; subject: string | null; value: number };
 
 export interface SetupParseResult {
   /** Mensaje sin etiquetas: lo que se lee en el chat. */
@@ -91,6 +100,18 @@ function parseDifficulty(value: string | undefined): number | null {
   if (!value) return null;
   const match = value.match(/[1-5]/);
   return match ? Number(match[0]) : null;
+}
+
+/** «temario», «horario», «exámenes», «horas» o «todo» → el área de la auditoría. */
+function parseAuditArea(value: string | undefined): SetupAuditArea | null {
+  const key = clean(value).toLowerCase();
+  if (key.length === 0) return null;
+  if (/temario|unidad|tema/.test(key)) return 'temario';
+  if (/horario|clase/.test(key)) return 'horario';
+  if (/examen|fecha/.test(key)) return 'examenes';
+  if (/hora/.test(key)) return 'horas';
+  if (/todo|curso|sistema|general/.test(key)) return 'todo';
+  return null;
 }
 
 /** Cómo se llama cada día al enseñarlo en el chat. */
@@ -464,6 +485,57 @@ export function parseSetupTags(raw: string): SetupParseResult {
           actions.push({ kind: 'mode', mode });
           return '';
         }
+        /**
+         * Revisar el sistema de verdad.
+         *
+         * El alumno pedía «revísame el temario» y el coordinador contestaba de
+         * memoria. Con esta etiqueta, la app ejecuta una auditoría real contra la
+         * base de datos y le devuelve los problemas que existen.
+         */
+        case 'revisar':
+        case 'auditar':
+        case 'auditoria': {
+          const area = parseAuditArea(parts[0]);
+          if (parts[0] && area === null) {
+            rejected.push(whole);
+            return '';
+          }
+          actions.push({ kind: 'audit', area });
+          return '';
+        }
+        /** «deshaz eso», «vuelve atrás»: se repone la foto del turno anterior. */
+        case 'deshacer': {
+          actions.push({ kind: 'undo' });
+          return '';
+        }
+        /**
+         * Nota media actual declarada por el alumno.
+         *
+         * Se aceptan las dos órdenes («[[nota:Lengua|8,5]]» y «[[nota:8,5]]»,
+         * con el nombre alante o detrás): el modelo no siempre las escribe igual.
+         */
+        case 'nota': {
+          const numeric = (part: string | undefined): number | null => {
+            const raw = String(part ?? '').replace(',', '.').trim();
+            if (!/^\d{1,2}(\.\d+)?$/.test(raw)) return null;
+            const value = Number(raw);
+            return Number.isFinite(value) && value >= 0 && value <= 10 ? value : null;
+          };
+          const values = parts.map(numeric);
+          const valueIndex = values.findIndex((value) => value !== null);
+          if (valueIndex < 0) {
+            rejected.push(whole);
+            return '';
+          }
+          const subject =
+            parts.find((part, index) => index !== valueIndex && clean(part).length >= 2) ?? null;
+          actions.push({
+            kind: 'grade',
+            subject: subject ? clean(subject) : null,
+            value: values[valueIndex] as number,
+          });
+          return '';
+        }
         case 'meta-pau': {
           const value2 = Number(String(parts[0]).replace(',', '.').replace(/[^\d.]/g, ''));
           if (!Number.isFinite(value2) || value2 < 5 || value2 > 14) {
@@ -514,6 +586,12 @@ export interface SetupSubjectState {
   exams: Array<{ title: string; date: string }>;
   /** Unidades que está dando ahora (para saber por dónde va el curso). */
   currentUnit: string | null;
+  /** Nota media actual (0-10), si la ha declarado o se ha medido. */
+  currentGrade?: number | null;
+  /** Nota objetivo de esa materia (0-10). */
+  targetGrade?: number | null;
+  /** De dónde sale la nota: «sin_medir» | «declarada» | «simulacro». */
+  gradeSource?: string;
 }
 
 export interface SetupSnapshot {
@@ -814,8 +892,11 @@ Escribe cada etiqueta en su PROPIA línea, justo cuando tengas el dato. El alumn
 - [[horas:18]] → horas semanales reales de estudio.
 - [[ritmo:athlete]] → athlete (exigente, 4 bloques/día) o comfort (3 bloques/día).
 - [[meta-pau:13.5]] → nota objetivo sobre 14.
+- [[revisar:todo]] → auditoría REAL del sistema (todo | temario | horario | examenes | horas). Úsalo SIEMPRE que te pida revisar, comprobar o auditar algo, o cuando pregunte «¿está todo bien?». El sistema te devuelve los problemas de verdad y tú se los cuentas sin inventar: si no hay ninguno, dilo también.
+- [[deshacer]] → deshace el último cambio de la puesta a punto. Úsalo en cuanto diga que te has equivocado, que vuelvas atrás, que restaures o que lo dejes todo como estaba: él manda.
+- [[nota:Lengua|8,5]] → su nota media actual en esa materia (0-10). Solo si te la dice él; se guarda como declarada.
 
-Si detectas que te has equivocado o él te corrige, arréglalo con [[renombrar:…]], [[borrar-unidad:…]] o [[sustituir:…]] en ese mismo turno y confírmaselo.`;
+Si detectas que te has equivocado o él te corrige, arréglalo con [[renombrar:…]], [[borrar-unidad:…]], [[sustituir:…]] o [[deshacer]] en ese mismo turno y confírmaselo.`;
 
 function formatSnapshot(snapshot: SetupSnapshot, checklist: SetupChecklist): string[] {
   const lines: string[] = [];
@@ -864,6 +945,11 @@ function formatSnapshot(snapshot: SetupSnapshot, checklist: SetupChecklist): str
     if (subject.classCount > 0) parts.push(`${subject.classCount} clases/semana`);
     if (subject.nextExam) parts.push(`próximo examen: ${subject.nextExam.title} el ${subject.nextExam.date}`);
     else parts.push('sin exámenes con fecha');
+    if (typeof subject.currentGrade === 'number') {
+      parts.push(
+        `nota actual ${subject.currentGrade}/10${subject.gradeSource === 'declarada' ? ' (declarada por él)' : ''}`
+      );
+    }
     if (subject.currentUnit) parts.push(`dando ahora: ${subject.currentUnit}`);
     lines.push(`- ${subject.name}: ${parts.join(' · ')}`);
   }
@@ -906,7 +992,12 @@ export function buildSetupSystemPrompt(
    * Lo que ya se habló en la entrevista los días anteriores (lo escribe
    * `agentMemory.ts`). Vacío el primer día: entonces no se añade nada.
    */
-  memory = ''
+  memory = '',
+  /**
+   * Auditoría real ejecutada justo antes de este turno (texto del sistema).
+   * El modelo no la calcula: la recibe hecha y solo la cuenta.
+   */
+  audit = ''
 ): string {
   const lines: string[] = [];
 
@@ -918,6 +1009,9 @@ export function buildSetupSystemPrompt(
   lines.push('CÓMO ENTREVISTAS (el orden importa: es lo que convierte la app en un plan real y no en una lista de deseos):');
   lines.push(
     '0. MANDA ÉL, SIEMPRE. El checklist de abajo es una guía, no una orden por encima del alumno. Si corrige un dato, dice que algo no es así, cambia de tema o pide saltarse un paso, hacéis ESO en este turno (con su etiqueta) y no vuelves a preguntar lo que acaba de responder. Una corrección suya no se discute: se aplica y se confirma.'
+  );
+  lines.push(
+    '0b. OBEDECER Y VOLVER ATRÁS. Si te pide revisar, comprobar o auditar algo, emite [[revisar:área]] y cuéntale los hallazgos REALES que te devuelve el sistema. Si dice que te has equivocado, que algo está mal montado o que vuelvas atrás, emite [[deshacer]] y vuelve a montarlo con sus datos en el mismo turno. Nunca digas que lo has arreglado sin haber emitido la etiqueta que lo arregla: si no puedes, dilo y pide el dato que falta.'
   );
   lines.push(
     '1. Una cosa por turno. Haces UNA pregunta concreta, esperas la respuesta, la anotas con etiquetas y confirmas en una línea lo que has guardado. Nada de cuestionarios largos.'
@@ -979,6 +1073,23 @@ export function buildSetupSystemPrompt(
   lines.push(
     'TERMINA SIEMPRE con UNA sola pregunta: la que toca DESPUÉS de lo que acabas de anotar. Nunca repitas la que él acaba de contestar ni vuelvas a pedir un dato ya guardado; si dudas de si está guardado, míralo en el ESTADO REAL del sistema.'
   );
+
+  /**
+   * La auditoría va AL FINAL A PROPÓSITO.
+   *
+   * El prompt se recorta por el centro cuando no cabe en el modelo (Groq mide el
+   * cupo por minuto) y se conservan la cabecera y el final. Con la auditoría y el
+   * estado en números al final, el modelo siempre tiene delante los datos reales
+   * —aunque el resto del estado se haya recortado— y no puede contestar «no hay
+   * ninguna unidad» ni inventarse materias que no existen.
+   */
+  if (audit.trim().length > 0) {
+    lines.push('');
+    lines.push(audit.trim());
+    lines.push(
+      'Esa auditoría y esos números son REALES: los acaba de leer el sistema de tu base de datos. La lista de materias es EXACTAMENTE la de «ESTADO EN NÚMEROS»: no nombres ninguna otra, ni siquiera si te suena de antes. Si una materia tiene N unidades (N mayor que 0), NUNCA digas que no tiene unidades: lo que falta es que él confirme que no falta ninguna. Si el número es 0, entonces sí le falta el temario. Si te pide arreglar algo, hazlo con las etiquetas en este mismo turno.'
+    );
+  }
 
   return lines.join('\n');
 }

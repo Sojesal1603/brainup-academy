@@ -15,7 +15,10 @@ import {
 } from '@/lib/aiEngine';
 import { buildSetupSystemPrompt, parseSetupTags, SETUP_CONVERSATION_TITLE } from '@/lib/setup';
 import { armPendingReplace, hasReplaceIntent, matchSubjectInMessage } from '@/lib/setupReplaceIntent';
-import { applySetupActions, getSetupState } from '@/lib/setupApply';
+import { applySetupActions, getSetupState, undoLastSetupChange } from '@/lib/setupApply';
+import { auditSetup } from '@/lib/setupAudit';
+import { hoursFromMessage, reviewArea, wantsUndo } from '@/lib/setupIntent';
+import { snapshotTemarioIfStale } from '@/lib/temarioRestore';
 import {
   buildLocalSetupReply,
   isLocalModeReply,
@@ -88,6 +91,10 @@ export async function POST(request: Request) {
   // instancia serverless recién arrancada, Ollama todavía no constaba.
   const aiAvailable = await hasAiProviderAsync();
 
+  /** «Deshaz eso»: el resultado se devuelve junto al turno del coordinador. */
+  let undoResult: { restored: string[]; problems: string[] } | null = null;
+  let undoChanged = false;
+
   try {
     const conversation = conversationId
       ? await prisma.aiConversation.findFirst({
@@ -104,6 +111,19 @@ export async function POST(request: Request) {
         data: { title: SETUP_CONVERSATION_TITLE },
       }));
 
+    /**
+     * OBEDIENCIA: si dice «deshaz eso» o «vuelve atrás», se hace ANTES de llamar
+     * al modelo. Obedecer al alumno no puede depender de que el proveedor emita
+     * una etiqueta, y menos cuando pide que se repare lo que ha quedado mal.
+     */
+    if (wantsUndo(message)) {
+      undoResult = await undoLastSetupChange();
+      undoChanged = undoResult.restored.length > 0;
+      if (undoChanged) {
+        console.log('[puesta-a-punto] deshecho el último cambio:', undoResult.restored.join(' | '));
+      }
+    }
+
     const [historyRows, state, memoryBlock] = await Promise.all([
       prisma.aiMessage.findMany({
         where: { conversationId: activeConversation.id },
@@ -116,7 +136,27 @@ export async function POST(request: Request) {
       loadMemoryBlock(MEMORY_SCOPE_COORDINATOR),
     ]);
 
-    const systemInstruction = buildSetupSystemPrompt(state.snapshot, state.checklist, memoryBlock);
+    /**
+     * «Revísame el temario»: la auditoría se ejecuta de verdad ANTES del modelo,
+     * así contesta con los problemas que existen en la base y no de memoria.
+     */
+    const auditArea = reviewArea(message);
+    const audit = auditArea ? await auditSetup(auditArea).catch(() => null) : null;
+
+    const undoNote =
+      undoResult && (undoResult.restored.length > 0 || undoResult.problems.length > 0)
+        ? `YA HAS HECHO ESTO EN ESTE TURNO (lo ha ejecutado el sistema por orden suya; no lo repitas, cuéntaselo): ${[
+            ...undoResult.restored,
+            ...undoResult.problems,
+          ].join(' · ')}`
+        : '';
+
+    const systemInstruction = buildSetupSystemPrompt(
+      state.snapshot,
+      state.checklist,
+      memoryBlock,
+      [undoNote, audit?.summary ?? ''].filter(Boolean).join('\n\n')
+    );
     const recent = trimHistory(historyRows);
 
     /**
@@ -194,7 +234,21 @@ export async function POST(request: Request) {
     // reemplazo. Es su orden, no una invención del modelo.
     const parsed = parseSetupTags(replyText);
 
-    let setupActions = parsed.actions;
+    // Un «deshacer» ya se ha ejecutado antes de llamar al modelo: no se repite.
+    let setupActions = parsed.actions.filter(
+      (action) => !(undoResult !== null && action.kind === 'undo')
+    );
+
+    /**
+     * Obediencia determinista de las horas: «3 horas al día entre semana» es un
+     * dato que él ha dicho. Si el modelo no ha emitido [[horas:…]], se apunta
+     * igual (15 h/semana en ese ejemplo).
+     */
+    if (!setupActions.some((action) => action.kind === 'hours')) {
+      const weekly = hoursFromMessage(message);
+      if (weekly !== null) setupActions = [{ kind: 'hours', weekly }, ...setupActions];
+    }
+
     if (replaceIntent && intentSubject) {
       const hasReplace = setupActions.some((action) => action.kind === 'replace');
       const hasUnits = setupActions.some((action) => action.kind === 'unit');
@@ -236,12 +290,22 @@ export async function POST(request: Request) {
     // tumbar la respuesta: si falla, se sigue con el texto ya generado.
     // Si el modelo contesta SOLO con etiquetas, el chat se quedaría con una
     // burbuja vacía. Se confirma lo aplicado en una línea y se sigue.
-    const assistantText =
+    const baseText =
       parsed.text.trim().length > 0
         ? parsed.text
         : applied.applied.length > 0
           ? `Anotado: ${applied.applied.join(' · ')}`
           : 'Entendido. Dime cuál es el siguiente dato y lo anoto.';
+    /**
+     * La revisión REAL se le enseña siempre, la haya pedido el alumno (auditoría
+     * ejecutada antes del modelo) o el modelo ([[revisar:…]]).
+     *
+     * Es deliberado: el modelo contó «no hay ninguna unidad» con 95 unidades en
+     * la base cuando el prompt se recortó. Los datos reales no pueden depender de
+     * que el modelo se acuerde de decirlos: si ha habido revisión, va en el chat.
+     */
+    const auditBlock = audit?.summary ?? applied.report ?? null;
+    const assistantText = auditBlock ? `${baseText}\n\n---\n\n${auditBlock}` : baseText;
     let assistantId = `local-${Date.now()}`;
     let assistantCreatedAt = new Date();
     try {
@@ -275,6 +339,12 @@ export async function POST(request: Request) {
     // El recuerdo del día se escribe después de contestar: la entrevista no se
     // retrasa por apuntar lo que se acaba de hablar.
     after(async () => {
+      // Un turno que cambia datos deja copia del temario: si algo se monta mal,
+      // hay de dónde volver aunque el proceso se reinicie.
+      if (applied.changed) {
+        const file = await snapshotTemarioIfStale(0).catch(() => null);
+        if (file) console.log(`[puesta-a-punto] copia de seguridad del temario: ${file}`);
+      }
       try {
         const remembered = await rememberConversation({
           scope: MEMORY_SCOPE_COORDINATOR,
@@ -297,10 +367,11 @@ export async function POST(request: Request) {
       provider,
       /** Respuesta sin IA: el cliente puede avisar de que el modo es local. */
       degraded,
-      changed: applied.changed,
+      changed: applied.changed || undoChanged,
       blocks: applied.blocks,
-      applied: applied.applied,
+      applied: [...(undoResult?.restored ?? []), ...applied.applied],
       problems: [
+        ...(undoResult?.problems ?? []),
         ...applied.problems,
         // Las etiquetas son protocolo interno: «[[unidad:1|…]]» no le dice nada al
         // alumno y parece que la app está rota. Se le cuenta qué ha pasado y qué
@@ -314,6 +385,8 @@ export async function POST(request: Request) {
           : []),
         ...(degradeReason ? [`Modo local: ${degradeReason}`] : []),
       ],
+      /** Auditoría real de este turno (si la ha habido). */
+      audit: audit?.summary ?? applied.report ?? null,
       checklist: applied.checklist,
       snapshot: applied.snapshot,
       reply: {

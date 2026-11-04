@@ -12,6 +12,7 @@ import {
   type SetupUnitSource,
 } from './setup';
 import { consumePendingReplace, hasPendingReplace } from './setupReplaceIntent';
+import { auditSetup } from './setupAudit';
 
 /** Opciones de aplicación de un turno. */
 export interface SetupApplyOptions {
@@ -49,6 +50,8 @@ export interface SetupApplyResult {
   blocks: number;
   snapshot: SetupSnapshot;
   checklist: SetupChecklist;
+  /** Auditoría real pedida con [[revisar:…]] en este turno (texto del sistema). */
+  report?: string;
 }
 
 function todayLabel(): string {
@@ -149,6 +152,9 @@ export async function getSetupSnapshot(): Promise<SetupSnapshot> {
           date: isoDay(new Date(exam.examDate)),
         })),
         currentUnit: inClass ? inClass.title : null,
+        currentGrade: subject.currentGrade,
+        targetGrade: subject.targetGrade,
+        gradeSource: subject.gradeSource,
       };
     }),
     setupCompletedAt: user?.setupCompletedAt ? isoDay(user.setupCompletedAt) : null,
@@ -178,6 +184,20 @@ export async function applySetupActions(
   const applied: string[] = [];
   const problems: string[] = [];
   let changed = false;
+  /** Texto de la auditoría real, si el coordinador ha pedido una. */
+  let auditReport: string | null = null;
+
+  /**
+   * Foto ANTES de tocar nada, para poder volver atrás con [[deshacer]].
+   *
+   * No se toma si el turno es un «deshacer» (sería la foto de lo que se está
+   * deshaciendo) ni si solo mira el estado ([[asignatura]]/[[origen]]/[[revisar]]).
+   */
+  const willUndo = actions.some((action) => action.kind === 'undo');
+  const willChange = actions.some(
+    (action) => action.kind !== 'focus' && action.kind !== 'source' && action.kind !== 'audit'
+  );
+  if (willChange && !willUndo) await captureUndoSnapshot();
 
   let subjects: SubjectRow[] = await prisma.subject.findMany({ orderBy: [{ order: 'asc' }] });
 
@@ -806,6 +826,68 @@ export async function applySetupActions(
         break;
       }
 
+      /**
+       * Revisar el curso de verdad.
+       *
+       * La etiqueta no pide al modelo que se acuerde de nada: dispara la
+       * auditoría determinista de `setupAudit.ts` y su resultado se le enseña al
+       * alumno tal cual (y el modelo lo cuenta si lo ha pedido él).
+       */
+      case 'audit': {
+        try {
+          const report = await auditSetup(action.area ?? 'todo');
+          auditReport = report.summary;
+          applied.push(
+            report.findings.length === 0
+              ? 'Revisión hecha: no he encontrado nada roto'
+              : `Revisión hecha: ${report.findings.length} ${
+                  report.findings.length === 1 ? 'problema encontrado' : 'problemas encontrados'
+                }`
+          );
+        } catch (error) {
+          problems.push(
+            `He intentado revisarlo pero la base de datos no ha respondido: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+        break;
+      }
+
+      /** Volver atrás: se repone la foto del turno anterior. */
+      case 'undo': {
+        const result = await undoLastSetupChange();
+        applied.push(...result.restored);
+        problems.push(...result.problems);
+        if (result.restored.length > 0) {
+          changed = true;
+          playlistDirty = true;
+          // El estado ha cambiado por detrás: se relee para que el chat y el
+          // checklist que se devuelven sean los de ahora mismo.
+          subjects = await prisma.subject.findMany({ orderBy: [{ order: 'asc' }] });
+          focus = focus ? subjects.find((subject) => subject.id === focus!.id) ?? null : null;
+        }
+        break;
+      }
+
+      /** Nota media actual declarada por el alumno. */
+      case 'grade': {
+        const subject = action.subject
+          ? (await findSubject(action.subject)) ?? (await createSubject(action.subject))
+          : focus;
+        if (!subject) {
+          problems.push('No sé de qué materia es esa nota: dime la asignatura y la anoto.');
+          break;
+        }
+        await prisma.subject.update({
+          where: { id: subject.id },
+          data: { currentGrade: action.value, gradeSource: 'declarada' },
+        });
+        applied.push(`Nota de ${subject.name}: ${action.value}/10 (declarada por ti)`);
+        changed = true;
+        break;
+      }
+
       case 'pau-target': {
         await updateDefaultProfile({ targetGradePau: action.value });
         applied.push(`Nota PAU objetivo: ${action.value}/14`);
@@ -829,7 +911,234 @@ export async function applySetupActions(
 
   const { snapshot, checklist } = await getSetupState();
 
-  return { applied, problems, changed, blocks, snapshot, checklist };
+  return { applied, problems, changed, blocks, snapshot, checklist, report: auditReport ?? undefined };
+}
+
+/**
+ * Deshacer: la foto del curso antes de cada turno.
+ *
+ * El alumno lo pidió con todas las letras: «si le digo haga algo y lo hace mal,
+ * debe hacerme caso y retroceder para volver a montarlo como es debido». Para eso
+ * hace falta saber cómo estaba el curso justo antes, y eso es esta foto: todas
+ * las unidades, exámenes, clases y los datos del perfil que la puesta a punto
+ * puede cambiar.
+ *
+ * Se guarda en memoria del proceso (no hay tabla nueva ni migración que puedas
+ * olvidar desplegar). En una instancia serverless cada arranque empieza sin foto:
+ * en ese caso el coordinador lo dice y se corrige dato por dato, en vez de
+ * fingir que ha vuelto atrás.
+ */
+const UNDO_TTL_MS = 30 * 60 * 1000;
+
+interface UndoSnapshot {
+  at: number;
+  topics: Awaited<ReturnType<typeof prisma.topic.findMany>>;
+  exams: Awaited<ReturnType<typeof prisma.exam.findMany>>;
+  classes: Awaited<ReturnType<typeof prisma.classPeriod.findMany>>;
+  subjects: Array<{
+    id: string;
+    isTracked: boolean;
+    syllabusComplete: boolean;
+    currentGrade: number;
+    targetGrade: number;
+    gradeSource: string;
+  }>;
+  user: {
+    weeklyHoursCap: number;
+    weeklyHoursDeclared: boolean;
+    studyMode: string;
+    targetGradePau: number;
+    timetableComplete: boolean;
+    setupCompletedAt: Date | null;
+  } | null;
+}
+
+let lastUndo: UndoSnapshot | null = null;
+
+async function captureUndoSnapshot(): Promise<void> {
+  try {
+    const [topics, exams, classes, subjects, user] = await Promise.all([
+      prisma.topic.findMany(),
+      prisma.exam.findMany(),
+      prisma.classPeriod.findMany(),
+      prisma.subject.findMany({
+        select: {
+          id: true,
+          isTracked: true,
+          syllabusComplete: true,
+          currentGrade: true,
+          targetGrade: true,
+          gradeSource: true,
+        },
+      }),
+      prisma.userProfile.findUnique({
+        where: { id: 'user_default' },
+        select: {
+          weeklyHoursCap: true,
+          weeklyHoursDeclared: true,
+          studyMode: true,
+          targetGradePau: true,
+          timetableComplete: true,
+          setupCompletedAt: true,
+        },
+      }),
+    ]);
+    lastUndo = { at: Date.now(), topics, exams, classes, subjects, user };
+  } catch (error) {
+    // Sin foto no hay deshacer, pero el turno sigue: la respuesta no se pierde.
+    console.warn(
+      '[puesta-a-punto] no he podido guardar la foto para deshacer:',
+      error instanceof Error ? error.message : String(error)
+    );
+    lastUndo = null;
+  }
+}
+
+/** ¿Hay algún cambio reciente que se pueda deshacer? */
+export function canUndoSetup(): boolean {
+  return lastUndo !== null && Date.now() - lastUndo.at <= UNDO_TTL_MS;
+}
+
+/**
+ * Repone el curso tal y como estaba antes del último turno.
+ *
+ * Lo que se creó en ese turno se quita; lo que se borró, vuelve con su id (para
+ * no romper lo que colgara de ello); los campos que se tocaron, se restauran.
+ * Después se recalcula el plan: un curso que vuelve atrás con el plan de después
+ * es peor que no deshacer.
+ */
+export async function undoLastSetupChange(): Promise<{ restored: string[]; problems: string[] }> {
+  const snapshot = lastUndo;
+  if (!snapshot) {
+    return {
+      restored: [],
+      problems: [
+        'No tengo ningún cambio reciente de la puesta a punto que deshacer. Dime qué quedó mal y lo corrijo dato por dato.',
+      ],
+    };
+  }
+  if (Date.now() - snapshot.at > UNDO_TTL_MS) {
+    lastUndo = null;
+    return {
+      restored: [],
+      problems: [
+        'El último cambio es de hace más de media hora, así que no lo deshago a ciegas: dime qué quedó mal y lo corrijo uno a uno (o restauramos la copia del temario).',
+      ],
+    };
+  }
+
+  const snapshotAt = new Date(snapshot.at);
+  const topicIds = snapshot.topics.map((row) => row.id);
+  const examIds = snapshot.exams.map((row) => row.id);
+  const classIds = snapshot.classes.map((row) => row.id);
+
+  try {
+    const outcome = await prisma.$transaction(
+      async (tx) => {
+        // 1. Fuera lo que se creó en este turno.
+        const removedTopics = await tx.topic.deleteMany({
+          where: { id: { notIn: topicIds }, createdAt: { gte: snapshotAt } },
+        });
+        const removedExams = await tx.exam.deleteMany({
+          where: { id: { notIn: examIds }, createdAt: { gte: snapshotAt } },
+        });
+        const removedClasses = await tx.classPeriod.deleteMany({ where: { id: { notIn: classIds } } });
+
+        // 2. Vuelven las unidades que el turno se llevó por delante.
+        let topicsBack = 0;
+        for (const topic of snapshot.topics) {
+          const exists = await tx.topic.findUnique({ where: { id: topic.id }, select: { id: true } });
+          if (exists) continue;
+          const { createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = topic;
+          await tx.topic.create({ data: rest });
+          topicsBack++;
+        }
+
+        // 3. Exámenes y horario, tal y como estaban.
+        for (const exam of snapshot.exams) {
+          const exists = await tx.exam.findUnique({ where: { id: exam.id }, select: { id: true } });
+          const { id, createdAt: _createdAt, ...rest } = exam;
+          if (exists) await tx.exam.update({ where: { id }, data: rest });
+          else await tx.exam.create({ data: { id, ...rest } });
+        }
+        for (const period of snapshot.classes) {
+          const exists = await tx.classPeriod.findUnique({ where: { id: period.id }, select: { id: true } });
+          const data = {
+            dayOfWeek: period.dayOfWeek,
+            period: period.period,
+            startTime: period.startTime,
+            endTime: period.endTime,
+            subjectId: period.subjectId,
+            classroom: period.classroom,
+          };
+          if (exists) await tx.classPeriod.update({ where: { id: period.id }, data });
+          else await tx.classPeriod.create({ data: { id: period.id, ...data } });
+        }
+
+        // 4. Los datos de cada materia (notas, «solo horario», temario completo…).
+        for (const subject of snapshot.subjects) {
+          await tx.subject.updateMany({
+            where: { id: subject.id },
+            data: {
+              isTracked: subject.isTracked,
+              syllabusComplete: subject.syllabusComplete,
+              currentGrade: subject.currentGrade,
+              targetGrade: subject.targetGrade,
+              gradeSource: subject.gradeSource,
+            },
+          });
+        }
+
+        // 5. Horas, ritmo, nota objetivo y estado de la puesta a punto.
+        if (snapshot.user) {
+          await tx.userProfile.update({ where: { id: 'user_default' }, data: { ...snapshot.user } });
+        }
+
+        return {
+          removedTopics: removedTopics.count,
+          removedExams: removedExams.count,
+          removedClasses: removedClasses.count,
+          topicsBack,
+        };
+      },
+      { timeout: 20_000 }
+    );
+
+    lastUndo = null;
+
+    const restored = ['Deshecho: el curso vuelve a como estaba antes del último cambio.'];
+    if (outcome.topicsBack > 0) restored.push(`${outcome.topicsBack} unidades recuperadas`);
+    if (outcome.removedTopics > 0)
+      restored.push(`${outcome.removedTopics} unidades que se habían añadido de más, fuera`);
+    if (outcome.removedExams > 0) restored.push(`${outcome.removedExams} exámenes añadidos de más, fuera`);
+    if (outcome.removedClasses > 0) restored.push(`${outcome.removedClasses} clases añadidas de más, fuera`);
+
+    // El plan se rehace con el curso restaurado: si no, la agenda sigue contando
+    // un temario que ya no existe.
+    try {
+      const user = await prisma.userProfile.findUnique({
+        where: { id: 'user_default' },
+        select: { studyMode: true },
+      });
+      await regenerateWeeklyPlan((user?.studyMode as StudyMode) || 'athlete');
+    } catch (error) {
+      console.warn(
+        '[puesta-a-punto] el plan no se ha podido rehacer tras deshacer:',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+
+    return { restored, problems: [] };
+  } catch (error) {
+    return {
+      restored: [],
+      problems: [
+        `No he podido volver atrás porque la base de datos ha fallado: ${
+          error instanceof Error ? error.message : String(error)
+        }. No se ha tocado nada más; dime qué corregimos.`,
+      ],
+    };
+  }
 }
 
 /** Cierra la puesta a punto (la marca como terminada). */
