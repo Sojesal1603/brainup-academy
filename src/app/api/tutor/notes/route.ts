@@ -11,7 +11,7 @@ import {
   type NoteQuality,
 } from '@/lib/apuntesIa';
 import { noteExcerpt } from '@/lib/tutorNotes';
-import { hasAiProvider, hasAnyFreeKey, runAiText, TutorError } from '@/lib/aiEngine';
+import { hasAiProviderAsync, hasAnyFreeKey, runAiText, TutorError } from '@/lib/aiEngine';
 import { rememberNoteDraft, takeNoteDraft } from '@/lib/noteDrafts';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
 
@@ -380,11 +380,15 @@ export async function POST(request: Request) {
       },
       { status: 400 }
     );
-  }    if (!hasAiProvider()) {
+  }
+
+    // Sondeo real (incluye el motor local): en una instancia serverless recién
+    // arrancada Ollama todavía no constaba y se negaba a redactar sin motivo.
+    if (!(await hasAiProviderAsync())) {
       return NextResponse.json(
         {
           error:
-            'El motor de IA no está configurado: falta GEMINI_API_KEY (o GROQ_API_KEY) en el archivo .env, así que no puedo redactar los apuntes.',
+            'El motor de IA no está configurado: falta GEMINI_API_KEY (o GROQ_API_KEY) en el archivo .env, y no hay ningún modelo local levantado, así que no puedo redactar los apuntes.',
         },
         { status: 503 }
       );

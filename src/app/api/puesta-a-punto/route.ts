@@ -7,7 +7,7 @@ import {
 } from '@/lib/agentMemory';
 import { polishMemoryWithAi } from '@/lib/agentMemoryPolish';
 import {
-  hasAiProvider,
+  hasAiProviderAsync,
   runAiText,
   TUTOR_MAX_HISTORY_MESSAGES,
   TutorError,
@@ -74,7 +74,9 @@ export async function POST(request: Request) {
 
   // Sin clave configurada NO se corta la conversación: se responde en modo local
   // y se le dice al alumno cómo poner la clave para tener la entrevista completa.
-  const aiAvailable = hasAiProvider();
+  // Se comprueba (y se sondea el motor local) antes de decidir nada: en una
+  // instancia serverless recién arrancada, Ollama todavía no constaba.
+  const aiAvailable = await hasAiProviderAsync();
 
   try {
     const conversation = conversationId
@@ -187,26 +189,54 @@ export async function POST(request: Request) {
       }
     }
 
-    const applied =
-      setupActions.length > 0
-        ? await applySetupActions(setupActions, {
-            allowReplace: replaceIntent,
-            allowReplaceSubject: intentSubject,
-          })
-        : { applied: [], problems: [], changed: false, blocks: 0, ...state };
+    // Lo que el modelo ha anotado se aplica aquí. Si la escritura falla, el
+    // turno NO se pierde: la respuesta ya está escrita y se devuelve con el
+    // problema explicado, en vez de un 500 que borra la conversación entera.
+    let applied: Awaited<ReturnType<typeof applySetupActions>>;
+    try {
+      applied =
+        setupActions.length > 0
+          ? await applySetupActions(setupActions, {
+              allowReplace: replaceIntent,
+              allowReplaceSubject: intentSubject,
+            })
+          : { applied: [], problems: [], changed: false, blocks: 0, ...state };
+    } catch (applyError) {
+      console.error('[puesta-a-punto] no se han podido guardar los datos del turno:', applyError);
+      applied = {
+        applied: [],
+        problems: [
+          'He entendido lo que me dices, pero NO se ha podido guardar en el sistema (la base de datos no ha respondido). Dímelo otra vez en un momento y lo aplico.',
+        ],
+        changed: false,
+        blocks: 0,
+        ...state,
+      };
+    }
 
-    const [, assistantMessage] = await prisma.$transaction([
-      prisma.aiMessage.create({
-        data: { conversationId: activeConversation.id, role: 'user', content: message },
-      }),
-      prisma.aiMessage.create({
-        data: {
-          conversationId: activeConversation.id,
-          role: 'assistant',
-          content: parsed.text,
-        },
-      }),
-    ]);
+    // Guardar el turno es importante (es la memoria del chat) pero no puede
+    // tumbar la respuesta: si falla, se sigue con el texto ya generado.
+    const assistantText = parsed.text;
+    let assistantId = `local-${Date.now()}`;
+    let assistantCreatedAt = new Date();
+    try {
+      const [, assistantMessage] = await prisma.$transaction([
+        prisma.aiMessage.create({
+          data: { conversationId: activeConversation.id, role: 'user', content: message },
+        }),
+        prisma.aiMessage.create({
+          data: {
+            conversationId: activeConversation.id,
+            role: 'assistant',
+            content: parsed.text,
+          },
+        }),
+      ]);
+      assistantId = assistantMessage.id;
+      assistantCreatedAt = assistantMessage.createdAt;
+    } catch (persistError) {
+      console.error('[puesta-a-punto] el turno no se ha podido guardar:', persistError);
+    }
 
     if (applied.applied.length > 0) {
       console.log(
@@ -249,16 +279,32 @@ export async function POST(request: Request) {
       checklist: applied.checklist,
       snapshot: applied.snapshot,
       reply: {
-        id: assistantMessage.id,
+        id: assistantId,
         role: 'assistant',
-        content: assistantMessage.content,
-        createdAt: assistantMessage.createdAt,
+        content: assistantText,
+        createdAt: assistantCreatedAt,
       },
     });
   } catch (error) {
     if (error instanceof TutorError) {
       console.error('[puesta-a-punto]', error.status, error.message, error.detail ?? '');
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    // Un fallo de base de datos tiene un mensaje propio y accionable: el genérico
+    // («Revisa la consola del servidor») no le dice nada a quien está montando
+    // el curso desde el móvil.
+    const prismaCode =
+      typeof (error as { code?: unknown })?.code === 'string'
+        ? (error as { code: string }).code
+        : '';
+    if (prismaCode.startsWith('P')) {
+      console.error('[puesta-a-punto] error de base de datos:', prismaCode, error);
+      return NextResponse.json(
+        {
+          error: `La base de datos no ha respondido (${prismaCode}). No se ha guardado nada de este turno: revisa DATABASE_URL y que Supabase esté accesible, y vuelve a intentarlo.`,
+        },
+        { status: 503 }
+      );
     }
     console.error('[puesta-a-punto] Error inesperado:', error);
     return NextResponse.json(

@@ -540,6 +540,22 @@ export function hasAiProvider(): boolean {
 }
 
 /**
+ * ¿Hay IA de verdad en ESTE proceso?
+ *
+ * `hasAiProvider()` es síncrona y solo sabe lo que ya está en memoria. En un
+ * proceso recién arrancado —o en cada instancia serverless, que arranca de
+ * cero— todavía no se ha sondeado Ollama, así que con el motor local levantado
+ * y sin claves de nube la app contestaba «no hay IA» y se quedaba en modo
+ * local. Las rutas de chat usan esta versión, que sondea antes de decidir.
+ */
+export async function hasAiProviderAsync(): Promise<boolean> {
+  if (hasAiProvider()) return true;
+  // `probeOllama` está cacheado: como mucho cuesta ~1 s una vez cada 90 s.
+  await probeOllama();
+  return getConfiguredProviders().length > 0;
+}
+
+/**
  * ¿Queda alguna vía con cupo? Es lo que evita encadenar treinta intentos
  * condenados a 429 (apuntes) o avisar de un enfriamiento que no existe.
  */
@@ -1190,11 +1206,24 @@ const TRANSIENT_BACKOFF_MS = [700, 1800];
  * El presupuesto de tiempo de un turno de IA (toda la cadena de modelos).
  * Con tope, el que llama sabe cuánto espera como mucho y puede responder en
  * local en vez de dejar al alumno mirando el chat.
+ *
+ * En Netlify la función se corta a los pocos segundos (10 s en el plan
+ * gratuito, 26 s en el de pago). Un presupuesto mayor no da más tiempo: la
+ * plataforma mata la petición y el alumno no recibe ni la respuesta ni el
+ * respaldo local. Por eso allí se conforma con 7 s, que es lo que tarda un
+ * flash en contestar cuando el proveedor va bien.
  */
-export const AI_TEXT_BUDGET_MS = 30_000;
+function aiTurnBudgetMs(): number {
+  const raw = Number(process.env.AI_BUDGET_MS);
+  if (Number.isFinite(raw) && raw >= 2_000) return raw;
+  if (process.env.NETLIFY) return 7_000;
+  return 30_000;
+}
+
+export const AI_TEXT_BUDGET_MS = aiTurnBudgetMs();
 
 /** Tope de un solo intento, aunque al turno le quede presupuesto de sobra. */
-export const AI_ATTEMPT_MAX_MS = 16_000;
+export const AI_ATTEMPT_MAX_MS = Math.min(16_000, AI_TEXT_BUDGET_MS);
 
 /** Por debajo de esto no se empieza un intento nuevo: no daría tiempo a nada. */
 const MIN_ATTEMPT_MS = 4_000;
@@ -1281,6 +1310,29 @@ function describeHttpError(provider: AiProvider, status: number, providerMessage
 }
 
 /** Aplana la respuesta de la API de Interactions para quedarnos con el texto. */
+/**
+ * Historial de chat → pasos de la API de Interactions (Gemini).
+ *
+ * No todos los llamadores mandan `history` (la puesta a punto solo reenviaba
+ * `messages`), y Gemini, al no recibir nada, contestaba como si cada mensaje
+ * fuera el primero de la conversación: repetía preguntas ya respondidas y se
+ * olvidaba de las correcciones del turno anterior. Con esto, cualquier ruta
+ * que pase historial en formato chat tiene memoria en TODOS los proveedores.
+ */
+function chatMessagesToSteps(messages: ChatMessage[]): unknown[] {
+  const steps: unknown[] = [];
+  for (const message of messages) {
+    const content = String(message?.content ?? '').trim();
+    if (content.length === 0) continue;
+    if (message.role === 'user') {
+      steps.push(buildUserInputStep(content));
+    } else if (message.role === 'assistant') {
+      steps.push({ type: 'model_output', content: [{ type: 'text', text: content }] });
+    }
+  }
+  return steps;
+}
+
 export function extractTutorText(steps: unknown[]): string {
   const chunks: string[] = [];
   for (const step of steps) {
@@ -1319,11 +1371,35 @@ interface OpenAiChatPayload {
 }
 interface GeminiPayload {
   steps?: unknown[];
+  /** Texto plano, por si la API deja de devolver `steps`. */
+  output_text?: string;
+  /** Formato clásico de GenerateContent, por si se cae a ese endpoint. */
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   error?: { message?: string };
 }
 
+/**
+ * El texto del modelo, mirando las tres formas en que puede llegar.
+ * Antes solo se leían los `steps`: si el proveedor cambiaba de sobre, la app
+ * lo interpretaba como «respuesta vacía» y se degradaba sin motivo.
+ */
+function extractGeminiText(payload: GeminiPayload | null): string {
+  const fromSteps = extractTutorText(Array.isArray(payload?.steps) ? payload.steps : []);
+  if (fromSteps) return fromSteps;
+  const flat = typeof payload?.output_text === 'string' ? payload.output_text.trim() : '';
+  if (flat) return flat;
+  const parts = payload?.candidates?.[0]?.content?.parts ?? [];
+  return parts.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('').trim();
+}
+
 async function callGemini(params: TransportParams): Promise<{ text: string; steps: unknown[] }> {
-  const input = [...(params.history ?? []), buildUserInputStep(params.message, params.attachments ?? [])];
+  // Si el llamador ya manda pasos crudos, esos mandan (llevan los adjuntos del
+  // turno). Si no, se reconstruye la conversación desde el historial de chat.
+  const history =
+    params.history && params.history.length > 0
+      ? params.history
+      : chatMessagesToSteps(params.messages ?? []);
+  const input = [...history, buildUserInputStep(params.message, params.attachments ?? [])];
   let res: Response;
   try {
     res = await fetch(GEMINI_INTERACTIONS_ENDPOINT, {
@@ -1352,7 +1428,7 @@ async function callGemini(params: TransportParams): Promise<{ text: string; step
     throw describeHttpError('gemini', res.status, payload?.error?.message || `HTTP ${res.status}`);
   }
   const steps = Array.isArray(payload?.steps) ? payload.steps : [];
-  const text = extractTutorText(steps);
+  const text = extractGeminiText(payload);
   if (!text) {
     throw new TutorError('El modelo no ha devuelto ninguna respuesta. Reinténtalo.', 502, 'Respuesta vacía del proveedor');
   }
@@ -1628,7 +1704,11 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
               apiKey,
               model: candidate.model,
               systemInstruction,
+              // Se pasan las dos formas del historial: los pasos crudos cuando
+              // los hay (llevan los adjuntos) y el chat para reconstruirlos
+              // cuando el llamador solo manda `messages`.
               history: params.history ?? [],
+              messages: params.messages ?? [],
               message: params.message,
               attachments: params.attachments ?? [],
               timeoutMs: attemptTimeoutMs,

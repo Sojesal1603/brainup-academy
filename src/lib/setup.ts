@@ -286,8 +286,17 @@ export function parseSetupTags(raw: string): SetupParseResult {
           return '';
         }
         case 'renombrar': {
-          const from = clean(parts[0]);
-          const to = clean(parts[1]);
+          let from = clean(parts[0]);
+          let to = clean(parts[1]);
+          // El protocolo se lo enseña como `[[renombrar:Viejo=Nuevo]]`, pero
+          // aquí solo se partía por «|»: la etiqueta que el propio prompt pide
+          // se rechazaba y la corrección del alumno se perdía en silencio. Se
+          // aceptan las dos formas (y también el orden inverso con «|»).
+          if (!to && from.includes('=')) {
+            const [left, ...rest] = from.split('=');
+            from = clean(left);
+            to = clean(rest.join('='));
+          }
           if (!from || !to) {
             rejected.push(whole);
             return '';
@@ -883,6 +892,9 @@ export function buildSetupSystemPrompt(
   lines.push('');
   lines.push('CÓMO ENTREVISTAS (el orden importa: es lo que convierte la app en un plan real y no en una lista de deseos):');
   lines.push(
+    '0. MANDA ÉL, SIEMPRE. El checklist de abajo es una guía, no una orden por encima del alumno. Si corrige un dato, dice que algo no es así, cambia de tema o pide saltarse un paso, hacéis ESO en este turno (con su etiqueta) y no vuelves a preguntar lo que acaba de responder. Una corrección suya no se discute: se aplica y se confirma.'
+  );
+  lines.push(
     '1. Una cosa por turno. Haces UNA pregunta concreta, esperas la respuesta, la anotas con etiquetas y confirmas en una línea lo que has guardado. Nada de cuestionarios largos.'
   );
   lines.push(
@@ -940,7 +952,7 @@ export function buildSetupSystemPrompt(
   lines.push(buildSystemKnowledgeForAi());
   lines.push('');
   lines.push(
-    'TERMINA SIEMPRE con la siguiente pregunta (una sola) para que él solo tenga que responder.'
+    'TERMINA SIEMPRE con UNA sola pregunta: la que toca DESPUÉS de lo que acabas de anotar. Nunca repitas la que él acaba de contestar ni vuelvas a pedir un dato ya guardado; si dudas de si está guardado, míralo en el ESTADO REAL del sistema.'
   );
 
   return lines.join('\n');

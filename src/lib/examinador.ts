@@ -10,7 +10,7 @@
  */
 
 import { prisma } from './prisma';
-import { hasAiProvider, runAiText } from './tutor';
+import { hasAiProviderAsync, runAiText } from './tutor';
 import type { BlockResult, ExamBlock, ExamGrade, ExamPackage } from './examenTypes';
 
 export type { BlockResult, ExamBlock, ExamGrade, ExamPackage } from './examenTypes';
@@ -231,7 +231,8 @@ export async function buildExamPackage(subjectId: string): Promise<ExamPackage> 
     throw new Error('Esta asignatura aún no tiene temas en el banco. Añádelos en el Cuaderno para generar simulacros.');
   }
 
-  if (!hasAiProvider()) {
+  // Sondeo real: el motor local también sirve para redactar el simulacro.
+  if (!(await hasAiProviderAsync())) {
     return { source: 'local', blocks: localBlocks(topics) };
   }
 
@@ -317,7 +318,7 @@ export async function gradeWithRubric(params: {
   blocks: ExamBlock[];
   answers: string[];
 }): Promise<AiGrading | null> {
-  if (!hasAiProvider()) return null;
+  if (!(await hasAiProviderAsync())) return null;
 
   const examText = params.blocks
     .map(

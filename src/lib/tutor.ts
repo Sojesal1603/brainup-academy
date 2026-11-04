@@ -32,6 +32,7 @@ export {
   getGeminiKey,
   getGroqKey,
   hasAiProvider,
+  hasAiProviderAsync,
   getEngineStatus,
   extractTutorText,
   runAiText,
@@ -275,6 +276,9 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
   lines.push('');
   lines.push(
     'NUNCA inventes su nivel ni sus notas. Si no hay medición de una unidad, no la des por sabida ni por floja: pregúntale.'
+  );
+  lines.push(
+    'CORRECCIONES DEL ALUMNO: cuando te corrija un dato que él mismo te dio antes (una nota, una unidad, una fecha, una definición de su profesor), la versión buena es la SUYA. Aplícala y sigue desde ahí; no vuelvas a la anterior, no se la discutas y no le pidas que repita la corrección. Si te pide «explícamelo sin preguntas», obedece y explica.'
   );
   lines.push(LEVEL_TAG_INSTRUCTION);
   lines.push('');

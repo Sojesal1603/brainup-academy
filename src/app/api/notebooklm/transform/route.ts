@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { runAiText, hasAiProvider, hasAnyFreeKey, type ChatMessage } from '@/lib/aiEngine';
+import { runAiText, hasAiProviderAsync, hasAnyFreeKey, type ChatMessage } from '@/lib/aiEngine';
 import { formatNotebookLmContent } from '@/lib/notebooklm';
 import { sanitizeNoteContent, NOTE_WRITER_INSTRUCTIONS } from '@/lib/apuntesIa';
 
@@ -17,9 +17,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'El contenido en bruto de NotebookLM no puede estar vacío' }, { status: 400 });
     }
 
-    if (!hasAiProvider()) {
+    // Sondeo antes de decidir: el motor local también cuenta como proveedor y en
+    // serverless todavía no consta en el primer turno de cada instancia.
+    if (!(await hasAiProviderAsync())) {
       return NextResponse.json(
-        { error: 'No hay proveedor de IA configurado en .env (GEMINI_API_KEY o GROQ_API_KEY)' },
+        {
+          error:
+            'No hay proveedor de IA disponible: ni GEMINI_API_KEY/GROQ_API_KEY en el entorno ni un modelo local levantado.',
+        },
         { status: 503 }
       );
     }

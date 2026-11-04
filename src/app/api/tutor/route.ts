@@ -5,7 +5,7 @@ import { polishMemoryWithAi } from '@/lib/agentMemoryPolish';
 import {
   TUTOR_MAX_HISTORY_MESSAGES,
   buildTutorSystemPrompt,
-  hasAiProvider,
+  hasAiProviderAsync,
   parseTutorResult,
   runAiText,
   TutorError,
@@ -218,15 +218,10 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!hasAiProvider()) {
-    return NextResponse.json(
-      {
-        error:
-          'El Tutor IA aún no está configurado: falta la clave GEMINI_API_KEY (o GROQ_API_KEY) en el archivo .env. Crea una gratis en Google AI Studio (aistudio.google.com) o en Groq (console.groq.com) y pégala en .env.',
-      },
-      { status: 503 }
-    );
-  }
+  // OJO: aquí NO se corta la conversación por no haber clave. Si no hay ningún
+  // motor (ni clave en la nube ni Ollama levantado), el catedrático contesta
+  // con el respaldo local unas líneas más abajo: el chat del alumno no puede
+  // quedarse en un error por configuración.
 
   try {
     const agent = await prisma.aiAgent.findUnique({
@@ -507,6 +502,16 @@ export async function POST(request: Request) {
     let degraded = false;
 
     try {
+      // Se sondea antes de gastar el turno: en serverless cada instancia arranca
+      // sin saber si hay modelo local, y sin esto un Ollama levantado se
+      // ignoraba y el alumno recibía un «no hay IA» falso.
+      if (!(await hasAiProviderAsync())) {
+        throw new TutorError(
+          'Ahora mismo no hay ningún motor de IA disponible (ninguna clave con cupo y ningún modelo local), así que te contesto con lo que el sistema sabe de tu curso.',
+          503,
+          'sin proveedores de IA disponibles'
+        );
+      }
       const result = await runAiText({
         systemInstruction,
         messages: toChatMessages(recentHistory),
