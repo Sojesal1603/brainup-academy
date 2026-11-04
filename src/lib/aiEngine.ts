@@ -32,7 +32,7 @@
  *   AI_PROVIDER         "auto" (Gemini primero), "gemini", "groq", "openrouter" u "ollama".
  */
 
-export type AiProvider = 'gemini' | 'groq' | 'openrouter' | 'ollama' | 'local';
+export type AiProvider = 'gemini' | 'groq' | 'openrouter' | 'nvidia' | 'ollama' | 'local';
 
 /** Un turno de conversación tal y como lo entienden los proveedores OpenAI. */
 export interface ChatMessage {
@@ -446,6 +446,59 @@ const OPENROUTER_STATIC_POOL = [
 /* Claves y disponibilidad                                             */
 /* ------------------------------------------------------------------ */
 
+/** Llamada al endpoint oficial de NVIDIA (integrate.api.nvidia.com).
+ * Igual que `callOpenAiCompatible` pero con su propia clave y dominio.
+ * El modelo suele venir especificado (ej. `nemotron` o `nvidia/nemotron`) y la
+ * clave debe ser `NVIDIA_API_KEY`.
+ */
+async function callNvidia(params: TransportParams): Promise<{ text: string }> {
+  const endpoint = 'https://integrate.api.nvidia.com/v1/chat/completions';
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${params.apiKey ?? ''}`,
+  };
+  const body = {
+    model: params.model ?? 'nemotron',
+    messages: openAiMessages(params, 'nvidia'),
+    temperature: 0.4,
+    max_tokens: params.maxTokens ?? 2048,
+  };
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
+    });
+  } catch (error) {
+    throw new TutorError(
+      'No se pudo contactar con el servicio de IA de NVIDIA. Comprueba tu conexión e inténtalo de nuevo.',
+      502,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+  const payload = (await res.json().catch(() => null)) as NvidiaPayload | null;
+  if (!res.ok) {
+    const providerMessage =
+      typeof payload?.error === 'object'
+        ? payload?.error?.message
+        : typeof payload?.error === 'string'
+          ? payload.error
+          : undefined;
+    throw describeHttpError('nvidia', res.status, providerMessage || `HTTP ${res.status}`);
+  }
+  const text = (payload?.choices?.[0]?.message?.content || '').trim();
+  if (!text) {
+    throw new TutorError(
+      'NVIDIA no ha devuelto ninguna respuesta. Reinténtalo.',
+      502,
+      'Respuesta vacía del proveedor'
+    );
+  }
+  return { text };
+}
+
 /** Máximo de claves por proveedor: las extra se numeran hasta aquí. */
 export const MAX_KEYS_PER_PROVIDER = 4;
 
@@ -531,12 +584,18 @@ export function getOpenRouterKey(): string | null {
   return getProviderKeys('openrouter')[0]?.key ?? null;
 }
 
+export function getNvidiaKey(): string | null {
+  return getProviderKeys('nvidia')[0]?.key ?? null;
+}
+
 export function getConfiguredProviders(): AiProvider[] {
   const providers: AiProvider[] = [];
   if (getApiKey('gemini')) providers.push('gemini');
   if (getApiKey('groq')) providers.push('groq');
   // OpenRouter va DESPUÉS de Groq y antes del modelo local: es la tercera vía.
   if (getApiKey('openrouter')) providers.push('openrouter');
+  // NVIDIA usa su propia clave y endpoint propio, tras OpenRouter.
+  if (getApiKey('nvidia')) providers.push('nvidia');
   // El motor local va SIEMPRE el último: la nube escribe mejor.
   const mode = ollamaMode();
   if (mode === 'on') providers.push('ollama');
@@ -661,6 +720,7 @@ function scoreOpenRouterModel(name: string): number | null {
   if (/mistral|mixtral/i.test(name)) return 12500;
   if (/llama-3\.3|llama-4/i.test(name)) return 12000;
   if (/gpt-oss/i.test(name)) return 11500;
+  if (/nvidia\/nemotron/i.test(name)) return 12500;
   return 9000;
 }
 
@@ -673,9 +733,20 @@ function scoreOllamaModel(name: string): number | null {
   return 5000;
 }
 
+/** Puntuación de un modelo NVIDIA (Nemotron y familia) desde su endpoint propio.
+ * El modelo estándar es `nvidia/nemotron:free` en OpenRouter, pero cuando se
+ * usa la clave NVIDIA_API_KEY directamente contra `https://integrate.api.nvidia.com/v1`
+ * también entran modelos como `nemotron` o `NVIDIA/nvidia-research`.
+ */
+function scoreNvidiaModel(name: string): number | null {
+  if (!name.toLowerCase().includes('nemotron')) return null;
+  if (/whisper|tts|guard|audio|vision|image|embedding/i.test(name)) return null;
+  // Nemotron usualmente escribe bien y aguanta redacción larga.
+  return 12500;
+}
+
 /* ------------------------------------------------------------------ */
 /* Catálogos reales (con caché)                                        */
-/* ------------------------------------------------------------------ */
 
 interface GeminiModelsPayload {
   models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
@@ -685,6 +756,16 @@ interface OpenAiModelsPayload {
 }
 interface OllamaModelsPayload {
   models?: Array<{ name?: string }>;
+}
+interface NvidiaModelsPayload {
+  choices?: Array<{ message?: { content?: string } }>;
+  error?: { message?: string };
+}
+// Respuesta del endpoint https://integrate.api.nvidia.com/v1/chat/completions
+// Estructura simplificada: choices[0].message.content tiene el texto.
+interface NvidiaPayload {
+  choices?: Array<{ message?: { content?: string } }>;
+  error?: { message?: string };
 }
 
 const catalogCache = new Map<string, { at: number; list: string[] }>();
@@ -1776,6 +1857,18 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
             });
           } else if (candidate.provider === 'groq') {
             result = await callOpenAiCompatible('groq', GROQ_CHAT_ENDPOINT, {
+              apiKey,
+              model: candidate.model,
+              systemInstruction,
+              messages: params.messages ?? [],
+              message: params.message,
+              attachments: params.attachments ?? [],
+              readableTextAttachments: params.readableTextAttachments,
+              maxTokens: params.maxTokens,
+              timeoutMs: attemptTimeoutMs,
+            });
+          } else if (candidate.provider === 'nvidia') {
+            result = await callNvidia({
               apiKey,
               model: candidate.model,
               systemInstruction,
