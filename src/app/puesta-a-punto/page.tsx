@@ -1,5 +1,13 @@
+import nextDynamic from 'next/dynamic';
 import { ClipboardList } from 'lucide-react';
-import SetupChat, { type SetupMessage } from '@/components/setup/SetupChat';
+import type { SetupMessage } from '@/components/setup/SetupChat';
+import { ChatSkeleton } from '@/components/ui/Skeletons';
+
+// El chat del coordinador (532 líneas) se descarga al entrar; el progreso del
+// curso, que es lo primero que se mira, ya viene pintado del servidor.
+const SetupChat = nextDynamic(() => import('@/components/setup/SetupChat'), {
+  loading: () => <ChatSkeleton />,
+});
 import { prisma } from '@/lib/prisma';
 import { getSetupState } from '@/lib/setupApply';
 import { getConfiguredModelLabel } from '@/lib/aiEngine';

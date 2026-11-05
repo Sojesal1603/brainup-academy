@@ -6,8 +6,17 @@ import {
   retentionTone,
   type SrsReviewRow,
 } from '@/lib/srs';
-import ReviewQueue, { type ReviewItemView } from '@/components/srs/ReviewQueue';
-import RetentionPanel from '@/components/srs/RetentionPanel';
+import nextDynamic from 'next/dynamic';
+import type { ReviewItemView } from '@/components/srs/ReviewQueue';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
+
+// La cola y la analítica son interactivas y se cargan después de los KPIs.
+const ReviewQueue = nextDynamic(() => import('@/components/srs/ReviewQueue'), {
+  loading: () => <PanelSkeleton lines={4} />,
+});
+const RetentionPanel = nextDynamic(() => import('@/components/srs/RetentionPanel'), {
+  loading: () => <PanelSkeleton lines={3} />,
+});
 import { AlertTriangle, Gauge, History, Repeat, Target } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { ensureUserProfile } from '@/lib/userProfile';
 import {
   BarChart3,
   TrendingUp,
@@ -12,9 +13,8 @@ import {
 export const dynamic = 'force-dynamic';
 
 export default async function StatsPage() {
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
-  });
+  // Memoizado por petición: el Header del layout ya ha pedido este perfil.
+  const user = await ensureUserProfile();
 
   const subjects = await prisma.subject.findMany({
     include: {

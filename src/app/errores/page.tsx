@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import CreateErrorModal from '@/components/errores/CreateErrorModal';
+import CreateErrorLauncher from '@/components/errores/CreateErrorLauncher';
 import ErrorCard from '@/components/errores/ErrorCard';
 import { AlertOctagon, ShieldCheck, AlertTriangle, Filter, Sparkles } from 'lucide-react';
 import Link from 'next/link';
@@ -65,7 +65,7 @@ export default async function ErrorsPage({
             <Sparkles className="w-3.5 h-3.5 text-rose-400" />
             <span>Repasar Errores en Enfoque</span>
           </Link>
-          <CreateErrorModal subjects={subjects} />
+          <CreateErrorLauncher subjects={subjects} />
         </div>
       </div>
 

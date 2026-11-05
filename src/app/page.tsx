@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -11,6 +12,7 @@ import {
   Target,
 } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
+import { ensureUserProfile } from '@/lib/userProfile';
 import { buildReviewQueue } from '@/lib/srs';
 import { levelFromXp, weekKeyOf } from '@/lib/challenges';
 import HoyTocaEsto from '@/components/cuartel/HoyTocaEsto';
@@ -19,19 +21,16 @@ import { ensureTodayPlan } from '@/lib/dayPlan';
 import ModeSwitcher from '@/components/dashboard/ModeSwitcher';
 import ClassCheckIn from '@/components/cuartel/ClassCheckIn';
 import { getTodayClassCheckIn } from '@/lib/temario';
-import { getSetupState } from '@/lib/setupApply';
+import SetupCard from '@/components/dashboard/SetupCard';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
 import { StudyMode } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  // 1. Obtener datos del usuario
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
-  });
-
-  // 1b. El plan del día. Si no hay sesiones vivas se calculan aquí mismo (una
-  // sola vez): abrir la app ya deja «Hoy toca esto» listo, sin organizar nada.
+  // 1. Perfil (memoizado con `cache()`: la consulta que ya hizo el Header en
+  // esta misma petición no se repite) y plan del día.
+  const user = await ensureUserProfile();
   const dayPlan = await ensureTodayPlan();
 
   // 2. Bloques de HOY
@@ -40,6 +39,9 @@ export default async function DashboardPage() {
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
 
+  // 2. Bloques de HOY. En serie a propósito: con el pooler de Supabase
+  // (`connection_limit=1`) todas las consultas comparten una conexión, así que
+  // lanzarlas a la vez no ahorra tiempo y sí puede agotar el `pool_timeout`.
   const todayBlocks = await prisma.studyBlock.findMany({
     where: {
       date: {
@@ -57,32 +59,17 @@ export default async function DashboardPage() {
     orderBy: { orderIndex: 'asc' },
   });
 
-  const completedBlocksCount = todayBlocks.filter((b) => b.isCompleted).length;
-  const totalBlocksCount = todayBlocks.length;
-  const totalMinutesToday = todayBlocks.reduce(
-    (acc, b) => acc + (b.isCompleted ? b.durationMinutes : 0),
-    0
-  );
-
   // 3. Exámenes próximos con cuenta atrás
   const upcomingExams = await prisma.exam.findMany({
-    where: {
-      isCompleted: false,
-      examDate: { gte: startOfDay },
-    },
-    include: {
-      subject: true,
-    },
+    where: { isCompleted: false, examDate: { gte: startOfDay } },
+    include: { subject: true },
     orderBy: { examDate: 'asc' },
     take: 3,
   });
 
   // 3b. Entregas y tareas sincronizadas de Moodle
   const moodleTasks = await prisma.moodleTask.findMany({
-    where: {
-      isCompleted: false,
-      dueDate: { gte: startOfDay },
-    },
+    where: { isCompleted: false, dueDate: { gte: startOfDay } },
     include: { subject: true },
     orderBy: { dueDate: 'asc' },
     take: 4,
@@ -90,17 +77,19 @@ export default async function DashboardPage() {
 
   // 4. Hábitos de hoy
   const habits = await prisma.habit.findMany({
-    include: {
-      logs: {
-        where: {
-          date: {
-            gte: startOfDay,
-            lte: endOfDay,
-          },
-        },
-      },
-    },
+    include: { logs: { where: { date: { gte: startOfDay, lte: endOfDay } } } },
   });
+
+  // 4b. Chequeo de clase: qué asignaturas has tenido hoy y qué unidad se dio.
+  // Es lo que mantiene el temario actualizado sin pedirte que abras un libro.
+  const checkInItems = await getTodayClassCheckIn();
+
+  const completedBlocksCount = todayBlocks.filter((b) => b.isCompleted).length;
+  const totalBlocksCount = todayBlocks.length;
+  const totalMinutesToday = todayBlocks.reduce(
+    (acc, b) => acc + (b.isCompleted ? b.durationMinutes : 0),
+    0
+  );
 
   const habitItems = habits.map((h) => ({
     id: h.id,
@@ -109,10 +98,6 @@ export default async function DashboardPage() {
     streak: h.streak,
     isCompletedToday: h.logs.length > 0,
   }));
-
-  // 4b. Chequeo de clase: qué asignaturas has tenido hoy y qué unidad se dio.
-  // Es lo que mantiene el temario actualizado sin pedirte que abras un libro.
-  const checkInItems = await getTodayClassCheckIn();
 
   // 5. Repaso espaciado y retos: el Cuartel dice lo que toca hoy sin obligar a
   // entrar en las páginas. Los repasos vencidos se cuentan con el mismo motor
@@ -159,17 +144,6 @@ export default async function DashboardPage() {
     take: 3,
   });
 
-  // 6b. Puesta a punto: hasta que el curso no esté montado, el Cuartel lo dice
-  // claro en vez de mostrar un panel vacío sin explicar por qué.
-  const setup = await getSetupState();
-  const setupConversation = await prisma.aiConversation.findFirst({
-    where: { agentId: null, title: 'Puesta a punto' },
-    select: { id: true },
-  });
-  const setupPending = setup.checklist.pending.map((subject) => subject.name);
-  const showSetupCard =
-    !setup.snapshot.setupCompletedAt && (setupPending.length > 0 || !setup.snapshot.weeklyHoursDeclared);
-
   return (
     <div className="space-y-8">
       {/* Cabecera Táctica del Cuartel */}
@@ -190,40 +164,11 @@ export default async function DashboardPage() {
         <ModeSwitcher currentMode={(user?.studyMode as StudyMode) || 'athlete'} />
       </div>
 
-      {/* Puesta a punto: qué falta por montar y acceso directo a la entrevista */}
-      {showSetupCard && (
-        <div className="glass-card glow-emerald border-emerald-500/25 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <ClipboardList className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-bold text-slate-100">
-                  Tu curso está al {setup.checklist.percent}% de montado
-                </p>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {setupPending.length > 0 ? (
-                    <>
-                      Te falta el temario o los exámenes de:{' '}
-                      <span className="text-slate-200">{setupPending.join(', ')}</span>.
-                    </>
-                  ) : (
-                    <>Solo falta que confirmes cuántas horas puedes estudiar a la semana.</>
-                  )}{' '}
-                  El coordinador te lo pregunta paso a paso y lo anota él mismo.
-                </p>
-              </div>
-            </div>
-
-            <Link
-              href="/puesta-a-punto"
-              className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shrink-0"
-            >
-              {setupConversation ? 'Continuar la puesta a punto' : 'Empezar la puesta a punto'}
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-        </div>
-      )}
+      {/* Puesta a punto: qué falta por montar y acceso directo a la entrevista.
+          Va en su propio Suspense: su cálculo no retrasa el resto del Cuartel. */}
+      <Suspense fallback={<PanelSkeleton lines={1} />}>
+        <SetupCard />
+      </Suspense>
 
       {/* Tarjetas de Métricas Rápidas */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

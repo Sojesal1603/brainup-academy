@@ -1,11 +1,25 @@
+import nextDynamic from 'next/dynamic';
 import { prisma } from '@/lib/prisma';
-import MoodleConnector from '@/components/ajustes/MoodleConnector';
-import MoodleWsConnector from '@/components/ajustes/MoodleWsConnector';
+import { ensureUserProfile } from '@/lib/userProfile';
 import { getMoodleStatus } from '@/lib/moodleWsSync';
 import { readMoodleHealth } from '@/lib/moodleSelfHeal';
-import AiEngineCard from '@/components/ajustes/AiEngineCard';
-import GradesPanel from '@/components/ajustes/GradesPanel';
 import AccesoMovil from '@/components/ajustes/AccesoMovil';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
+
+// Ajustes es un panel de paneles: cada uno baja cuando se va a ver, no todos
+// de golpe al abrir la sección.
+const MoodleWsConnector = nextDynamic(() => import('@/components/ajustes/MoodleWsConnector'), {
+  loading: () => <PanelSkeleton lines={4} />,
+});
+const MoodleConnector = nextDynamic(() => import('@/components/ajustes/MoodleConnector'), {
+  loading: () => <PanelSkeleton lines={2} />,
+});
+const AiEngineCard = nextDynamic(() => import('@/components/ajustes/AiEngineCard'), {
+  loading: () => <PanelSkeleton lines={3} />,
+});
+const GradesPanel = nextDynamic(() => import('@/components/ajustes/GradesPanel'), {
+  loading: () => <PanelSkeleton lines={4} />,
+});
 import {
   Settings,
   Download,
@@ -21,9 +35,8 @@ import {
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
-  });
+  // Memoizado por petición: el Header del layout ya ha pedido este perfil.
+  const user = await ensureUserProfile();
 
   const [moodleStatus, moodleHealth] = await Promise.all([getMoodleStatus(), readMoodleHealth()]);
 

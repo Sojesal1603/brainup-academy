@@ -1,7 +1,14 @@
+import nextDynamic from 'next/dynamic';
 import { prisma } from '@/lib/prisma';
-import NotionWorkspace from '@/components/apuntes/NotionWorkspace';
 import MoodleMaterialsPanel from '@/components/apuntes/MoodleMaterialsPanel';
+import { EditorSkeleton } from '@/components/ui/Skeletons';
 import { BookOpen } from 'lucide-react';
+
+// El cuaderno es un editor completo (~900 líneas y las acciones que usa): su
+// código baja al entrar aquí, y mientras llega se ve su forma ya dibujada.
+const NotionWorkspace = nextDynamic(() => import('@/components/apuntes/NotionWorkspace'), {
+  loading: () => <EditorSkeleton />,
+});
 
 export const dynamic = 'force-dynamic';
 

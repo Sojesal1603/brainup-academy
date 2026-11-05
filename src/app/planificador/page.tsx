@@ -1,9 +1,17 @@
 import { prisma } from '@/lib/prisma';
+import { ensureUserProfile } from '@/lib/userProfile';
 import { calculateRequiredHoursForTopic } from '@/lib/planner';
 import { reviewDayProgress } from '@/lib/dayPlan';
 import { StudyMode } from '@/lib/types';
+import nextDynamic from 'next/dynamic';
 import ModeSwitcher from '@/components/dashboard/ModeSwitcher';
-import PlannerControls from '@/components/planificador/PlannerControls';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
+
+// El generador de plan (controles interactivos) baja aparte: la revisión del
+// día y el calendario de 7 días se leen sin esperar su código.
+const PlannerControls = nextDynamic(() => import('@/components/planificador/PlannerControls'), {
+  loading: () => <PanelSkeleton lines={2} />,
+});
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock, Repeat, Target } from 'lucide-react';
 import Link from 'next/link';
 
@@ -17,9 +25,8 @@ function localDayKey(date: Date): string {
 }
 
 export default async function PlannerPage() {
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
-  });
+  // Memoizado por petición: el Header del layout ya ha pedido este perfil.
+  const user = await ensureUserProfile();
 
   // Foto del avance real del día: es la misma que usa el motor al recalcular,
   // así que la tarjeta y el plan nuevo no pueden contar cosas distintas.

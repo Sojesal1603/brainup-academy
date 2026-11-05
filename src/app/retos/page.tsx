@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { ensureUserProfile } from '@/lib/userProfile';
 import {
   challengeProgress,
   levelFromXp,
@@ -33,7 +34,7 @@ export default async function ChallengesPage() {
   const weekLabel = weekRangeLabel(weekStart);
 
   const [profile, subjects, weekRows, pastRows, workData] = await Promise.all([
-    prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+    ensureUserProfile(),
     prisma.subject.findMany({ select: { id: true, name: true } }),
     prisma.weeklyChallenge.findMany({ where: { weekKey }, orderBy: { createdAt: 'asc' } }),
     prisma.weeklyChallenge.findMany({

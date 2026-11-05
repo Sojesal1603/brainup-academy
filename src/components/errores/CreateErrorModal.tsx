@@ -11,10 +11,12 @@ interface CreateErrorModalProps {
     name: string;
     topics: Array<{ id: string; title: string }>;
   }>;
+  /** Se monta ya abierto: el clic lo ha dado el lanzador. */
+  initialOpen?: boolean;
 }
 
-export default function CreateErrorModal({ subjects }: CreateErrorModalProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function CreateErrorModal({ subjects, initialOpen = false }: CreateErrorModalProps) {
+  const [isOpen, setIsOpen] = useState(initialOpen);
   const [isPending, startTransition] = useTransition();
 
   const [selectedSubjectId, setSelectedSubjectId] = useState(

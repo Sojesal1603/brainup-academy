@@ -2,7 +2,15 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
 import { agentSlug, looksLikeUuid } from '@/lib/agentSlug';
-import TutorChat from '@/components/brainup/TutorChat';
+import nextDynamic from 'next/dynamic';
+import { ChatSkeleton } from '@/components/ui/Skeletons';
+
+// El chat del catedrático es el componente más grande de la app (1.500 líneas
+// entre interfaz, adjuntos y render de apuntes). Viaja en su propio trozo y
+// solo al entrar a una conversación; el radar táctico ya está visible.
+const TutorChat = nextDynamic(() => import('@/components/brainup/TutorChat'), {
+  loading: () => <ChatSkeleton />,
+});
 import { getConfiguredModelLabel, parseTutorReply, type TutorStage } from '@/lib/tutor';
 import type { NoteProposal } from '@/lib/apuntesIa';
 import { MASTERY_SOURCE_META } from '@/lib/knowledge';

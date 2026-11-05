@@ -1,7 +1,15 @@
+import nextDynamic from 'next/dynamic';
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
-import PauExamRunner from '@/components/examen/PauExamRunner';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
+// La corrección no lleva estado ni manejadores: se renderiza en el servidor y
+// no envía JavaScript propio al móvil.
 import ExamResults from '@/components/examen/ExamResults';
+
+// El enunciado es interactivo (temporizador, respuestas): baja en su trozo.
+const PauExamRunner = nextDynamic(() => import('@/components/examen/PauExamRunner'), {
+  loading: () => <PanelSkeleton lines={4} />,
+});
 import type { ExamGrade, ExamPackage } from '@/lib/examenTypes';
 
 export const dynamic = 'force-dynamic';

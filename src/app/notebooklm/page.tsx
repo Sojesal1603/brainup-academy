@@ -1,5 +1,12 @@
+import nextDynamic from 'next/dynamic';
 import { prisma } from '@/lib/prisma';
-import NotebookLmStudio from '@/components/notebooklm/NotebookLmStudio';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
+
+// El estudio (interfaz completa y render de apuntes) se descarga al abrir la
+// sección, no con la navegación general.
+const NotebookLmStudio = nextDynamic(() => import('@/components/notebooklm/NotebookLmStudio'), {
+  loading: () => <PanelSkeleton lines={6} />,
+});
 
 export const dynamic = 'force-dynamic';
 

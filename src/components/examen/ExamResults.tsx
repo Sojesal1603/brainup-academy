@@ -1,4 +1,3 @@
-'use client';
 
 import Link from 'next/link';
 import { AlertTriangle, Award, Brain, RotateCcw, Target } from 'lucide-react';

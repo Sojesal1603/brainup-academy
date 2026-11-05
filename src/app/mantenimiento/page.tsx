@@ -2,11 +2,27 @@ import { prisma } from '@/lib/prisma';
 import { scanSystem } from '@/lib/maintenanceActions';
 import { loadMaintenanceInput } from '@/lib/maintenanceData';
 import { SEVERITY_META, type MaintenanceSeverity } from '@/lib/maintenance';
-import FixesPanel from '@/components/mantenimiento/FixesPanel';
-import ReportIssueForm from '@/components/mantenimiento/ReportIssueForm';
-import IssueTriageButton from '@/components/mantenimiento/IssueTriageButton';
-import IssuesList, { type IssueRow } from '@/components/mantenimiento/IssuesList';
-import SyllabusAudit from '@/components/mantenimiento/SyllabusAudit';
+import nextDynamic from 'next/dynamic';
+import type { IssueRow } from '@/components/mantenimiento/IssuesList';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
+
+// Los paneles interactivos del taller son la mitad del peso de la página; el
+// diagnóstico ya se lee del servidor antes de que lleguen.
+const FixesPanel = nextDynamic(() => import('@/components/mantenimiento/FixesPanel'), {
+  loading: () => <PanelSkeleton lines={3} />,
+});
+const ReportIssueForm = nextDynamic(() => import('@/components/mantenimiento/ReportIssueForm'), {
+  loading: () => <PanelSkeleton lines={2} />,
+});
+const IssueTriageButton = nextDynamic(() => import('@/components/mantenimiento/IssueTriageButton'), {
+  loading: () => <PanelSkeleton lines={1} />,
+});
+const IssuesList = nextDynamic(() => import('@/components/mantenimiento/IssuesList'), {
+  loading: () => <PanelSkeleton lines={3} />,
+});
+const SyllabusAudit = nextDynamic(() => import('@/components/mantenimiento/SyllabusAudit'), {
+  loading: () => <PanelSkeleton lines={2} />,
+});
 import {
   AlertOctagon,
   AlertTriangle,

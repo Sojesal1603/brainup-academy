@@ -1,6 +1,13 @@
+import nextDynamic from 'next/dynamic';
 import { Suspense } from 'react';
 import { prisma } from '@/lib/prisma';
-import FocusRoom from '@/components/enfoque/FocusRoom';
+import { PanelSkeleton } from '@/components/ui/Skeletons';
+
+// La sala (temporizador, ondas, registro de sesión) es lo más pesado de la
+// página y lo último que hace falta pintar: baja en su propio trozo.
+const FocusRoom = nextDynamic(() => import('@/components/enfoque/FocusRoom'), {
+  loading: () => <PanelSkeleton lines={4} />,
+});
 import { Timer, History, CheckCircle2, AlertCircle, XCircle } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';

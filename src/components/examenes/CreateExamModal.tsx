@@ -6,10 +6,15 @@ import { createExam } from '@/lib/actions';
 
 interface CreateExamModalProps {
   subjects: Array<{ id: string; name: string }>;
+  /**
+   * El lanzador ya ha recibido el clic: este componente se carga para estar
+   * abierto, no para enseñar otro botón que habría que volver a pulsar.
+   */
+  initialOpen?: boolean;
 }
 
-export default function CreateExamModal({ subjects }: CreateExamModalProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function CreateExamModal({ subjects, initialOpen = false }: CreateExamModalProps) {
+  const [isOpen, setIsOpen] = useState(initialOpen);
   const [isPending, startTransition] = useTransition();
 
   const [formData, setFormData] = useState({

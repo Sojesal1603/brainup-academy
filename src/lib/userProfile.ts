@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { cache } from 'react';
 import { prisma } from './prisma';
 
 /**
@@ -17,15 +18,22 @@ import { prisma } from './prisma';
  */
 export const DEFAULT_PROFILE_ID = 'user_default';
 
-/** Devuelve el perfil, creándolo si la base está recién migrada. */
-export async function ensureUserProfile() {
+/**
+ * Devuelve el perfil, creándolo si la base está recién migrada.
+ *
+ * `cache()` lo memoiza **por petición**: el Header del layout y la página que
+ * se está pintando lo piden a la vez, y así la base recibe una sola consulta en
+ * vez de dos idénticas. No cachea entre peticiones: si cambias tus ajustes, el
+ * siguiente render lo ve al instante.
+ */
+export const ensureUserProfile = cache(async () => {
   return prisma.userProfile.upsert({
     where: { id: DEFAULT_PROFILE_ID },
     // Si ya existe no se toca nada: es un «find or create» atómico.
     update: {},
     create: { id: DEFAULT_PROFILE_ID },
   });
-}
+});
 
 /**
  * Actualiza el perfil creándolo antes si hace falta.

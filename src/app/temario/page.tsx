@@ -1,7 +1,16 @@
+import nextDynamic from 'next/dynamic';
 import { BookOpenCheck, CalendarClock, Layers } from 'lucide-react';
-import TemarioBoard from '@/components/temario/TemarioBoard';
-import TemarioImporter from '@/components/temario/TemarioImporter';
+import { BoardSkeleton, PanelSkeleton } from '@/components/ui/Skeletons';
 import { getTemarioSubjects } from '@/lib/temario';
+
+// Tablero e importador solo se descargan si se entra al temario, y cada uno
+// con su propio esqueleto: el resumen de arriba ya se lee mientras llegan.
+const TemarioBoard = nextDynamic(() => import('@/components/temario/TemarioBoard'), {
+  loading: () => <BoardSkeleton />,
+});
+const TemarioImporter = nextDynamic(() => import('@/components/temario/TemarioImporter'), {
+  loading: () => <PanelSkeleton lines={2} />,
+});
 
 export const dynamic = 'force-dynamic';
 

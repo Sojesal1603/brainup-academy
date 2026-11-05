@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import CreateExamModal from '@/components/examenes/CreateExamModal';
+import CreateExamLauncher from '@/components/examenes/CreateExamLauncher';
 import ExamControls from '@/components/examenes/ExamControls';
 import {
   GraduationCap,
@@ -57,7 +57,7 @@ export default async function ExamsPage() {
           </p>
         </div>
 
-        <CreateExamModal subjects={subjects} />
+        <CreateExamLauncher subjects={subjects} />
       </div>
 
       {/* Listado de Exámenes */}
