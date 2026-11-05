@@ -227,13 +227,49 @@ La app **ya escucha en toda la red de casa** (el servidor vigilado la abre con `
    ```
    Para deshacerlo: `Remove-NetFirewallRule -DisplayName "BrainUp Academy (movil)"`. Y si tu Wi-Fi figura como red **pública**, Windows la bloquea igual: pásala a **privada**.
 
-Dos cosas que conviene tener claras: la app **no tiene contraseña**, así que cualquiera en esa misma Wi-Fi podría abrirla (si prefieres que sea solo de este ordenador, pon `BRAINUP_HOST=127.0.0.1` en `.env` y reinicia con `npm run sirve`); y el PC tiene que estar **encendido y con la app en marcha** (`npm run sirve`, o el arranque automático del punto 7).
+Dos cosas que conviene tener claras: si has activado la **contraseña de acceso** (siguiente apartado), el móvil la pedirá la primera vez y luego entra solo durante 30 días (si prefieres que la app sea solo de este ordenador, pon `BRAINUP_HOST=127.0.0.1` en `.env` y reinicia con `npm run sirve`); y el PC tiene que estar **encendido y con la app en marcha** (`npm run sirve`, o el arranque automático del punto 7).
+
+---
+
+## 🔒 Acceso privado (usuario y contraseña, sin pagar la protección de Netlify)
+
+Netlify cobra por la contraseña del sitio. Esta app trae la suya: un `proxy.ts` que corta **todas** las páginas y APIs antes de que respondan, y un formulario en `/login` que, si aciertas, deja una cookie firmada en el dispositivo.
+
+**Las credenciales viven en variables de entorno, nunca en el código:**
+
+| Variable | Para qué sirve |
+| --- | --- |
+| `AUTH_USER` | Tu usuario. |
+| `AUTH_PASSWORD` | Tu contraseña. Larga: es la única llave. |
+| `AUTH_SECRET` | Clave con la que se firma la cookie. Si falta, se usa la contraseña (y cambiarla cierra todas las sesiones). |
+| `AUTH_SESSION_DAYS` | Días que dura la sesión en un dispositivo (`30` por defecto). |
+
+**En Netlify:** *Site configuration → Environment variables* → añade `AUTH_USER`, `AUTH_PASSWORD` y `AUTH_SECRET`, y vuelve a desplegar (Netlify no aplica variables nuevas a un despliegue que ya está en pie). A partir de ahí, la dirección del sitio pide usuario y contraseña aunque Netlify no tenga activada su propia protección.
+
+**En local**, las mismas dos/ tres variables en `.env`. El archivo ya puede traer una contraseña generada: cámbiala por la tuya si quieres.
+
+Lo que se queda abierto a propósito: `/login`, `/api/auth/*` (entrar y salir), `/api/salud` (lo consulta el icono al arrancar; sin él, la app «no arrancaría») y los archivos que el navegador necesita para pintar la puerta y para instalar la PWA (manifest, iconos, service worker). Todo lo demás —incluidas las APIs de datos, la IA y Moodle— contesta **401** o redirige al formulario.
+
+Tres detalles que se agradecen cuando se usa a diario:
+
+- La cookie es `httpOnly`, `SameSite=Lax` y `Secure` en HTTPS: no la lee el JavaScript de la página y no se puede reutilizar desde otro sitio. Caducado el plazo, se vuelve a pedir la contraseña.
+- El formulario funciona **sin JavaScript** (es un POST normal), que es justo lo que hace falta en el móvil.
+- Tras 10 intentos fallidos desde la misma IP en 10 minutos, la puerta espera. En serverless el contador es por instancia, pero con una contraseña larga no hay nada que rascar.
+- El botón de **cerrar sesión** está en la cabecera, a la derecha.
+
+Si una comprobación local que habla con la app (`npm run verify:*`, el taller, el vigilante) te devuelve la puerta en vez de la app, arráncala con la puerta abierta solo para esa prueba:
+
+```bash
+AUTH_DISABLED=1 npm run verify:memoria
+```
+
+(En Windows CMD: `set AUTH_DISABLED=1 && npm run verify:memoria`.) `AUTH_DISABLED` no se pone en Netlify.
 
 ---
 
 ## ✅ Verificación rápida (scripts incluidos)
 
-Con el servidor levantado (`npm run dev`) puedes comprobar tú mismo que todo sigue funcionando:
+Con el servidor levantado (`npm run dev`) puedes comprobar tú mismo que todo sigue funcionando (si tienes la puerta puesta, arráncalo con `AUTH_DISABLED=1` para que los scripts que llaman a la app no se la encuentren):
 
 | Comando | Qué comprueba |
 | --- | --- |

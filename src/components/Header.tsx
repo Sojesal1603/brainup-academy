@@ -1,6 +1,7 @@
 import Link from 'next/link';
-import { Flame, Target, Zap, Play } from 'lucide-react';
+import { Flame, Target, Zap, Play, LogOut } from 'lucide-react';
 import { ensureUserProfile } from '@/lib/userProfile';
+import { readAuthConfig } from '@/lib/authGate';
 import PwaRegister from './PwaRegister';
 
 /**
@@ -42,6 +43,8 @@ export default async function Header() {
   const streak = user?.streakCurrent ?? 0;
   const targetGrade = user?.targetGradePau ?? 13.5;
   const mode = user?.studyMode ?? 'athlete';
+  // El botón de cerrar sesión solo tiene sentido si la puerta está puesta.
+  const authOn = Boolean(readAuthConfig());
 
   return (
     <header className="sticky top-0 z-40 bg-[#0a0a0c]/90 backdrop-blur-md border-b border-white/10 px-4 py-3.5 sm:px-6 flex items-center justify-between gap-2">
@@ -97,6 +100,20 @@ export default async function Header() {
           <Play className="w-3.5 h-3.5 fill-slate-950" />
           <span className="hidden sm:inline">Iniciar Enfoque</span>
         </Link>
+
+        {/* Cerrar sesión: la puerta se abre una vez por dispositivo. */}
+        {authOn ? (
+          <form action="/api/auth/logout" method="post">
+            <button
+              type="submit"
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
+              className="flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] p-2 text-slate-400 transition-colors hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </form>
+        ) : null}
       </div>
     </header>
   );
