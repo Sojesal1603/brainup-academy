@@ -8,6 +8,7 @@
  */
 
 import { prisma } from './prisma';
+import { currentUserId } from './tenant';
 
 export interface MoodleEvent {
   uid: string;
@@ -191,7 +192,11 @@ export async function syncMoodleFeed(feedUrl: string): Promise<MoodleSyncStats> 
 
   const relevant = events.filter((event) => event.start >= from && event.start <= horizon);
 
-  const subjects = await prisma.subject.findMany({ select: { id: true, name: true } });
+  const userId = currentUserId();
+  const subjects = await prisma.subject.findMany({
+    where: { userId },
+    select: { id: true, name: true },
+  });
 
   let created = 0;
   let updated = 0;
@@ -222,15 +227,15 @@ export async function syncMoodleFeed(feedUrl: string): Promise<MoodleSyncStats> 
       moodleUrl: event.url ?? null,
     };
 
-    const existing = await prisma.moodleTask.findUnique({
-      where: { externalId: event.uid },
+    const existing = await prisma.moodleTask.findFirst({
+      where: { userId, externalId: event.uid },
     });
 
     if (existing) {
       await prisma.moodleTask.update({ where: { id: existing.id }, data });
       updated++;
     } else {
-      await prisma.moodleTask.create({ data: { externalId: event.uid, ...data } });
+      await prisma.moodleTask.create({ data: { userId, externalId: event.uid, ...data } });
       created++;
     }
   }

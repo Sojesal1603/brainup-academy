@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // Netlify ejecuta las funciones en Amazon Linux, no en la imagen donde se
   // compila. Sin este binario, `prisma generate` deja el motor para la máquina
   // de build y en runtime Prisma falla con «Query engine library not found»:
@@ -13,6 +13,15 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// --- Fase 1 multiusuario ---------------------------------------------------
+// Cada tabla de contenido lleva `userId` apuntando a `UserProfile`. Mientras no
+// exista Supabase Auth (Fase 2), el valor por defecto sigue siendo la cuenta
+// única `user_default`: los datos de hoy no se pierden ni cambian de dueño.
+// Los índices y uniques compuestos (`@@unique([userId, …])`) permiten que dos
+// cuentas tengan la misma materia, el mismo curso de Moodle o la misma semana
+// de retos sin chocar entre sí. Una consulta sin `userId` es, desde ya, una fuga
+// entre cuentas: la Fase 2 sustituye el valor por el de la sesión.
 
 // 1. Perfil del Estudiante
 model UserProfile {
@@ -63,11 +72,37 @@ model UserProfile {
   moodleCheckedAt      DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
+
+  // Relaciones inversas: borrar la cuenta borra en cascada todo lo suyo.
+  subjects         Subject[]
+  topics           Topic[]
+  exams            Exam[]
+  studyBlocks      StudyBlock[]
+  studySessions    StudySession[]
+  errorLogs        ErrorLog[]
+  habits           Habit[]
+  habitLogs        HabitLog[]
+  aiAgents         AiAgent[]
+  aiConversations  AiConversation[]
+  aiMessages       AiMessage[]
+  aiAttachments    AiAttachment[]
+  pauExamSessions  PauExamSession[]
+  notes            Note[]
+  classPeriods     ClassPeriod[]
+  moodleTasks      MoodleTask[]
+  moodleCourses    MoodleCourse[]
+  moodleMaterials  MoodleMaterial[]
+  srsReviews       SrsReview[]
+  weeklyChallenges WeeklyChallenge[]
+  systemIssues     SystemIssue[]
+  agentMemories    AgentMemory[]
 }
 
 // 2. Asignaturas y Ponderaciones PAU
 model Subject {
   id               String            @id @default(uuid())
+  userId           String            @default("user_default")
+  user             UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade)
   name             String // "Matemáticas I", "Física y Química", "Tecnología e Ingeniería I", etc.
   color            String            @default("#10b981") // HEX
   pauWeight        Float             @default(0.2) // 0.2, 0.1 o 0
@@ -95,11 +130,15 @@ model Subject {
   aiAgent          AiAgent?
   challenges       WeeklyChallenge[]
   createdAt        DateTime          @default(now())
+
+  @@index([userId])
 }
 
 // 3. Temas y Bloques de Estudio
 model Topic {
   id              String            @id @default(uuid())
+  userId          String            @default("user_default")
+  user            UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade)
   subjectId       String
   subject         Subject           @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   title           String // p.ej. "Matrices y Determinantes"
@@ -136,11 +175,15 @@ model Topic {
   challenges      WeeklyChallenge[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+
+  @@index([userId, subjectId])
 }
 
 // 4. Exámenes y Convocatorias
 model Exam {
   id            String           @id @default(uuid())
+  userId        String           @default("user_default")
+  user          UserProfile      @relation(fields: [userId], references: [id], onDelete: Cascade)
   subjectId     String
   subject       Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   title         String
@@ -156,95 +199,122 @@ model Exam {
   notes         String?
   pauSessions   PauExamSession[]
   createdAt     DateTime         @default(now())
+
+  @@index([userId, examDate])
 }
 
 // 5. Planificador: Bloques Diarios y Semanales
 model StudyBlock {
-  id              String   @id @default(uuid())
+  id              String      @id @default(uuid())
+  userId          String      @default("user_default")
+  user            UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   topicId         String
-  topic           Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic           Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
   date            DateTime // Día asignado
   // La duración es variable a propósito (10, 15, 25, 40, 50, 60 o 90 min): la
   // decide el motor de sesiones con el tiempo real disponible, la dificultad, el
   // tipo de tarea y la proximidad del examen. 45 fijos era una promesa falsa.
-  durationMinutes Int      @default(25)
+  durationMinutes Int         @default(25)
   technique       String // "active_recall", "problemas", "flashcards", "simulacro", "error_fix", "srs_review"
-  mode            String   @default("athlete") // "comfort" vs "athlete"
-  isCompleted     Boolean  @default(false)
-  orderIndex      Int      @default(0)
+  mode            String      @default("athlete") // "comfort" vs "athlete"
+  isCompleted     Boolean     @default(false)
+  orderIndex      Int         @default(0)
   // Qué se hace exactamente y por qué toca hoy. Sin esto la agenda es una
   // lista de títulos y el alumno tiene que reconstruir el motivo cada mañana.
   objective       String?
   reason          String?
   material        String?
   // Fase del trabajo: comprensión, práctica, repaso, corrección o simulacro.
-  stage           String   @default("practica")
+  stage           String      @default("practica")
   // Descanso que toca DESPUÉS de esta sesión (no se impone el 25/5 a todo).
-  breakMinutes    Int      @default(5)
+  breakMinutes    Int         @default(5)
   // "pendiente" | "en_curso" | "completada" | "abandonada" | "parcial"
-  status          String   @default("pendiente")
-  spentMinutes    Int      @default(0) // minutos realmente hechos (pausas incluidas)
-  priorityScore   Float    @default(0)
+  status          String      @default("pendiente")
+  spentMinutes    Int         @default(0) // minutos realmente hechos (pausas incluidas)
+  priorityScore   Float       @default(0)
   // De dónde sale: "plan" | "reprogramada" | "micro" | "recuperacion"
-  origin          String   @default("plan")
+  origin          String      @default("plan")
   resumedFrom     String? // id del bloque que se pausó y se retoma aquí
-  createdAt       DateTime @default(now())
+  createdAt       DateTime    @default(now())
+
+  @@index([userId, date])
 }
 
 // 6. Registro de Sesiones / Pomodoro
 model StudySession {
-  id              String   @id @default(uuid())
+  id              String      @id @default(uuid())
+  userId          String      @default("user_default")
+  user            UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   topicId         String
-  topic           Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  startedAt       DateTime @default(now())
+  topic           Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  startedAt       DateTime    @default(now())
   minutesSpent    Int
   techniqueUsed   String
   outcome         String // "entendido", "con_dudas", "fallado"
   previousMastery Int
   newMastery      Int
   notes           String?
+
+  @@index([userId, startedAt])
 }
 
 // 7. Banco de Errores Quirúrgico
 model ErrorLog {
-  id               String   @id @default(uuid())
+  id               String      @id @default(uuid())
+  userId           String      @default("user_default")
+  user             UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   subjectId        String
-  subject          Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subject          Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   topicId          String
-  topic            Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic            Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
   questionPrompt   String
   myAnswer         String
   correctAnswer    String
   rootCause        String // "concepto", "calculo", "lectura_enunciado", "tiempo", "bloqueo"
   keyLesson        String
   correctiveAction String
-  reviewCount      Int      @default(0)
-  isMastered       Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  reviewCount      Int         @default(0)
+  isMastered       Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([userId, isMastered])
 }
 
 // 8. Hábitos Diarios y Retos
 model Habit {
-  id          String     @id @default(uuid())
+  id          String      @id @default(uuid())
+  userId      String      @default("user_default")
+  user        UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   description String?
-  streak      Int        @default(0)
+  streak      Int         @default(0)
   logs        HabitLog[]
-  createdAt   DateTime   @default(now())
+  createdAt   DateTime    @default(now())
+
+  @@index([userId])
 }
 
 model HabitLog {
-  id        String   @id @default(uuid())
+  id        String      @id @default(uuid())
+  userId    String      @default("user_default")
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   habitId   String
-  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  habit     Habit       @relation(fields: [habitId], references: [id], onDelete: Cascade)
   date      DateTime // Truncada al día
-  completed Boolean  @default(true)
+  completed Boolean     @default(true)
+
+  @@index([userId, habitId, date])
 }
 
 // 9. Agentes Especializados (Catedráticos de IA)
 model AiAgent {
   id            String           @id @default(uuid())
+  userId        String           @default("user_default")
+  user          UserProfile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Sigue siendo único global: es el UUID de una materia (no un id de Moodle),
+  // así que dos cuentas nunca pueden compartirlo. Mantenerlo @unique es lo que
+  // permite la relación 1:1 `Subject.aiAgent`.
   subjectId     String           @unique
   subject       Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   name          String
@@ -252,19 +322,27 @@ model AiAgent {
   systemPrompt  String
   conversations AiConversation[]
   notes         Note[]
+
+  @@index([userId])
 }
 
 model AiConversation {
   id        String      @id @default(uuid())
+  userId    String      @default("user_default")
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   agentId   String?
   agent     AiAgent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
   title     String      @default("Consulta de Estudio")
   messages  AiMessage[]
   createdAt DateTime    @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model AiMessage {
   id             String         @id @default(uuid())
+  userId         String         @default("user_default")
+  user           UserProfile    @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversationId String
   conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   role           String // "user" | "assistant" | "system"
@@ -276,26 +354,34 @@ model AiMessage {
   noteProposal   String?
   attachments    AiAttachment[] // Capturas, PDFs y archivos que le enseñas al catedrático
   createdAt      DateTime       @default(now())
+
+  @@index([userId, conversationId])
 }
 
 // 15. Archivos que el alumno le enseña al catedrático IA
 // (capturas de pantalla, PDFs, fotos del cuaderno, enunciados escaneados).
 model AiAttachment {
-  id        String    @id @default(uuid())
+  id        String      @id @default(uuid())
+  userId    String      @default("user_default")
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   messageId String
-  message   AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message   AiMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
   name      String // Nombre original del archivo
   mimeType  String // image/png, image/jpeg, application/pdf…
-  sizeBytes Int       @default(0)
+  sizeBytes Int         @default(0)
   localPath String? // Copia en data/uploads: se puede volver a leer sin conexión
-  createdAt DateTime  @default(now())
+  createdAt DateTime    @default(now())
+
+  @@index([userId, messageId])
 }
 
 // 10. Sesiones de Examen PAU & Corrección
 model PauExamSession {
-  id             String   @id @default(uuid())
+  id             String      @id @default(uuid())
+  userId         String      @default("user_default")
+  user           UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   examId         String?
-  exam           Exam?    @relation(fields: [examId], references: [id], onDelete: SetNull)
+  exam           Exam?       @relation(fields: [examId], references: [id], onDelete: SetNull)
   subjectName    String
   timedMinutes   Int
   elapsedMinutes Int
@@ -304,66 +390,84 @@ model PauExamSession {
   finalScore     Float?
   weakTopicsJson String?
   rubricFeedback String?
-  isCompleted    Boolean  @default(false)
-  createdAt      DateTime @default(now())
+  isCompleted    Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+
+  @@index([userId, createdAt])
 }
 
 // 11. Cuaderno de Apuntes y Base de Datos tipo Notion
 model Note {
-  id                   String   @id @default(uuid())
+  id                   String      @id @default(uuid())
+  userId               String      @default("user_default")
+  user                 UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   topicId              String
-  topic                Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic                Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
   title                String
   content              String // Markdown estructurado con bloques, toggles de active recall y fórmulas
-  tags                 String?  @default("apuntes,resumen")
-  isPinned             Boolean  @default(false)
+  tags                 String?     @default("apuntes,resumen")
+  isPinned             Boolean     @default(false)
   // Quién ha escrito el apunte: tú, o un catedrático IA con su agente y la
   // consulta en la que nació (así siempre se sabe de dónde sale).
-  author               String   @default("alumno") // "alumno" | "catedratico"
+  author               String      @default("alumno") // "alumno" | "catedratico"
   agentId              String?
-  agent                AiAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agent                AiAgent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
   sourceConversationId String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  @@index([userId, topicId])
 }
 
 // 12. Horario de Clases del Instituto (Lunes a Viernes)
 model ClassPeriod {
-  id        String  @id @default(uuid())
+  id        String      @id @default(uuid())
+  userId    String      @default("user_default")
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   dayOfWeek Int // 1 = Lunes, 2 = Martes, 3 = Miércoles, 4 = Jueves, 5 = Viernes
   period    Int // 1ª hora, 2ª hora, etc. (1 a 6)
   startTime String // "08:15"
   endTime   String // "09:10"
   subjectId String
-  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subject   Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   classroom String? // "Aula 104", "Taller Tecnología", "Lab Física"
+
+  @@index([userId, dayOfWeek])
 }
 
 // 13. Tareas y Tareas Pendientes sincronizadas de Moodle
 model MoodleTask {
-  id           String   @id @default(uuid())
-  externalId   String?  @unique // UID único del evento en Moodle
+  id           String      @id @default(uuid())
+  userId       String      @default("user_default")
+  user         UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  externalId   String? // UID único del evento en Moodle (único por cuenta, abajo)
   title        String // "Entrega Problemas Dinámica", "Práctica Circuito Mixto"
   description  String?
   courseName   String // Nombre del curso en Moodle
   subjectId    String?
-  subject      Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  subject      Subject?    @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   dueDate      DateTime // Fecha límite de entrega
-  isCompleted  Boolean  @default(false)
+  isCompleted  Boolean     @default(false)
   moodleUrl    String?
   // Vía Web Services (token): la tarea llega con más contexto que el iCal.
-  assignmentId Int?     @unique // id de la tarea en Moodle (mod_assign)
-  source       String   @default("ical") // "ical" | "web_services"
+  assignmentId Int? // id de la tarea en Moodle (mod_assign)
+  source       String      @default("ical") // "ical" | "web_services"
   submitted    Boolean? // ¿ya la ha entregado? (null = no lo sabemos)
-  graded       Boolean  @default(false)
+  graded       Boolean     @default(false)
   grade        Float? // nota de Moodle (0-10) si ya está corregida
-  createdAt    DateTime @default(now())
+  createdAt    DateTime    @default(now())
+
+  @@unique([userId, externalId])
+  @@unique([userId, assignmentId])
+  @@index([userId, dueDate])
 }
 
 // 14. Moodle por Web Services: cursos y apuntes (archivos y recursos)
 model MoodleCourse {
   id        String           @id @default(uuid())
-  moodleId  Int              @unique
+  userId    String           @default("user_default")
+  user      UserProfile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  moodleId  Int
   fullName  String
   shortName String
   subjectId String?
@@ -372,11 +476,15 @@ model MoodleCourse {
   syncedAt  DateTime         @default(now())
   materials MoodleMaterial[]
   createdAt DateTime         @default(now())
+
+  @@unique([userId, moodleId])
 }
 
 model MoodleMaterial {
   id          String       @id @default(uuid())
-  externalId  String       @unique // id del módulo en Moodle + nombre del archivo
+  userId      String       @default("user_default")
+  user        UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  externalId  String // id del módulo en Moodle + nombre del archivo (único por cuenta, abajo)
   courseId    String
   course      MoodleCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
   sectionName String // "Tema 3: Dinámica" (bloque del curso donde está)
@@ -392,33 +500,42 @@ model MoodleMaterial {
   fetchedAt   DateTime?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
+
+  @@unique([userId, externalId])
+  @@index([userId, courseId])
 }
 
 // 16. Repaso Espaciado (SRS): CADA repaso real, con el intervalo que llevaba y
 // si lo recordaba. Es lo que permite calcular retención de verdad en vez de
 // estimarla: sin historial no hay analítica, solo promesas.
 model SrsReview {
-  id                 String   @id @default(uuid())
+  id                 String      @id @default(uuid())
+  userId             String      @default("user_default")
+  user               UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   topicId            String
-  topic              Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic              Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
   subjectId          String? // copia a propósito: las consultas de retención van por materia
-  reviewedAt         DateTime @default(now())
+  reviewedAt         DateTime    @default(now())
   rating             String // "again" | "hard" | "good" | "easy"
-  quality            Int      @default(3) // 0-5, el valor interno del algoritmo
-  recalled           Boolean  @default(true) // ¿lo tenía? (again → no)
-  intervalBeforeDays Int      @default(0) // intervalo que llevaba programado
-  intervalAfterDays  Int      @default(1) // intervalo nuevo
-  easeAfter          Float    @default(2.5)
-  overdueDays        Int      @default(0) // días de retraso sobre la fecha prevista
-  minutesSpent       Int      @default(0)
-  createdAt          DateTime @default(now())
+  quality            Int         @default(3) // 0-5, el valor interno del algoritmo
+  recalled           Boolean     @default(true) // ¿lo tenía? (again → no)
+  intervalBeforeDays Int         @default(0) // intervalo que llevaba programado
+  intervalAfterDays  Int         @default(1) // intervalo nuevo
+  easeAfter          Float       @default(2.5)
+  overdueDays        Int         @default(0) // días de retraso sobre la fecha prevista
+  minutesSpent       Int         @default(0)
+  createdAt          DateTime    @default(now())
+
+  @@index([userId, reviewedAt])
 }
 
 // 17. Retos semanales: metas cortas de la semana, generadas de datos reales del
 // alumno (repasos vencidos, errores sin cerrar, exámenes a la vista), no de una
 // lista fija. El progreso se calcula del trabajo hecho, no se marca a mano.
 model WeeklyChallenge {
-  id          String    @id @default(uuid())
+  id          String      @id @default(uuid())
+  userId      String      @default("user_default")
+  user        UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   weekKey     String // "2026-W42" (semana ISO)
   weekStart   DateTime // lunes 00:00 de esa semana
   kind        String // "srs_reviews" | "study_minutes" | "master_errors" | "simulacro" | "mastery_gain" | "streak_days"
@@ -427,36 +544,39 @@ model WeeklyChallenge {
   target      Int // cuánto hay que conseguir
   unit        String // "count" | "minutes" | "percent" | "days"
   subjectId   String?
-  subject     Subject?  @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  subject     Subject?    @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   topicId     String?
-  topic       Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
-  rewardXp    Int       @default(50)
-  status      String    @default("active") // "active" | "completed" | "expired"
+  topic       Topic?      @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  rewardXp    Int         @default(50)
+  status      String      @default("active") // "active" | "completed" | "expired"
   completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   // Ojo: en PostgreSQL un índice único con columnas NULL tampoco impide duplicados
   // (NULL != NULL), así que la generación comprueba la existencia a mano. Aquí
-  // solo va el índice que sí acelera la consulta por semana.
-  @@index([weekKey])
+  // solo van los índices que sí aceleran la consulta por cuenta y semana.
+  @@index([userId, weekKey])
+  @@index([userId, status])
 }
 
 // 18. Fallos del sistema: lo que reporta el alumno, lo que detecta el vigilante y
 // lo que resuelve el taller de mantenimiento. Es el cuaderno de incidencias: sin
 // él, cada fallo se cuenta una vez y se olvida.
 model SystemIssue {
-  id          String   @id @default(uuid())
+  id          String      @id @default(uuid())
+  userId      String      @default("user_default")
+  user        UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   detail      String?
   contextJson String? // datos de alrededor (ruta, mensaje de error, versión)
-  source      String   @default("alumno") // "alumno" | "vigilante" | "ia"
-  status      String   @default("abierto") // "abierto" | "revisado" | "resuelto"
+  source      String      @default("alumno") // "alumno" | "vigilante" | "ia"
+  status      String      @default("abierto") // "abierto" | "revisado" | "resuelto"
   resolution  String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
-  @@index([status])
+  @@index([userId, status])
 }
 
 // 23. Memoria entre días de la IA (catedráticos, puesta a punto y mantenimiento)
@@ -465,7 +585,9 @@ model SystemIssue {
 // sabía ayer. Una fila por ámbito y día: crece acotado (un registro al día) y se
 // puede leer ordenado por día para armar el bloque que recibe el modelo.
 model AgentMemory {
-  id        String   @id @default(uuid())
+  id        String      @id @default(uuid())
+  userId    String      @default("user_default")
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Quién recuerda: el id del catedrático, «coordinador» o «mantenimiento».
   scope     String
   // Día al que pertenece el recuerdo (AAAA-MM-DD, hora local del alumno).
@@ -475,10 +597,10 @@ model AgentMemory {
   // Datos concretos y estables en JSON (unidades, fechas, acuerdos, pendientes).
   factsJson String?
   // Quién lo escribió: las reglas de siempre, o el modelo si ha podido pulirlo.
-  writtenBy String   @default("reglas") // "reglas" | "ia"
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  writtenBy String      @default("reglas") // "reglas" | "ia"
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
 
-  @@unique([scope, day])
-  @@index([scope, createdAt])
+  @@unique([userId, scope, day])
+  @@index([userId, scope, createdAt])
 }

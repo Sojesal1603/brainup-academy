@@ -15,6 +15,7 @@
  */
 
 import { prisma } from './prisma';
+import { currentUserId } from './tenant';
 import type { MoodleCourseInfo, MoodleMaterialDraft } from './moodleWs';
 
 export interface StoreCourseResult {
@@ -33,10 +34,14 @@ export async function storeCourseWithMaterials(params: {
   materials: MoodleMaterialDraft[];
 }): Promise<StoreCourseResult> {
   const { course, subjectId, sections, materials } = params;
+  // Cada cuenta tiene sus propios cursos: el mismo `moodleId` puede repetirse
+  // entre dos alumnos de centros distintos sin pisarse.
+  const userId = currentUserId();
 
   const row = await prisma.moodleCourse.upsert({
-    where: { moodleId: course.moodleId },
+    where: { userId_moodleId: { userId, moodleId: course.moodleId } },
     create: {
+      userId,
       moodleId: course.moodleId,
       fullName: course.fullName,
       shortName: course.shortName,
@@ -56,14 +61,14 @@ export async function storeCourseWithMaterials(params: {
   for (const material of materials) {
     seen.push(material.externalId);
     await prisma.moodleMaterial.upsert({
-      where: { externalId: material.externalId },
-      create: { courseId: row.id, ...material },
+      where: { userId_externalId: { userId, externalId: material.externalId } },
+      create: { userId, courseId: row.id, ...material },
       update: { courseId: row.id, ...material },
     });
   }
 
   await prisma.moodleMaterial.deleteMany({
-    where: { courseId: row.id, externalId: { notIn: seen.length > 0 ? seen : [''] } },
+    where: { userId, courseId: row.id, externalId: { notIn: seen.length > 0 ? seen : [''] } },
   });
 
   return { id: row.id, subjectId };
@@ -109,6 +114,7 @@ const NO_DATE = new Date(0);
  *      de crear otra.
  */
 export async function storeTasks(drafts: MoodleTaskWrite[]): Promise<StoreTasksResult> {
+  const userId = currentUserId();
   let tasks = 0;
   let submitted = 0;
   let adopted = 0;
@@ -118,6 +124,7 @@ export async function storeTasks(drafts: MoodleTaskWrite[]): Promise<StoreTasksR
     // vía, la fila tiene que quedarse con la marca de la vía que ahora la lleva.
     // Si no, la siguiente sincronización no la reconocería y la duplicaría.
     const data = {
+      userId,
       title: draft.title,
       description: draft.description,
       courseName: draft.courseName,
@@ -132,12 +139,14 @@ export async function storeTasks(drafts: MoodleTaskWrite[]): Promise<StoreTasksR
       ...(draft.externalId ? { externalId: draft.externalId } : {}),
     };
 
+    // El unique ahora es compuesto con `userId`: se busca con findFirst para no
+    // depender de las claves globales que ya no existen.
     const existing =
       (draft.externalId
-        ? await prisma.moodleTask.findUnique({ where: { externalId: draft.externalId } })
+        ? await prisma.moodleTask.findFirst({ where: { userId, externalId: draft.externalId } })
         : null) ??
       (draft.assignmentId !== null
-        ? await prisma.moodleTask.findUnique({ where: { assignmentId: draft.assignmentId } })
+        ? await prisma.moodleTask.findFirst({ where: { userId, assignmentId: draft.assignmentId } })
         : null);
 
     if (existing) {
@@ -145,6 +154,7 @@ export async function storeTasks(drafts: MoodleTaskWrite[]): Promise<StoreTasksR
     } else {
       const sameTitle = await prisma.moodleTask.findFirst({
         where: {
+          userId,
           source: 'ical',
           title: draft.title,
           courseName: draft.courseName,

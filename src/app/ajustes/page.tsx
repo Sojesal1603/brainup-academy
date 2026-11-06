@@ -5,6 +5,7 @@ import { getMoodleStatus } from '@/lib/moodleWsSync';
 import { readMoodleHealth } from '@/lib/moodleSelfHeal';
 import AccesoMovil from '@/components/ajustes/AccesoMovil';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
+import { readAuthConfig } from '@/lib/authGate';
 
 // Ajustes es un panel de paneles: cada uno baja cuando se va a ver, no todos
 // de golpe al abrir la sección.
@@ -30,6 +31,7 @@ import {
   Cpu,
   CheckCircle,
   GraduationCap,
+  LogOut,
 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +39,8 @@ export const dynamic = 'force-dynamic';
 export default async function SettingsPage() {
   // Memoizado por petición: el Header del layout ya ha pedido este perfil.
   const user = await ensureUserProfile();
+  // Solo hay sesión que cerrar si la puerta está puesta en el entorno.
+  const authOn = Boolean(readAuthConfig());
 
   const [moodleStatus, moodleHealth] = await Promise.all([getMoodleStatus(), readMoodleHealth()]);
 
@@ -70,6 +74,37 @@ export default async function SettingsPage() {
           Control de privacidad, exportación de copias de seguridad y estado de conectores externos.
         </p>
       </div>
+
+      {/* Sesión del dispositivo: aquí se cierra la puerta, no solo en la cabecera */}
+      {authOn ? (
+        <div className="p-6 rounded-2xl glass-card space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 shrink-0 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-300">
+                <Shield className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-100">Sesión de este dispositivo</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  La sesión está abierta con la contraseña del entorno y dura 30 días. Al cerrarla
+                  se borra la cookie firmada de este navegador y volverás al formulario de acceso;
+                  los datos no se tocan.
+                </p>
+              </div>
+            </div>
+
+            <form action="/api/auth/logout" method="post" className="shrink-0">
+              <button
+                type="submit"
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs font-bold text-rose-200 transition-colors hover:bg-rose-500/20"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Cerrar sesión</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {/* Mis notas reales: la base de toda la analítica y de los catedráticos */}
       <GradesPanel

@@ -30,6 +30,7 @@
  */
 
 import { prisma } from './prisma';
+import { currentUserId } from './tenant';
 
 /** Ámbitos que no son un catedrático. */
 export const MEMORY_SCOPE_COORDINATOR = 'coordinador';
@@ -272,10 +273,11 @@ export async function saveDayMemory(input: {
   const day = input.day ?? dayKey();
   const factsJson = JSON.stringify((input.facts ?? []).slice(0, MEMORY_MAX_FACTS));
   const writtenBy = input.writtenBy ?? 'reglas';
+  const userId = currentUserId();
 
   await prisma.agentMemory.upsert({
-    where: { scope_day: { scope, day } },
-    create: { scope, day, summary: summary.slice(0, 1000), factsJson, writtenBy },
+    where: { userId_scope_day: { userId, scope, day } },
+    create: { userId, scope, day, summary: summary.slice(0, 1000), factsJson, writtenBy },
     update: { summary: summary.slice(0, 1000), factsJson, writtenBy },
   });
 }
@@ -286,7 +288,7 @@ export async function loadRecentMemories(scope: string, days: number = MEMORY_DA
   from.setDate(from.getDate() - Math.max(0, days));
 
   const rows = await prisma.agentMemory.findMany({
-    where: { scope, createdAt: { gte: from } },
+    where: { userId: currentUserId(), scope, createdAt: { gte: from } },
     orderBy: { createdAt: 'desc' },
     take: days + 1,
     select: { day: true, summary: true, factsJson: true, writtenBy: true },
@@ -356,7 +358,7 @@ export async function rememberConversation(input: {
 export async function isPolishedToday(scope: string, day: string = dayKey()): Promise<boolean> {
   try {
     const row = await prisma.agentMemory.findUnique({
-      where: { scope_day: { scope, day } },
+      where: { userId_scope_day: { userId: currentUserId(), scope, day } },
       select: { writtenBy: true },
     });
     return row?.writtenBy === 'ia';

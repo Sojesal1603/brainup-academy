@@ -65,6 +65,32 @@ export async function proxy(request: NextRequest) {
           'Define las dos variables en el entorno (en Netlify: Site configuration → Environment variables).'
       );
     }
+
+    // En producción no hay puerta abierta por accidente: si faltan las
+    // credenciales, no se puede distinguir a nadie, así que se cierra y se dice
+    // qué falta en vez de enseñar el panel a quien llegue. En desarrollo sigue
+    // abierta para que una instalación recién clonada arranque sin fricción.
+    if (process.env.NODE_ENV === 'production') {
+      const message =
+        'La app está cerrada porque faltan AUTH_USER y AUTH_PASSWORD en el entorno. ' +
+        'Defínelas y vuelve a desplegar (en Netlify: Site configuration → Environment variables).';
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json(
+          { ok: false, error: message },
+          { status: 503, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      return new NextResponse(
+        `<!doctype html><html lang="es"><meta charset="utf-8"><title>Acceso no configurado</title>` +
+          `<body style="font-family:system-ui;background:#0a0a0c;color:#e2e8f0;padding:2rem">` +
+          `<h1 style="font-size:1rem">Acceso no configurado</h1><p style="font-size:.875rem">${message}</p></body></html>`,
+        {
+          status: 503,
+          headers: { 'content-type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+        }
+      );
+    }
+
     return NextResponse.next();
   }
 
