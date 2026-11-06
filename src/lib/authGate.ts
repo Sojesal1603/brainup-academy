@@ -86,6 +86,81 @@ export function safeNextPath(value: unknown): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Origen real de la petición                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Un `Host` de verdad: nombre, IPv4 o IPv6 entre corchetes, con puerto opcional.
+ * Se valida porque `Host` lo pone el cliente: no puede acabar dentro de un
+ * `Location` que la app devuelva.
+ */
+const HOST_PATTERN =
+  /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?::\d{1,5})?$|^\[[0-9a-f:]+\](?::\d{1,5})?$/i;
+
+function firstHeader(request: Request, name: string): string {
+  return (request.headers.get(name) ?? '').split(',')[0].trim();
+}
+
+/** El host de una cabecera, si sirve para navegar (no `0.0.0.0` ni `[::]`). */
+function navigableHost(value: string): string | null {
+  const host = String(value ?? '').trim().toLowerCase();
+  if (!host || !HOST_PATTERN.test(host)) return null;
+
+  const name = host.replace(/:\d+$/, '');
+  if (name === '0.0.0.0' || name === '[::]' || name === '::') return null;
+  return host;
+}
+
+/**
+ * El origen por el que ha entrado el navegador de verdad.
+ *
+ * `sirve.js` escucha en `0.0.0.0` y Next construye `request.url` con esa
+ * dirección: `http://0.0.0.0:3000`. Devolver al navegador un `Location` ahí es
+ * un `ERR_ADDRESS_INVALID` (0.0.0.0 no es una dirección a la que se pueda
+ * navegar), y ese era el fallo del login. Aquí se usa:
+ *   1. `x-forwarded-host` / `Host`, que es la dirección que el navegador escribió
+ *      (localhost, la IP de la Wi-Fi o el dominio de la nube);
+ *   2. `x-forwarded-proto` para el protocolo que pone el proxy de delante
+ *      (Netlify, Render…), o el de `request.url` si no lo hay;
+ *   3. y, solo si no hay nada usable, `localhost` con el puerto del servidor.
+ *
+ * Así el login funciona igual desde el ordenador, desde el móvil en la misma red
+ * y en producción, sin dirección fija en el código.
+ */
+export function requestOrigin(request: Request): string {
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(request.url);
+  } catch {
+    parsed = null;
+  }
+
+  const protoHeader = firstHeader(request, 'x-forwarded-proto').toLowerCase();
+  const proto =
+    protoHeader === 'https'
+      ? 'https'
+      : protoHeader === 'http'
+        ? 'http'
+        : parsed?.protocol === 'https:'
+          ? 'https'
+          : 'http';
+
+  const host =
+    navigableHost(firstHeader(request, 'x-forwarded-host')) ??
+    navigableHost(firstHeader(request, 'host')) ??
+    navigableHost(parsed?.host ?? '');
+
+  if (host) return `${proto}://${host}`;
+
+  return `${proto}://localhost:${parsed?.port || '3000'}`;
+}
+
+/** URL absoluta de una ruta de esta app, con el origen real del navegador. */
+export function appUrl(request: Request, path: string): URL {
+  return new URL(path, requestOrigin(request));
+}
+
+/* ------------------------------------------------------------------ */
 /* Utilidades de firma                                                 */
 /* ------------------------------------------------------------------ */
 

@@ -21,6 +21,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import {
   AUTH_COOKIE,
+  appUrl,
   isAuthDisabled,
   readAuthConfig,
   verifySessionToken,
@@ -107,9 +108,10 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = '/login';
-  loginUrl.search = '';
+  // El destino se construye con el host por el que ha entrado el navegador
+  // (localhost, la IP de la Wi-Fi o el dominio), no con la dirección interna del
+  // servidor (`0.0.0.0`), que el navegador no puede abrir.
+  const loginUrl = appUrl(request, '/login');
   if (pathname !== '/') {
     loginUrl.searchParams.set('next', `${pathname}${search}`);
   }

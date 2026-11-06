@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import {
   AUTH_COOKIE,
+  appUrl,
   createSessionToken,
   readAuthConfig,
+  requestOrigin,
   safeNextPath,
   sessionMaxAgeSeconds,
   verifyCredentials,
@@ -64,14 +66,20 @@ function registerFail(key: string, now: number): void {
   entry.count += 1;
 }
 
+/**
+ * ¿Se está sirviendo por HTTPS? La cookie `Secure` solo puede ir con TLS: si se
+ * marca en una visita por `http://`, el navegador la descarta y no hay sesión.
+ * Se pregunta al mismo origen que se usa para redirigir (host y protocolo reales),
+ * no a `request.url`, que ve el `0.0.0.0` donde escucha el servidor.
+ */
 function isHttps(request: Request): boolean {
-  const proto = (request.headers.get('x-forwarded-proto') ?? '').split(',')[0].trim();
-  if (proto) return proto === 'https';
-  return new URL(request.url).protocol === 'https:';
+  return requestOrigin(request).startsWith('https://');
 }
 
 function backToLogin(request: Request, reason: string, next: string): NextResponse {
-  const url = new URL('/login', request.url);
+  // Con el origen del navegador, no con el del proceso: `request.url` trae el
+  // `0.0.0.0` en el que escucha `sirve.js`, y ese `Location` no se puede abrir.
+  const url = appUrl(request, '/login');
   url.searchParams.set('error', reason);
   if (next !== '/') url.searchParams.set('next', next);
   return NextResponse.redirect(url, 303);
@@ -103,7 +111,7 @@ export async function POST(request: Request) {
 
   attempts.delete(key);
 
-  const response = NextResponse.redirect(new URL(destino, request.url), 303);
+  const response = NextResponse.redirect(appUrl(request, destino), 303);
   response.cookies.set({
     name: AUTH_COOKIE,
     value: await createSessionToken(config, now),

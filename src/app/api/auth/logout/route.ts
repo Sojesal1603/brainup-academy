@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { AUTH_COOKIE } from '@/lib/authGate';
+import { AUTH_COOKIE, appUrl } from '@/lib/authGate';
 
 /**
  * Cerrar sesión: se borra la cookie y se vuelve al formulario.
@@ -12,7 +12,9 @@ import { AUTH_COOKIE } from '@/lib/authGate';
 export const dynamic = 'force-dynamic';
 
 function cerrar(request: Request): NextResponse {
-  const response = NextResponse.redirect(new URL('/login', request.url), 303);
+  // Vuelta al formulario por el host real del navegador: `request.url` trae la
+  // dirección interna del servidor (`0.0.0.0`), que no se puede abrir.
+  const response = NextResponse.redirect(appUrl(request, '/login'), 303);
   response.cookies.set({
     name: AUTH_COOKIE,
     value: '',
