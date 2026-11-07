@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { Check, Copy } from 'lucide-react';
 import { scanInline } from '@/lib/inlineEmphasis';
 
 /**
@@ -133,6 +134,64 @@ function normalizeDelimiters(input: string): string {
     .replace(/\\\(([\s\S]*?)\\\)/g, (_, body: string) => `$${body}$`);
 }
 
+/**
+ * Bloque de código con su botón de copia. El texto se copia tal cual, sin el
+ * rótulo del lenguaje ni adornos: es lo que se pega en el editor.
+ */
+function CodeBlock({ code, language }: { code: string; language: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Navegador sin permiso de portapapeles (http fuera de localhost):
+      // el botón no hace nada raro, simplemente no copia.
+    }
+  };
+
+  return (
+    <div className="my-2 overflow-hidden rounded-lg border border-white/10 bg-[#08080a]">
+      <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-stone-500">
+          {language || 'código'}
+        </span>
+        <button
+          type="button"
+          onClick={copy}
+          title="Copiar el bloque de código"
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-stone-400 transition-colors hover:bg-white/[0.06] hover:text-stone-200"
+        >
+          {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+          {copied ? 'Copiado' : 'Copiar'}
+        </button>
+      </div>
+      <pre className="overflow-x-auto px-3.5 py-3">
+        <code className="whitespace-pre font-mono text-[12.5px] leading-6 text-stone-200/90">
+          {code}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
+/** ¿La línea es el separador de una tabla Markdown (`|---|:--:|`)? */
+function isTableSeparator(line: string): boolean {
+  return /^\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$/.test(line.trim());
+}
+
+/** Trocea una fila `| a | b |` en celdas. */
+function parseTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
 const HEADING_SIZES: Record<number, string> = {
   1: 'text-sm font-black uppercase tracking-wide text-slate-100',
   2: 'text-[13px] font-bold text-slate-100',
@@ -184,17 +243,59 @@ export default function MarkdownMessage({
         }
         index += 1; // salta el cierre
         output.push(
-          <pre
-            key={`code-${output.length}`}
-            className="my-1.5 rounded-xl bg-[#070b14] border border-slate-800 px-3 py-2.5 overflow-x-auto"
+          <CodeBlock key={`code-${output.length}`} code={codeLines.join('\n')} language={language} />
+        );
+        continue;
+      }
+
+      // Tablas: cabecera, separador y filas. Las usa el catedrático para
+      // comparar autores, tiempos verbales o pasos de un método.
+      if (trimmed.startsWith('|') && isTableSeparator(lines[index + 1] ?? '')) {
+        flushParagraph();
+        const header = parseTableRow(trimmed);
+        index += 2;
+        const rows: string[][] = [];
+        while (index < lines.length && lines[index].trim().startsWith('|')) {
+          rows.push(parseTableRow(lines[index].trim()));
+          index += 1;
+        }
+        output.push(
+          <div
+            key={`table-${output.length}`}
+            className="my-2 overflow-x-auto rounded-lg border border-white/10"
           >
-            <code className="text-[12px] font-mono text-emerald-200 whitespace-pre">
-              {codeLines.join('\n')}
-            </code>
-            {language && (
-              <span className="sr-only">{`bloque de código ${language}`}</span>
-            )}
-          </pre>
+            <table className="w-full border-collapse text-[12.5px]">
+              <thead>
+                <tr className="bg-white/[0.04]">
+                  {header.map((cell, cellIndex) => (
+                    <th
+                      key={cellIndex}
+                      className="border-b border-white/10 px-3 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wider text-stone-400"
+                    >
+                      {renderInline(cell, `th-${output.length}-${cellIndex}`)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, rowIndex) => (
+                  <tr
+                    key={rowIndex}
+                    className="border-b border-white/[0.05] last:border-0 odd:bg-white/[0.015]"
+                  >
+                    {row.map((cell, cellIndex) => (
+                      <td
+                        key={cellIndex}
+                        className="px-3 py-2 align-top leading-6 text-stone-200"
+                      >
+                        {renderInline(cell, `td-${output.length}-${rowIndex}-${cellIndex}`)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         );
         continue;
       }

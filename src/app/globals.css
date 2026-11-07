@@ -200,3 +200,88 @@ body {
     box-shadow: none;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Catedrático: lienzo completo y vista dividida                       */
+/* ------------------------------------------------------------------ */
+
+/* La página del catedrático es un lienzo propio a pantalla completa: se pinta
+   por encima del armazón (cabecera y barra lateral) y la página de fondo no
+   desplaza, así que los únicos scroll son los de cada panel. */
+body:has(.chat-fullscreen) {
+  overflow: hidden;
+}
+
+.chat-fullscreen {
+  height: 100dvh;
+  width: 100vw;
+}
+
+/* Mensajes largos: el navegador no los pinta hasta que se acercan a la vista.
+   Es lo que mantiene fluido un hilo con veinte respuestas densas. */
+.chat-message {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
+
+@media (min-width: 1024px) {
+  /* Vista dividida: dos columnas iguales y perfectamente delimitadas; cada una
+     se desplaza por su cuenta (el chat por dentro, el documento por dentro). */
+  .chat-grid:has(.chat-panel) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Visor PDF digital: folio DIN-A4 dentro de la app                    */
+/* ------------------------------------------------------------------ */
+
+/* No es una captura ni una impresión: es una hoja de estudio pintada dentro de
+   la app, con tinta oscura sobre papel cálido y letra de libro. */
+.note-paper {
+  color: #1b1a17;
+  background-color: #fbf9f4;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 30px 60px -28px rgba(0, 0, 0, 0.85);
+}
+
+.note-paper * {
+  color: #1c1b18;
+  background-image: none;
+  box-shadow: none;
+  border-color: #d9d3c4 !important;
+}
+
+/* Los fondos oscuros de la pantalla pasan a papel: si no, hay texto que no se lee. */
+.note-paper [class*="bg-[#0"],
+.note-paper [class*="bg-slate-8"],
+.note-paper [class*="bg-slate-9"],
+.note-paper pre,
+.note-paper code,
+.note-paper table,
+.note-paper details {
+  background-color: #f2eee4 !important;
+}
+
+.note-paper h1,
+.note-paper h2,
+.note-paper h3,
+.note-paper h4 {
+  color: #11100e !important;
+  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  letter-spacing: -0.01em;
+}
+
+/* Las respuestas de Active Recall se leen siempre en el folio. */
+.note-paper .reveal-answer,
+.note-paper .reveal-answer > div {
+  display: block !important;
+}
+
+.note-paper table,
+.note-paper pre,
+.note-paper details,
+.note-paper li {
+  break-inside: avoid;
+}

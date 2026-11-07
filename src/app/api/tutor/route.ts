@@ -170,6 +170,16 @@ function toChatMessages(messages: StoredMessage[]): ChatMessage[] {
     })
 }
 
+/**
+ * La ruta habla con Prisma y con los proveedores de IA: runtime de Node.
+ *
+ * `maxDuration` es el techo de la plataforma, no del turno: el turno ya se
+ * corta solo con su presupuesto (`AI_TEXT_BUDGET_MS`) y contesta en local. Lo
+ * que evita es que un despliegue serverless mate la petición a media respuesta.
+ */
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   let body: TutorRequestBody;
   try {
@@ -779,9 +789,32 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error('[tutor] Error inesperado:', error);
+
+    // Siempre JSON con forma de error: el cliente nunca debe recibir un HTML de
+    // pasarela ni una conexión cortada. Si el fallo es de la IA, se conserva su
+    // estado (429 cupo, 502 proveedor, 503 sin motor) y su mensaje, que ya está
+    // escrito para el alumno. El resto se cuenta como 500 sin filtrar detalles.
+    if (error instanceof TutorError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error.message,
+          kind: error.kind ?? 'ia',
+          retryable: error.status === 429 || error.status >= 500,
+        },
+        { status: error.status, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'El catedrático no ha podido responder. Revisa la consola del servidor.' },
-      { status: 500 }
+      {
+        ok: false,
+        error:
+          'El catedrático no ha podido responder por un fallo del servidor. Tu mensaje no se ha perdido: vuelve a intentarlo en unos segundos.',
+        kind: 'servidor',
+        retryable: true,
+      },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 }

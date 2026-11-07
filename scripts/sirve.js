@@ -404,7 +404,14 @@ function startServer() {
   healthFailures = 0;
 }
 
-/** Pregunta de salud: si no contesta tres veces, se reinicia el proceso. */
+/**
+ * Pregunta de salud. Solo se reinicia el proceso cuando NO CONTESTA.
+ *
+ * Un 200 con `ok: false` significa «la app está en pie, la base de datos no»:
+ * reiniciar el servidor no arregla la base y sí parte en dos el turno de IA que
+ * esté en vuelo, que es exactamente lo que el navegador enseña como «Failed to
+ * fetch». Por eso aquí se mira el HTTP, no el estado de la base.
+ */
 function checkHealth() {
   if (stopping || !child) return;
 
@@ -413,8 +420,11 @@ function checkHealth() {
   fetch(HEALTH_URL, timeout ? { signal: timeout } : {})
     .then(async (res) => {
       const body = await res.json().catch(() => ({}));
-      if (res.status === 200 && body.ok) {
+      if (res.status === 200) {
         if (healthFailures > 0) log('la app vuelve a responder con normalidad.');
+        if (body && body.ok === false) {
+          log('salud: la app responde, pero la base no (no se reinicia por eso).');
+        }
         healthFailures = 0;
         return;
       }
@@ -429,24 +439,51 @@ function checkHealth() {
     });
 }
 
-function maybeRestartForHealth() {
-  if (healthFailures < HEALTH_FAILURES_BEFORE_RESTART) return;
+/** Evita que dos comprobaciones finales se pisen. */
+let confirmandoReinicio = false;
 
-  log('la app lleva tres comprobaciones sin responder: se reinicia el servidor para desatascarlo.');
-  healthFailures = 0;
+/**
+ * Matar el servidor es el último recurso, y antes se le da una última
+ * oportunidad con más margen: un turno de IA puede tardar 30 s y no por eso
+ * está muerto. El proceso se lleva por delante la petición HTTP en curso y el
+ * alumno ve «Failed to fetch».
+ */
+async function maybeRestartForHealth() {
+  if (healthFailures < HEALTH_FAILURES_BEFORE_RESTART || confirmandoReinicio) return;
+  confirmandoReinicio = true;
 
-  if (child) {
-    const doomed = child;
-    child = null;
-    try {
-      doomed.kill();
-    } catch {}
-    // Si en 10 segundos no ha muerto, se fuerza.
-    setTimeout(() => {
+  try {
+    const sigueVivo = await new Promise((resolve) => {
+      const timeout = AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined;
+      fetch(HEALTH_URL, timeout ? { signal: timeout } : {})
+        .then((res) => resolve(res.status === 200))
+        .catch(() => resolve(false));
+    });
+
+    if (sigueVivo) {
+      healthFailures = 0;
+      log('la app ha contestado a la comprobación final: no se reinicia.');
+      return;
+    }
+
+    log('la app lleva tres comprobaciones sin responder: se reinicia el servidor para desatascarlo.');
+    healthFailures = 0;
+
+    if (child) {
+      const doomed = child;
+      child = null;
       try {
-        process.kill(doomed.pid, 'SIGKILL');
+        doomed.kill();
       } catch {}
-    }, 10000);
+      // Si en 10 segundos no ha muerto, se fuerza.
+      setTimeout(() => {
+        try {
+          process.kill(doomed.pid, 'SIGKILL');
+        } catch {}
+      }, 10000);
+    }
+  } finally {
+    confirmandoReinicio = false;
   }
 }
 

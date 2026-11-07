@@ -13,15 +13,8 @@ const TutorChat = nextDynamic(() => import('@/components/brainup/TutorChat'), {
 });
 import { getConfiguredModelLabel, parseTutorReply, type TutorStage } from '@/lib/tutor';
 import type { NoteProposal } from '@/lib/apuntesIa';
-import { MASTERY_SOURCE_META } from '@/lib/knowledge';
-import {
-  ArrowLeft,
-  CalendarClock,
-  GraduationCap,
-  ShieldAlert,
-  Sparkles,
-  Target,
-} from 'lucide-react';
+import { getConfiguredEngines } from '@/lib/aiEngine';
+import { ArrowLeft, GraduationCap, Sparkles } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +51,9 @@ export default async function TutorPage({
 }) {
   const { agentId } = await params;
   const modelLabel = getConfiguredModelLabel();
+  // Motores que pueden escribir ahora mismo: con ellos se comparan las
+  // versiones de un mismo apunte (Gemini, Groq, OpenRouter, local…).
+  const engines = getConfiguredEngines();
   // Proveedor que toca ahora mismo: Gemini es el primario y Groq el respaldo,
   // así que el rótulo sale del modelo configurado, no de una suposición.
   const engineLabel = /groq/i.test(modelLabel)
@@ -176,72 +172,54 @@ export default async function TutorPage({
       }) ?? [];
 
   return (
-    <div className="space-y-6">
-      {/* Cabecera táctica del catedrático */}
-      <div className="card-glass fade-up space-y-4 rounded-2xl p-4 sm:p-5">
+    <div className="chat-fullscreen fixed inset-0 z-[60] flex h-[100dvh] w-screen flex-col overflow-hidden bg-[#0a0a0b] text-stone-200">
+      {/* Barra fija del catedrático: quién te habla y en qué estado. */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.07] px-3 py-2.5 sm:px-5">
         <Link
           href="/brainup"
-          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 hover:text-emerald-400 transition-colors"
+          aria-label="Volver a los catedráticos"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-white/[0.05] hover:text-stone-200"
         >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Volver a los catedráticos
+          <ArrowLeft className="h-4 w-4" />
         </Link>
 
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-4">
-            {/* Avatar destacado con halo del color de la materia */}
-            <div className="relative shrink-0">
-              <span
-                className="absolute -inset-1.5 rounded-2xl opacity-60 blur-md"
-                style={{ backgroundColor: `${agent.subject.color}55` }}
-                aria-hidden
-              />
-              <div
-                className="relative flex h-14 w-14 items-center justify-center rounded-2xl border-2"
-                style={{
-                  background: `radial-gradient(circle at 30% 20%, ${agent.subject.color}33, #0a0a0c 78%)`,
-                  borderColor: `${agent.subject.color}80`,
-                  boxShadow: `0 0 22px ${agent.subject.color}40, inset 0 0 14px ${agent.subject.color}22`,
-                  color: agent.subject.color,
-                }}
-              >
-                <GraduationCap className="h-7 w-7" />
-              </div>
-            </div>
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border"
+          style={{
+            backgroundColor: `${agent.subject.color}14`,
+            borderColor: `${agent.subject.color}40`,
+            color: agent.subject.color,
+          }}
+          aria-hidden
+        >
+          <GraduationCap className="h-5 w-5" />
+        </div>
 
-            <div className="min-w-0">
-              <p
-                className="font-mono text-[10px] font-bold uppercase tracking-[0.18em]"
-                style={{ color: agent.subject.color }}
-              >
-                Catedrático IA · {agent.subject.name}
-              </p>
-              <h1 className="mt-0.5 text-xl font-black tracking-tight text-slate-100 uppercase font-mono">
-                {agent.name}
-              </h1>
-              <p className="text-xs text-slate-400 mt-0.5">{agent.specialty}</p>
-            </div>
-          </div>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate font-serif text-[16px] leading-tight text-stone-100 sm:text-[17px]">
+            {agent.name}
+          </h1>
+          <p className="truncate text-[11px] text-stone-500">
+            Catedrático de {agent.subject.name} · {agent.specialty}
+          </p>
+        </div>
 
-          <div className="flex flex-col items-start gap-2 sm:items-end">
-            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-300">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-              </span>
-              {engineLabel} en línea
-            </span>
-            <span className="text-[10px] font-mono text-slate-500">
-              {modelLabel.startsWith('auto') ? 'mejor modelo gratuito disponible' : modelLabel}
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-500/25 bg-blue-500/10 px-2.5 py-1 text-[10px] font-semibold text-blue-200">
-              <Sparkles className="h-3 w-3" /> Protocolo socrático activo
-            </span>
-          </div>
+        <div className="hidden shrink-0 items-center gap-3 sm:flex">
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-stone-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/80" />
+            {engineLabel}
+          </span>
+          <span className="hidden text-[10px] font-mono text-stone-600 lg:inline">
+            {modelLabel.startsWith('auto') ? 'mejor modelo gratuito disponible' : modelLabel}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-[10px] text-stone-400">
+            <Sparkles className="h-3 w-3" />
+            Protocolo socrático
+          </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
+      <div className="chat-grid flex min-h-0 flex-1 lg:grid lg:grid-cols-1">
         {/* Chat */}
         <TutorChat
           agent={{
@@ -261,134 +239,9 @@ export default async function TutorPage({
             pendingErrors,
           }}
           notes={{ total: notesTotal, titles: notesPreview.map((note) => note.title) }}
+          engines={engines}
         />
 
-        {/* Radar táctico */}
-        <aside className="space-y-4">
-          <div className="rounded-2xl glass-card p-4 space-y-4">
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-300 font-mono flex items-center gap-2">
-              <Target className="w-4 h-4 text-emerald-400" />
-              Radar táctico
-            </h2>
-
-            {/* Exámenes próximos */}
-            <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Próximos exámenes
-              </p>
-              {upcomingExams.length === 0 ? (
-                <p className="text-[11px] text-slate-500">
-                  Sin exámenes registrados para esta materia.
-                </p>
-              ) : (
-                upcomingExams.map((exam) => {
-                  const days = daysUntil(exam.examDate);
-                  return (
-                    <div
-                      key={exam.id}
-                      className="rounded-xl bg-[#070b14] border border-slate-800 px-3 py-2 space-y-0.5"
-                    >
-                      <p className="text-[11px] font-semibold text-slate-200 leading-snug">
-                        {exam.title}
-                      </p>
-                      <p className="text-[10px] font-mono text-amber-300 flex items-center gap-1.5">
-                        <CalendarClock className="w-3 h-3" />
-                        {days <= 0 ? 'Hoy' : days === 1 ? 'Mañana' : `En ${days} días`}
-                      </p>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Nivel medido (nunca supuesto) */}
-            <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Nivel medido por el catedrático
-              </p>
-              {measuredTopics.length === 0 ? (
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Todavía no hay ninguna medición real de esta materia{unmeasuredUnits > 0 ? ` (${unmeasuredUnits} unidades sin medir)` : ''}.
-                  El catedrático empezará preguntando y anotará el nivel que compruebe con tus
-                  respuestas o con un simulacro.
-                </p>
-              ) : (
-                measuredTopics.map((topic) => (
-                  <div key={topic.id} className="space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] text-slate-300 leading-snug line-clamp-1">
-                        {topic.title}
-                      </p>
-                      <span
-                        className={`text-[10px] font-mono shrink-0 px-1.5 py-0.5 rounded border ${
-                          MASTERY_SOURCE_META[
-                            (topic.masterySource as keyof typeof MASTERY_SOURCE_META) ?? 'sin_medir'
-                          ]?.badgeColor ?? MASTERY_SOURCE_META.autoevaluacion.badgeColor
-                        }`}
-                        title={
-                          MASTERY_SOURCE_META[
-                            (topic.masterySource as keyof typeof MASTERY_SOURCE_META) ?? 'sin_medir'
-                          ]?.hint
-                        }
-                      >
-                        {topic.masteryLevel}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          topic.masteryLevel < 40
-                            ? 'bg-rose-400'
-                            : topic.masteryLevel < 70
-                              ? 'bg-amber-400'
-                              : 'bg-emerald-400'
-                        }`}
-                        style={{ width: `${Math.max(4, topic.masteryLevel)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Errores pendientes */}
-            <div
-              className={`flex items-center gap-2 rounded-xl px-3 py-2 border text-[11px] ${
-                pendingErrors > 0
-                  ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
-                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-              }`}
-            >
-              <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-              {pendingErrors > 0 ? (
-                <span>
-                  {pendingErrors} {pendingErrors === 1 ? 'error pendiente' : 'errores pendientes'}{' '}
-                  de dominio en el banco.
-                </span>
-              ) : (
-                <span>Banco de errores al día en esta materia.</span>
-              )}
-            </div>
-          </div>
-
-          <p className="text-[10px] text-slate-500 leading-relaxed px-1">
-            💡 El catedrático conoce tus temas débiles, tus próximos exámenes y tus errores
-            pendientes. Cuanto más concreta sea tu pregunta, mejor será el diagnóstico.
-          </p>
-
-          <p className="text-[10px] text-slate-500 leading-relaxed px-1">
-            📎 Puedes <strong className="text-slate-400">enseñarle una captura o un PDF</strong> con el
-            clip (o pegando con Ctrl+V) y darle acceso a tus{' '}
-            <strong className="text-slate-400">apuntes</strong> con el interruptor de abajo: los lee de
-            verdad antes de responderte.
-          </p>
-
-          <p className="text-[10px] text-slate-500 leading-relaxed px-1">
-            📝 Y si te hace falta material, <strong className="text-slate-400">pídele los
-            apuntes</strong>: te los ofrecerá y, solo si tú dices que sí, los escribe y los deja en la
-            sección de su asignatura del cuaderno, listos para descargar o imprimir.
-          </p>
-        </aside>
       </div>
     </div>
   );

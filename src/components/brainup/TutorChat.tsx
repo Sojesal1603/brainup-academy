@@ -18,18 +18,23 @@ import {
   ImageIcon,
   Loader2,
   NotebookPen,
+  PanelRight,
   Paperclip,
   Printer,
   Ruler,
   RotateCcw,
   Send,
   ShieldQuestion,
-  User,
   X,
 } from 'lucide-react';
 import clsx from 'clsx';
 import MarkdownMessage from './MarkdownMessage';
-import NoteRenderer from '@/components/apuntes/NoteRenderer';
+import NoteSplitPanel, {
+  type EngineOption,
+  type NoteVariant,
+  type PanelMode,
+  type SplitNote,
+} from './NoteSplitPanel';
 import type { NoteProposal } from '@/lib/apuntesIa';
 import {
   ALLOWED_ATTACHMENT_HINT,
@@ -42,6 +47,90 @@ import {
   isAllowedMime,
   isImageMime,
 } from '@/lib/attachmentLimits';
+
+/**
+ * Cuánto se espera una respuesta antes de darla por perdida.
+ *
+ * El servidor ya se corta solo a los 30 s de IA y contesta con el respaldo
+ * local, así que este tope solo cubre el caso de que la conexión se quede
+ * colgada (red, servidor reiniciándose). Sin él, el spinner giraba para siempre
+ * y el alumno no sabía si esperar o recargar.
+ */
+const CHAT_TIMEOUT_MS = 150_000;
+/** Redactar un apunte es la llamada más cara del sistema: más margen. */
+const NOTES_TIMEOUT_MS = 240_000;
+
+/** Un error HTTP con su estado, para poder decidir si merece la pena reintentar. */
+class HttpStatusError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HttpStatusError';
+    this.status = status;
+  }
+}
+
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+/** Qué se le cuenta al alumno según lo que haya contestado el servidor. */
+function describeHttpStatus(status: number): string {
+  if (status === 401) return 'Tu sesión ha caducado. Recarga la página y vuelve a entrar.';
+  if (status === 403) return 'Esa acción no está permitida ahora mismo.';
+  if (status === 404) return 'No se ha encontrado el catedrático o la conversación. Recarga la página.';
+  if (status === 413) return 'La petición es demasiado grande: quita algún adjunto o acorta el mensaje.';
+  if (status === 429) {
+    return 'Ahora mismo no queda cupo de IA (los motores gratuitos se han agotado). Espera un minuto y vuelve a intentarlo: tu mensaje no se ha perdido.';
+  }
+  if (status === 502) {
+    return 'El motor de IA no ha contestado a tiempo. Suele ser saturación momentánea: vuelve a intentarlo en unos segundos.';
+  }
+  if (status === 503) {
+    return 'El servidor no está disponible un momento (puede estar arrancando). Vuelve a intentarlo en unos segundos.';
+  }
+  if (status === 504) return 'El servidor ha tardado demasiado en contestar. Vuelve a intentarlo.';
+  if (status >= 500) {
+    return `El servidor ha fallado al responder (error ${status}). Tu mensaje no se ha perdido: vuelve a intentarlo.`;
+  }
+  return `La petición no ha salido bien (error ${status}). Vuelve a intentarlo.`;
+}
+
+/** ¿El fallo es de red (fetch ni siquiera llegó a responder)? */
+function isNetworkFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'TypeError') return true;
+  return /failed to fetch|networkerror|network error|load failed|fetch failed|network request failed/i.test(
+    error.message
+  );
+}
+
+/** Mensaje en castellano para el alumno, en vez del «Failed to fetch» crudo. */
+function describeFetchError(error: unknown): string {
+  if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+    return 'La espera se ha cortado porque el catedrático ha tardado demasiado. No se ha perdido nada: vuelve a intentarlo.';
+  }
+  if (isNetworkFailure(error)) {
+    return 'Se ha cortado la conexión con el servidor (puede haberse reiniciado o haber fallado la red). Tu mensaje sigue aquí: pulsa «Reintentar».';
+  }
+  const message = error instanceof Error ? error.message.trim() : '';
+  return message.length > 0 ? message : 'Error inesperado del tutor.';
+}
+
+/** Solo se ofrece reintentar cuando el fallo puede irse con otra tentativa. */
+function canRetry(error: unknown): boolean {
+  if (error instanceof HttpStatusError) return error.status === 429 || error.status >= 500;
+  if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+    return true;
+  }
+  return isNetworkFailure(error);
+}
 
 type TutorStage =
   | 'diagnostico'
@@ -101,6 +190,18 @@ interface NoteDraftPreview {
   developedPoints: number;
   structureMissing: string[];
   model: string;
+  /** Motor que la ha escrito (para marcar su pestaña en la comparativa). */
+  provider: string;
+}
+
+/** Documento abierto en la vista dividida (borrador o apunte ya guardado). */
+interface PanelNote extends SplitNote {
+  /** Mensaje del chat al que pertenece: es lo que permite guardarlo. */
+  messageId: string;
+  /** Una entrada por motor: la misma unidad escrita por cada IA disponible. */
+  variants: NoteVariant[];
+  /** Motor cuya versión se está leyendo ahora. */
+  activeEngine: string;
 }
 
 /** Estado de cada propuesta de apunte, por mensaje. */
@@ -173,6 +274,8 @@ interface TutorChatProps {
   opening: TutorOpeningContext;
   /** Cuántos apuntes tiene de esta materia, para el interruptor de compartir. */
   notes: { total: number; titles: string[] };
+  /** Motores que pueden escribir ahora mismo: alimentan la comparativa. */
+  engines: EngineOption[];
 }
 
 /** Ficha de un adjunto: miniatura si es imagen, icono si es PDF, y su nombre. */
@@ -404,6 +507,7 @@ function NoteOfferCard({
   proposal,
   job,
   agentName,
+  onOpen,
   onPreview,
   onSave,
   onDismiss,
@@ -411,6 +515,8 @@ function NoteOfferCard({
   proposal: NoteProposal;
   job: NoteJob | undefined;
   agentName: string;
+  /** Abrirlo en la vista dividida para leerlo con calma. */
+  onOpen: () => void;
   /** Redactar (o volver a redactar) y enseñarlo sin guardarlo. */
   onPreview: () => void;
   /** Guardar el apunte que se acaba de leer, tal cual. */
@@ -424,9 +530,9 @@ function NoteOfferCard({
   const busy = job?.status === 'writing' || job?.status === 'saving';
 
   return (
-    <div className="space-y-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3.5 py-3">
-      <p className="flex items-start gap-2 text-[11px] leading-relaxed text-violet-200">
-        <NotebookPen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300" />
+    <div className="space-y-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3.5 py-3">
+      <p className="flex items-start gap-2 text-[11px] leading-relaxed text-stone-300">
+        <NotebookPen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300/80" />
         <span>
           {agentName} te ofrece <strong>unos apuntes suyos</strong>
           {unitLabel}: <strong>«{proposal.title}»</strong>. Los escribiría en tu cuaderno, en la
@@ -491,22 +597,26 @@ function NoteOfferCard({
             </p>
           )}
 
-          <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-800 bg-[#0a0a0c] px-3.5 py-3">
-            <NoteRenderer content={draft.content} />
-          </div>
-
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={onOpen}
+              title="Leerlo en la vista dividida, sin salir del chat"
+              className="flex items-center gap-1.5 rounded-lg bg-stone-200 px-2.5 py-1.5 text-[10px] font-semibold text-stone-900 transition-colors hover:bg-white"
+            >
+              <PanelRight className="h-3 w-3" />
+              Abrir documento
+            </button>
             <button
               onClick={onSave}
               disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg bg-violet-500 px-2.5 py-1.5 text-[10px] font-bold text-slate-950 transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-[10px] font-semibold text-stone-200 transition-colors hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {job?.status === 'saving' ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
                 <Check className="h-3 w-3" />
               )}
-              {job?.status === 'saving' ? 'Guardando…' : 'Me convence, guárdalo'}
+              {job?.status === 'saving' ? 'Guardando…' : 'Guardar'}
             </button>
             <button
               onClick={onPreview}
@@ -614,6 +724,7 @@ export default function TutorChat({
   initialMessages,
   opening,
   notes,
+  engines,
 }: TutorChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
@@ -621,6 +732,11 @@ export default function TutorChat({
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Turno que falló por red o por el servidor: se puede reenviar tal cual. */
+  const [failedTurn, setFailedTurn] = useState<{
+    text: string;
+    attachments: PendingAttachment[];
+  } | null>(null);
   const [measurement, setMeasurement] = useState<
     { unitNumber: number; title: string; mastery: number } | null
   >(null);
@@ -633,8 +749,16 @@ export default function TutorChat({
   const [sharedNotes, setSharedNotes] = useState<SharedNoteRef[]>([]);
   // Propuestas de apunte: pendientes, en redacción, escritas o rechazadas.
   const [noteJobs, setNoteJobs] = useState<Record<string, NoteJob>>({});
+  // Vista dividida: el documento que se lee al lado del chat.
+  const [panel, setPanel] = useState<PanelNote | null>(null);
+  const [panelSaving, setPanelSaving] = useState(false);
+  /** Chat a todo el ancho, texto Markdown o folio PDF digital. */
+  const [panelMode, setPanelMode] = useState<PanelMode>('chat');
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** ¿El alumno está al final del hilo? Si no, no se le mueve la vista. */
+  const nearBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   /** Adjuntos que el alumno ha quitado mientras subían (hay que borrarlos del servidor). */
@@ -643,13 +767,25 @@ export default function TutorChat({
   /** ¿Hay algún archivo subiendo todavía? (entonces no se puede enviar el turno) */
   const uploading = pending.some((attachment) => attachment.progress !== null);
 
+  // Autoscroll inteligente: baja solo si ya estabas abajo. Si estás releyendo
+  // un mensaje de hace diez turnos, una respuesta nueva no te arranca la vista.
   useEffect(() => {
+    if (!nearBottomRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, isSending]);
 
-  const send = async (rawText?: string) => {
+  const handleScroll = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    nearBottomRef.current =
+      element.scrollHeight - element.scrollTop - element.clientHeight < 140;
+  };
+
+  const send = async (rawText?: string, retryAttachments?: PendingAttachment[]) => {
     const text = (rawText ?? input).trim();
-    if ((!text && pending.length === 0) || isSending) return;
+    // Al reintentar, el turno viaja con los adjuntos que ya tenía: no se pierden.
+    const outgoing = retryAttachments ?? pending;
+    if ((!text && outgoing.length === 0) || isSending) return;
     if (uploading) {
       setAttachmentError('Espera a que terminen de subir los archivos: en cuanto estén, se envía el mensaje.');
       return;
@@ -658,8 +794,8 @@ export default function TutorChat({
     setError(null);
     setAttachmentError(null);
     setAttachmentWarning(null);
+    setFailedTurn(null);
 
-    const outgoing = pending;
     const optimisticId = `local-user-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
@@ -678,6 +814,7 @@ export default function TutorChat({
       const res = await fetch('/api/tutor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: timeoutSignal(CHAT_TIMEOUT_MS),
         body: JSON.stringify({
           agentId: agent.id,
           conversationId,
@@ -717,9 +854,18 @@ export default function TutorChat({
           }
         | null;
 
-      if (!res.ok || !data?.reply) {
-        throw new Error(data?.error || 'No se pudo obtener respuesta del catedrático.');
+      // El servidor siempre contesta JSON: si el estado no es 2xx, se usa su
+      // mensaje (ya viene en castellano) o el que corresponda al código.
+      if (!res.ok) {
+        throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
       }
+      if (!data?.reply) {
+        throw new Error(
+          data?.error || 'El catedrático ha contestado en blanco. Vuelve a intentarlo.'
+        );
+      }
+
+      setFailedTurn(null);
 
       if (data.conversationId) setConversationId(data.conversationId);
       if (data.model) setActiveModel(data.model);
@@ -782,10 +928,17 @@ export default function TutorChat({
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
       setInput(text);
       setPending(outgoing);
-      setError(err instanceof Error ? err.message : 'Error inesperado del tutor.');
+      setFailedTurn(canRetry(err) ? { text, attachments: outgoing } : null);
+      setError(describeFetchError(err));
     } finally {
       setIsSending(false);
     }
+  };
+
+  /** Reenvía el turno que se quedó sin respuesta, con su texto y sus adjuntos. */
+  const retrySend = () => {
+    if (!failedTurn || isSending) return;
+    void send(failedTurn.text, failedTurn.attachments);
   };
 
   /**
@@ -809,6 +962,7 @@ export default function TutorChat({
       const res = await fetch('/api/tutor/notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: timeoutSignal(NOTES_TIMEOUT_MS),
         body: JSON.stringify({
           agentId: agent.id,
           conversationId,
@@ -837,11 +991,15 @@ export default function TutorChat({
             };
             quality?: { words: number; developedPoints: number; structureMissing?: string[] };
             model?: string;
+            provider?: string;
             error?: string;
           }
         | null;
 
-      if (!res.ok || !data?.ok || !data.draftToken || !data.draft) {
+      if (!res.ok) {
+        throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
+      }
+      if (!data?.ok || !data.draftToken || !data.draft) {
         throw new Error(data?.error || 'No se han podido redactar los apuntes.');
       }
 
@@ -868,15 +1026,48 @@ export default function TutorChat({
             developedPoints: data.quality?.developedPoints ?? 0,
             structureMissing: data.quality?.structureMissing ?? [],
             model: data.model ?? '',
+            provider: data.provider ?? '',
           },
         },
       }));
+
+      // Acaba de entregar el documento: se abre en la vista dividida, que es
+      // donde se lee, se compara con otros motores y se guarda sin salir del
+      // chat. La versión recién escrita entra como primera pestaña.
+      const engineId = data.provider ?? '';
+      setPanel({
+        messageId: message.id,
+        title: draft.title,
+        unitLabel: draft.unitNumber
+          ? `Unidad ${draft.unitNumber} · ${draft.unitTitle}`
+          : draft.unitTitle,
+        unitNumber: draft.unitNumber,
+        subjectName: draft.subjectName,
+        authorLabel: `Del catedrático ${draft.agentName}`,
+        content: draft.content,
+        words: data.quality?.words ?? 0,
+        isDraft: true,
+        activeEngine: engineId,
+        variants: [
+          {
+            engine: engineId,
+            label: engines.find((engine) => engine.id === engineId)?.name ?? 'Motor',
+            model: data.model ?? '',
+            status: 'ready',
+            token,
+            title: draft.title,
+            content: draft.content,
+            words: data.quality?.words ?? 0,
+          },
+        ],
+      });
+      setPanelMode('markdown');
     } catch (err) {
       setNoteJobs((prev) => ({
         ...prev,
         [message.id]: {
           status: 'error',
-          error: err instanceof Error ? err.message : 'Error inesperado.',
+          error: describeFetchError(err),
         },
       }));
     }
@@ -897,6 +1088,7 @@ export default function TutorChat({
       const res = await fetch('/api/tutor/notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: timeoutSignal(NOTES_TIMEOUT_MS),
         body: JSON.stringify({
           agentId: agent.id,
           conversationId,
@@ -909,14 +1101,34 @@ export default function TutorChat({
         | { ok?: boolean; updated?: boolean; note?: WrittenNoteRef; error?: string }
         | null;
 
-      if (!res.ok || !data?.ok || !data.note) {
+      if (!res.ok) {
+        throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
+      }
+      if (!data?.ok || !data.note) {
         throw new Error(data?.error || 'No se ha podido guardar el apunte.');
       }
 
+      const savedNote = data.note;
       setNoteJobs((prev) => ({
         ...prev,
-        [message.id]: { status: 'done', note: data.note, updated: Boolean(data.updated) },
+        [message.id]: { status: 'done', note: savedNote, updated: Boolean(data.updated) },
       }));
+      // Si se guarda desde la vista dividida, el panel sigue abierto pero deja
+      // de ser un borrador: aparecen las salidas (.md, cuaderno).
+      setPanel((prev) =>
+        prev && prev.messageId === message.id
+          ? {
+              ...prev,
+              isDraft: false,
+              noteId: savedNote.id,
+              updatedLabel: new Date().toLocaleDateString('es-ES', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              }),
+            }
+          : prev
+      );
       // El cuaderno ya tiene el apunte nuevo: el radar lateral se refresca.
       router.refresh();
     } catch (err) {
@@ -924,7 +1136,7 @@ export default function TutorChat({
         ...prev,
         [message.id]: {
           status: 'error',
-          error: err instanceof Error ? err.message : 'Error inesperado.',
+          error: describeFetchError(err),
         },
       }));
     }
@@ -1051,9 +1263,282 @@ export default function TutorChat({
     setAttachmentError(null);
     setAttachmentWarning(null);
     setSharedNotes([]);
+    setPanel(null);
+    setPanelMode('chat');
+  };
+
+  /** Vuelve al chat sin perder el documento: queda listo para reabrirlo. */
+  const closePanel = () => setPanelMode('chat');
+
+  /** Abre en el panel el borrador que ya está escrito para ese mensaje. */
+  const openDraftPanel = (message: ChatMessage) => {
+    const draft = noteJobs[message.id]?.draft;
+    if (!draft) return;
+    setPanel({
+      messageId: message.id,
+      title: draft.title,
+      unitLabel: draft.unitNumber
+        ? `Unidad ${draft.unitNumber} · ${draft.unitTitle}`
+        : draft.unitTitle,
+      unitNumber: draft.unitNumber ?? null,
+      subjectName: draft.subjectName,
+      authorLabel: `Del catedrático ${draft.agentName}`,
+      content: draft.content,
+      words: draft.words,
+      isDraft: true,
+      activeEngine: draft.provider || 'original',
+      variants: draft.token
+        ? [
+            {
+              engine: draft.provider || 'original',
+              label:
+                engines.find((engine) => engine.id === draft.provider)?.name ??
+                'Versión del catedrático',
+              model: draft.model,
+              status: 'ready',
+              token: draft.token,
+              title: draft.title,
+              content: draft.content,
+              words: draft.words,
+            },
+          ]
+        : [],
+    });
+    setPanelMode('markdown');
+  };
+
+  /** Trae del servidor un apunte ya guardado y lo abre al lado del chat. */
+  const openSavedNotePanel = async (message: ChatMessage) => {
+    const note = noteJobs[message.id]?.note;
+    if (!note) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/notes/${note.id}`, {
+        signal: timeoutSignal(NOTES_TIMEOUT_MS),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | {
+            note?: {
+              id: string;
+              title: string;
+              content: string;
+              unitNumber: number | null;
+              unitTitle: string;
+              subjectName: string;
+              updatedAt: string;
+            };
+            error?: string;
+          }
+        | null;
+      if (!res.ok) {
+        throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
+      }
+      if (!data?.note) throw new Error(data?.error || 'No se ha podido abrir el apunte.');
+      const opened = data.note;
+      setPanel({
+        messageId: message.id,
+        title: opened.title,
+        unitLabel: opened.unitNumber
+          ? `Unidad ${opened.unitNumber} · ${opened.unitTitle}`
+          : opened.unitTitle,
+        subjectName: opened.subjectName,
+        authorLabel: `Del catedrático ${agent.name}`,
+        content: opened.content,
+        noteId: opened.id,
+        updatedLabel: new Date(opened.updatedAt).toLocaleDateString('es-ES', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        }),
+        isDraft: false,
+        unitNumber: opened.unitNumber,
+        activeEngine: '',
+        variants: [],
+      });
+      setPanelMode('markdown');
+    } catch (err) {
+      setError(describeFetchError(err));
+    }
+  };
+
+  /**
+   * «Guardar esta versión»: entra en el cuaderno exactamente la versión que el
+   * alumno está leyendo, no la primera que se escribió. Se reutiliza su vale de
+   * borrador, así que no se vuelve a gastar una llamada de IA.
+   */
+  const savePanelNote = async () => {
+    if (!panel) return;
+    const variant =
+      panel.variants.find(
+        (item) => item.status === 'ready' && item.token && item.engine === panel.activeEngine
+      ) ?? panel.variants.find((item) => item.status === 'ready' && item.token);
+    if (!variant?.token) return;
+
+    setPanelSaving(true);
+    try {
+      const res = await fetch('/api/tutor/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: agent.id,
+          conversationId,
+          confirmed: true,
+          draftToken: variant.token,
+        }),
+      });
+
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; updated?: boolean; note?: WrittenNoteRef; error?: string }
+        | null;
+
+      if (!res.ok) {
+        throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
+      }
+      if (!data?.ok || !data.note) {
+        throw new Error(data?.error || 'No se ha podido guardar el apunte.');
+      }
+
+      const saved = data.note;
+      setNoteJobs((prev) => ({
+        ...prev,
+        [panel.messageId]: { status: 'done', note: saved, updated: Boolean(data.updated) },
+      }));
+      setPanel((prev) =>
+        prev
+          ? {
+              ...prev,
+              isDraft: false,
+              noteId: saved.id,
+              updatedLabel: new Date().toLocaleDateString('es-ES', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              }),
+            }
+          : prev
+      );
+      router.refresh();
+    } catch (err) {
+      setError(describeFetchError(err));
+    } finally {
+      setPanelSaving(false);
+    }
+  };
+
+  /** Lee otra versión ya escrita, sin volver a pedirla. */
+  const selectVariant = (engine: string) =>
+    setPanel((prev) => (prev ? { ...prev, activeEngine: engine } : prev));
+
+  /**
+   * Pide la MISMA unidad al motor elegido y guarda su versión como una pestaña
+   * más. No toca el cuaderno: ahí solo entra lo que el alumno fija al guardar.
+   */
+  const generateVariant = async (engineId: string) => {
+    if (!panel) return;
+    const message = messages.find((item) => item.id === panel.messageId);
+    const proposal = message?.noteProposal;
+    const label = engines.find((engine) => engine.id === engineId)?.name ?? engineId;
+    const current = panel.variants.find((variant) => variant.engine === panel.activeEngine);
+
+    setPanel((prev) =>
+      prev
+        ? {
+            ...prev,
+            variants: [
+              ...prev.variants.filter((variant) => variant.engine !== engineId),
+              { engine: engineId, label, model: '', status: 'pending' },
+            ],
+          }
+        : prev
+    );
+
+    try {
+      const res = await fetch('/api/tutor/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: timeoutSignal(NOTES_TIMEOUT_MS),
+        body: JSON.stringify({
+          agentId: agent.id,
+          conversationId,
+          unitNumber: proposal?.unitNumber ?? panel.unitNumber ?? null,
+          title: proposal?.title ?? current?.title ?? panel.title,
+          confirmed: true,
+          preview: true,
+          // El motor de ESTA pestaña, no el que elija la cadena por su cuenta.
+          provider: engineId,
+        }),
+      });
+
+      const data = (await res.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            draftToken?: string;
+            draft?: { title: string; content: string };
+            quality?: { words: number };
+            model?: string;
+            error?: string;
+          }
+        | null;
+
+      if (!res.ok) {
+        throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
+      }
+      if (!data?.ok || !data.draftToken || !data.draft) {
+        throw new Error(data?.error || 'Ese motor no ha podido escribir su versión.');
+      }
+
+      const draft = data.draft;
+      const variant: NoteVariant = {
+        engine: engineId,
+        label,
+        model: data.model ?? '',
+        status: 'ready',
+        token: data.draftToken,
+        title: draft.title,
+        content: draft.content,
+        words: data.quality?.words ?? 0,
+      };
+
+      setPanel((prev) =>
+        prev
+          ? {
+              ...prev,
+              variants: [...prev.variants.filter((item) => item.engine !== engineId), variant],
+              activeEngine: engineId,
+            }
+          : prev
+      );
+    } catch (err) {
+      setPanel((prev) =>
+        prev
+          ? {
+              ...prev,
+              variants: [
+                ...prev.variants.filter((item) => item.engine !== engineId),
+                {
+                  engine: engineId,
+                  label,
+                  model: '',
+                  status: 'error',
+                  error: describeFetchError(err),
+                },
+              ],
+            }
+          : prev
+      );
+    }
   };
 
   const hasMessages = messages.length > 0;
+
+  /** Proveedor que está respondiendo, para el rótulo de la barra. */
+  const providerName = /groq/i.test(activeModel)
+    ? 'Groq'
+    : /openrouter/i.test(activeModel)
+      ? 'OpenRouter'
+      : /ollama|local/i.test(activeModel)
+        ? 'Local'
+        : 'Gemini';
 
   const openingMessage = useMemo(() => buildOpeningMessage(agent, opening), [agent, opening]);
 
@@ -1097,53 +1582,84 @@ export default function TutorChat({
     return null;
   }, [messages]);
 
+  /** La versión que se está leyendo manda sobre el cuerpo del documento. */
+  const activeVariant = panel
+    ? panel.variants.find(
+        (variant) => variant.engine === panel.activeEngine && variant.status === 'ready'
+      )
+    : undefined;
+  const panelNote: SplitNote | null = panel
+    ? {
+        ...panel,
+        title: activeVariant?.title ?? panel.title,
+        content: activeVariant?.content ?? panel.content,
+        words: activeVariant?.words ?? panel.words,
+      }
+    : null;
+
   return (
-    <div className="flex flex-col rounded-2xl bg-[#0b101c] border border-white/10 overflow-hidden shadow-lg shadow-black/20">
-      {/* Barra de herramientas */}
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 glass-card">
-        <div className="flex items-center gap-2.5 min-w-0">
+    <>
+      <div
+        className="chat-shell flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0a0a0b]"
+      >
+      {/* Barra de herramientas: el estado del catedrático, sin ruido. */}
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <span
-            className="text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider shrink-0"
+            className="shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]"
             style={{
-              backgroundColor: `${agent.subject.color}15`,
-              borderColor: `${agent.subject.color}40`,
+              backgroundColor: `${agent.subject.color}12`,
+              borderColor: `${agent.subject.color}33`,
               color: agent.subject.color,
             }}
           >
             {agent.subject.name}
           </span>
-          <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] text-slate-400 font-mono truncate">
-            <span className="relative flex h-1.5 w-1.5 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            </span>
-            {/groq/i.test(activeModel)
-              ? 'Groq'
-              : /openrouter/i.test(activeModel)
-                ? 'OpenRouter'
-                : /ollama|local/i.test(activeModel)
-                  ? 'Local'
-                  : 'Gemini'}
+          <span className="hidden items-center gap-1.5 truncate text-[11px] text-stone-500 sm:inline-flex">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/80" />
+            {providerName}
             {' · '}
-            {activeModel.startsWith('auto') ? 'mejor modelo' : activeModel} · historial local
+            {activeModel.startsWith('auto') ? 'mejor modelo' : activeModel}
           </span>
         </div>
 
-        <button
-          onClick={startNewConversation}
-          disabled={isSending}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-slate-300 bg-slate-800/70 hover:bg-slate-700 transition-colors disabled:opacity-50 shrink-0"
-          title="Empezar una consulta nueva (se creará otra conversación)"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          Nueva consulta
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {panel && panelMode === 'chat' && (
+            <button
+              onClick={() => setPanelMode('markdown')}
+              className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-medium text-stone-300 transition-colors hover:border-white/20 hover:text-stone-100"
+              title="Abrir el documento al lado del chat"
+            >
+              <PanelRight className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Documento</span>
+            </button>
+          )}
+          {panelMode !== 'chat' && (
+            <button
+              onClick={closePanel}
+              className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-medium text-stone-300 transition-colors hover:border-white/20 hover:text-stone-100"
+              title="Volver al chat a pantalla completa"
+            >
+              <PanelRight className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Cerrar documento</span>
+            </button>
+          )}
+          <button
+            onClick={startNewConversation}
+            disabled={isSending}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-stone-400 transition-colors hover:bg-white/[0.05] hover:text-stone-100 disabled:opacity-40"
+            title="Empezar una consulta nueva (se creará otra conversación)"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Nueva consulta</span>
+          </button>
+        </div>
       </div>
 
       {/* Medición real anotada por el catedrático */}
       {measurement && (
-        <div className="flex items-start gap-2 border-b border-violet-500/25 bg-violet-500/10 px-4 py-2 text-[11px] text-violet-200">
-          <Ruler className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300" />
+        <div className="flex shrink-0 items-start gap-2 border-b border-white/[0.05] px-4 py-2 text-[11px] text-stone-400">
+          <Ruler className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
           <span>
             Nivel registrado por el catedrático: <strong>U{measurement.unitNumber}</strong>{' '}
             «{measurement.title}» → <strong>{measurement.mastery}%</strong>. Ya cuenta como medido en
@@ -1154,8 +1670,8 @@ export default function TutorChat({
 
       {/* Apuntes que el catedrático está leyendo en este momento */}
       {sharedNotes.length > 0 && (
-        <div className="flex items-start gap-2 border-b border-emerald-500/25 bg-emerald-500/5 px-4 py-2 text-[11px] text-emerald-200">
-          <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
+        <div className="flex shrink-0 items-start gap-2 border-b border-white/[0.05] px-4 py-2 text-[11px] text-stone-400">
+          <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400/70" />
           <span>
             El catedrático está leyendo {sharedNotes.length}{' '}
             {sharedNotes.length === 1 ? 'apunte' : 'apuntes'} tuyos:{' '}
@@ -1170,51 +1686,32 @@ export default function TutorChat({
         </div>
       )}
 
-      {/* Progreso socrático de la sesión: el paso activo va iluminado en neón. */}
+      {/* Progreso socrático: una línea de pasos, sin neones. */}
       {hasMessages && (
-        <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-white/10 bg-[#080d18]/90 overflow-x-auto backdrop-blur-sm">
+        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-white/[0.05] px-4 py-2">
           {STAGE_ORDER.map((stage, index) => {
             const activeIndex = currentStage ? STAGE_ORDER.indexOf(currentStage) : -1;
             const isDone = activeIndex > -1 && index < activeIndex;
             const isActive = stage === currentStage;
 
             return (
-              <div key={stage} className="flex items-center gap-1.5 shrink-0">
+              <div key={stage} className="flex shrink-0 items-center gap-1.5">
                 <span
                   className={clsx(
-                    'relative flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-bold font-mono uppercase tracking-wider transition-all duration-300',
+                    'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors',
                     isActive
-                      ? `${STAGE_META[stage].className} scale-[1.03]`
+                      ? 'bg-white/[0.07] text-stone-100'
                       : isDone
-                        ? 'border-slate-600 bg-slate-800/70 text-slate-300'
-                        : 'border-slate-800 bg-transparent text-slate-600'
+                        ? 'text-stone-400'
+                        : 'text-stone-600'
                   )}
-                  style={
-                    isActive
-                      ? {
-                          boxShadow:
-                            '0 0 16px rgba(59,130,246,0.45), inset 0 0 10px rgba(139,92,246,0.25)',
-                        }
-                      : undefined
-                  }
                 >
-                  {isActive && (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-300" />
-                    </span>
-                  )}
-                  {isDone && <Check className="w-2.5 h-2.5" />}
+                  {isDone && <Check className="h-2.5 w-2.5" />}
                   {STAGE_META[stage].label}
                 </span>
                 {index < STAGE_ORDER.length - 1 && (
                   <span
-                    className={clsx(
-                      'h-px w-3',
-                      isDone
-                        ? 'bg-blue-400/70 shadow-[0_0_8px_rgba(59,130,246,0.8)]'
-                        : 'bg-slate-700'
-                    )}
+                    className={clsx('h-px w-2.5', isDone ? 'bg-stone-600' : 'bg-white/[0.07]')}
                   />
                 )}
               </div>
@@ -1223,38 +1720,31 @@ export default function TutorChat({
         </div>
       )}
 
-      {/* Lista de mensajes */}
-      <div className="flex-1 min-h-[440px] max-h-[62vh] overflow-y-auto px-4 py-5 space-y-5 sm:px-6">
+      {/* Lista de mensajes: ocupa el alto disponible y se desplaza dentro. */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+      >
+        <div className="mx-auto w-full max-w-3xl space-y-8">
         {/* Apertura proactiva del catedrático (sin gastar API) */}
         {!hasMessages && (
-          <div className="flex gap-3">
+          <div className="chat-message flex gap-3">
             <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 mt-0.5"
-              style={{
-                backgroundColor: `${agent.subject.color}15`,
-                borderColor: `${agent.subject.color}40`,
-                color: agent.subject.color,
-              }}
+              className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.03]"
+              style={{ color: agent.subject.color }}
             >
-              <GraduationCap className="w-4 h-4" />
+              <GraduationCap className="h-3.5 w-3.5" />
             </div>
 
-            <div className="flex-1 min-w-0 space-y-3">
-              <div
-                className="relative overflow-hidden rounded-2xl rounded-tl-md border bg-gradient-to-br from-[#151b2b]/95 to-[#0f1422]/95 px-4 py-3 space-y-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
-                style={{ borderColor: `${agent.subject.color}4d` }}
-              >
-                <span
-                  className="absolute inset-y-0 left-0 w-[2px]"
-                  style={{
-                    background: `linear-gradient(180deg, ${agent.subject.color}, transparent)`,
-                  }}
-                  aria-hidden
-                />
-                <span className="inline-flex items-center text-[10px] font-bold font-mono uppercase tracking-wider px-2 py-0.5 rounded border bg-emerald-500/10 text-emerald-300 border-emerald-500/40">
+            <div className="min-w-0 flex-1 space-y-4">
+              <div className="space-y-2">
+                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-stone-500">
                   Primer contacto
-                </span>
-                <MarkdownMessage content={openingMessage} />
+                </p>
+                <div className="text-[15px] leading-7 text-stone-200/90">
+                  <MarkdownMessage content={openingMessage} />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-2">
@@ -1263,7 +1753,7 @@ export default function TutorChat({
                     key={starter.label}
                     onClick={() => send(starter.text)}
                     disabled={isSending}
-                    className="group flex items-center justify-between gap-3 text-left text-xs text-slate-300 glass-card hover:bg-[#111a2e] border border-white/10 hover:border-emerald-500/40 rounded-xl px-3.5 py-2.5 transition-colors disabled:opacity-50"
+                    className="group flex items-center justify-between gap-3 rounded-lg border border-white/[0.07] px-3.5 py-2.5 text-left text-[12.5px] text-stone-300 transition-colors hover:border-white/20 hover:bg-white/[0.03] disabled:opacity-50"
                   >
                     <span className="font-semibold text-slate-200">{starter.label}</span>
                     <span className="flex items-center gap-1.5 text-[10px] text-slate-500 group-hover:text-emerald-400">
@@ -1283,8 +1773,8 @@ export default function TutorChat({
 
           if (isUser) {
             return (
-              <div key={message.id} className="flex justify-end gap-3">
-                <div className="max-w-[85%] sm:max-w-[75%] space-y-1.5">
+              <div key={message.id} className="chat-message flex justify-end">
+                <div className="max-w-[88%] space-y-1.5 sm:max-w-[75%]">
                   {message.attachments && message.attachments.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1.5">
                       {message.attachments.map((attachment, index) => (
@@ -1296,61 +1786,57 @@ export default function TutorChat({
                     </div>
                   )}
                   {message.content.trim().length > 0 && (
-                    <div className="rounded-2xl rounded-br-md bg-emerald-500/90 px-4 py-2.5 shadow-sm">
-                      <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-slate-950">
+                    <div className="rounded-2xl rounded-br-md border border-white/[0.07] bg-white/[0.05] px-4 py-2.5">
+                      <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-stone-100">
                         {message.content}
                       </p>
                     </div>
                   )}
-                </div>
-                <div className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 shrink-0 mt-0.5">
-                  <User className="w-4 h-4" />
                 </div>
               </div>
             );
           }
 
           return (
-            <div key={message.id} className="flex gap-3">
+            <div key={message.id} className="chat-message flex gap-3">
               <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 mt-0.5"
-                style={{
-                  backgroundColor: `${agent.subject.color}15`,
-                  borderColor: `${agent.subject.color}40`,
-                  color: agent.subject.color,
-                }}
+                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.03]"
+                style={{ color: agent.subject.color }}
               >
-                <GraduationCap className="w-4 h-4" />
+                <GraduationCap className="h-3.5 w-3.5" />
               </div>
 
-              <div className="max-w-[88%] sm:max-w-[78%] space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400 tracking-wide">
-                    {agent.name}
-                  </span>
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[12px] font-medium text-stone-300">{agent.name}</span>
                   {stageMeta && (
-                    <span
-                      className={clsx(
-                        'inline-flex items-center text-[10px] font-bold font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border',
-                        stageMeta.className
-                      )}
-                    >
+                    <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-stone-400">
                       {stageMeta.label}
                     </span>
                   )}
+                  {noteJobs[message.id]?.draft && (
+                    <button
+                      onClick={() => openDraftPanel(message)}
+                      title="Leerlo en la vista dividida, sin salir del chat"
+                      className="flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-stone-300 transition-colors hover:border-white/25 hover:text-white"
+                    >
+                      <PanelRight className="h-3 w-3" />
+                      Vista previa
+                    </button>
+                  )}
+                  {noteJobs[message.id]?.note && (
+                    <button
+                      onClick={() => void openSavedNotePanel(message)}
+                      title="Abrir el apunte guardado al lado del chat"
+                      className="flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-stone-300 transition-colors hover:border-white/25 hover:text-white"
+                    >
+                      <FileText className="h-3 w-3" />
+                      Abrir documento
+                    </button>
+                  )}
                 </div>
 
-                <div
-                  className="relative overflow-hidden rounded-2xl rounded-tl-md border bg-gradient-to-br from-[#151b2b]/95 to-[#0f1422]/95 px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
-                  style={{ borderColor: `${agent.subject.color}4d` }}
-                >
-                  <span
-                    className="absolute inset-y-0 left-0 w-[2px]"
-                    style={{
-                      background: `linear-gradient(180deg, ${agent.subject.color}, transparent)`,
-                    }}
-                    aria-hidden
-                  />
+                <div className="text-[15px] leading-7 text-stone-200/90">
                   <MarkdownMessage content={message.content} />
                 </div>
 
@@ -1360,6 +1846,7 @@ export default function TutorChat({
                     proposal={message.noteProposal}
                     job={noteJobs[message.id]}
                     agentName={agent.name}
+                    onOpen={() => openDraftPanel(message)}
                     onPreview={() => requestNotePreview(message)}
                     onSave={() => saveNoteDraft(message)}
                     onDismiss={() => dismissNote(message.id)}
@@ -1397,19 +1884,32 @@ export default function TutorChat({
           </div>
         )}
 
-        <div ref={bottomRef} />
+          <div ref={bottomRef} />
+        </div>
       </div>
 
       {/* Error */}
       {error && (
         <div className="mx-4 sm:mx-6 mb-3 flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-rose-200">
           <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-          <p className="text-xs leading-relaxed">{error}</p>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <p className="text-xs leading-relaxed">{error}</p>
+            {failedTurn && (
+              <button
+                onClick={retrySend}
+                disabled={isSending}
+                className="flex items-center gap-1.5 rounded-lg border border-rose-400/40 bg-rose-500/10 px-2.5 py-1 text-[10px] font-semibold text-rose-100 transition-colors hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw className="h-3 w-3" />
+                {isSending ? 'Reintentando…' : 'Reintentar el envío'}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       {/* Compartir apuntes: lo que el catedrático puede leer de tu cuaderno */}
-      <div className="flex flex-wrap items-center gap-2 border-t border-white/10 glass-card px-4 pt-3 sm:px-6">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/[0.06] px-4 pt-2.5 sm:px-6">
         <button
           onClick={() => setShareNotes((prev) => !prev)}
           className={clsx(
@@ -1438,8 +1938,9 @@ export default function TutorChat({
         )}
       </div>
 
-      {/* Cuadro de escritura */}
-      <div className="glass-card px-4 py-3 sm:px-6">
+      {/* Cuadro de escritura, pegado al borde inferior */}
+      <div className="shrink-0 bg-[#0b0b0d] px-4 pb-3 pt-1 sm:px-6">
+        <div className="mx-auto w-full max-w-3xl">
         {/* Archivos listos para enviar */}
         {pending.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
@@ -1573,12 +2074,34 @@ export default function TutorChat({
           </p>
         )}
 
-        <p className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-2">
-          <ShieldQuestion className="w-3 h-3" />
-          Enter para enviar · Shift+Enter para salto de línea · Ctrl+V pega una captura ·{' '}
-          {ALLOWED_ATTACHMENT_HINT} · fórmulas en LaTeX con $...$
-        </p>
+          <p className="mt-2 flex items-center gap-1.5 text-[10px] text-stone-600">
+            <ShieldQuestion className="h-3 w-3 shrink-0" />
+            Enter para enviar · Shift+Enter salto de línea · Ctrl+V pega una captura ·{' '}
+            {ALLOWED_ATTACHMENT_HINT}
+          </p>
+        </div>
       </div>
-    </div>
+      </div>
+
+      {panelMode !== 'chat' && (
+        <NoteSplitPanel
+          note={panelNote}
+          mode={panelMode}
+          onMode={setPanelMode}
+          onClose={closePanel}
+          onSave={
+            panelNote?.isDraft && panel?.variants.some((variant) => variant.token)
+              ? savePanelNote
+              : undefined
+          }
+          saving={panelSaving}
+          variants={panel?.variants ?? []}
+          engines={engines}
+          activeEngine={panel?.activeEngine ?? ''}
+          onSelectEngine={selectVariant}
+          onGenerate={generateVariant}
+        />
+      )}
+    </>
   );
 }

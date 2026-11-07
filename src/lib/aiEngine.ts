@@ -77,6 +77,15 @@ export interface AiTextParams {
    * memoria, auditoría). Con el cupo justo cede el turno al alumno.
    */
   priority?: 'alumno' | 'fondo';
+  /**
+   * Fuerza ESTE proveedor y ninguno más.
+   *
+   * Lo usa la comparativa de apuntes: el alumno pide la misma unidad a Gemini y
+   * a Groq para quedarse con la versión que mejor le sienta. Sin esto, la cadena
+   * elegiría por él y las dos pestañas podrían acabar escritas por el mismo
+   * motor (o por otro distinto del que dice la pestaña).
+   */
+  provider?: AiProvider;
 }
 
 export interface ModelCandidate {
@@ -586,6 +595,26 @@ export function getOpenRouterKey(): string | null {
 
 export function getNvidiaKey(): string | null {
   return getProviderKeys('nvidia')[0]?.key ?? null;
+}
+
+/** Un motor disponible, con el nombre que ve el alumno en la interfaz. */
+export interface EngineOption {
+  id: AiProvider;
+  name: string;
+}
+
+/** Motores que pueden escribir ahora mismo (los que tienen clave o local vivo). */
+export function getConfiguredEngines(): EngineOption[] {
+  return getConfiguredProviders().map((id) => ({ id, name: engineDisplayName(id) }));
+}
+
+/** Cómo se llama cada motor en la interfaz, sin tecnicismos. */
+function engineDisplayName(provider: AiProvider): string {
+  if (provider === 'gemini') return 'Gemini';
+  if (provider === 'groq') return 'Groq';
+  if (provider === 'openrouter') return 'OpenRouter';
+  if (provider === 'nvidia') return 'NVIDIA';
+  return 'Modelo local';
 }
 
 export function getConfiguredProviders(): AiProvider[] {
@@ -1232,7 +1261,7 @@ function forcedModel(provider: AiProvider): string | null {
  * Cadena ordenada de modelos a intentar: el mejor primero, saltando los que
  * están en enfriamiento. Los modelos forzados por env van en cabeza.
  */
-export async function getCandidateChain(): Promise<ModelCandidate[]> {
+export async function getCandidateChain(only?: AiProvider): Promise<ModelCandidate[]> {
   // Antes de armar la cadena se mira (con caché) si hay modelo local.
   await probeOllama();
   const chain: ModelCandidate[] = [];
@@ -1240,6 +1269,7 @@ export async function getCandidateChain(): Promise<ModelCandidate[]> {
     if (!chain.some((c) => c.key === candidate.key)) chain.push(candidate);
   };
   for (const provider of configuredProviderOrder()) {
+    if (only && provider !== only) continue;
     const forced = forcedModel(provider);
     if (forced) {
       push({
@@ -1732,7 +1762,7 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
       'quota'
     );
   }
-  const chain = await getCandidateChain();
+  const chain = await getCandidateChain(params.provider);
   const attempts: Array<{ key: string; outcome: string; note?: string }> = [];
   // El reloj del turno: la cadena entera comparte un solo presupuesto.
   const budgetMs = Math.max(1_000, params.budgetMs ?? AI_TEXT_BUDGET_MS);
@@ -1741,9 +1771,14 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
   if (chain.length === 0) {
     const configured = getConfiguredProviders();
     const hasCloudKeys = Boolean(getApiKey('gemini') || getApiKey('groq') || getApiKey('openrouter'));
-    const message = !hasCloudKeys
-      ? 'El motor de IA no tiene por dónde funcionar: no hay ninguna clave en el .env (GEMINI_API_KEY, GROQ_API_KEY u OPENROUTER_API_KEY) y tampoco un modelo local levantado. Pon una clave gratuita o arranca Ollama (`npm run ollama:doctor`).'
-      : 'Todos los modelos gratuitos están saturados ahora mismo. Espera un minuto y reinténtalo.';
+    const forcedNote = params.provider
+      ? ` El motor elegido (${engineDisplayName(params.provider)}) no tiene ahora mismo ningún modelo con cupo disponible.`
+      : '';
+    const message =
+      (!hasCloudKeys
+        ? 'El motor de IA no tiene por dónde funcionar: no hay ninguna clave en el .env (GEMINI_API_KEY, GROQ_API_KEY u OPENROUTER_API_KEY) y tampoco un modelo local levantado. Pon una clave gratuita o arranca Ollama (`npm run ollama:doctor`).'
+        : 'Todos los modelos gratuitos están saturados ahora mismo. Espera un minuto y reinténtalo.') +
+      forcedNote;
     lastDecision = { at: Date.now(), provider: null, model: null, ranked: [], attempts };
     throw new TutorError(message, configured.length === 0 ? 503 : 429, 'Sin candidatos disponibles');
   }

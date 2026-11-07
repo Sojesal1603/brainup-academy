@@ -11,7 +11,14 @@ import {
   type NoteQuality,
 } from '@/lib/apuntesIa';
 import { noteExcerpt } from '@/lib/tutorNotes';
-import { hasAiProviderAsync, hasAnyFreeKey, runAiText, TutorError } from '@/lib/aiEngine';
+import {
+  getConfiguredProviders,
+  hasAiProviderAsync,
+  hasAnyFreeKey,
+  runAiText,
+  TutorError,
+  type AiProvider,
+} from '@/lib/aiEngine';
 import { rememberNoteDraft, takeNoteDraft } from '@/lib/noteDrafts';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
 
@@ -97,7 +104,12 @@ interface NotesBody {
   preview?: unknown;
   /** Vale de un borrador ya redactado que hay que guardar tal cual (paso 2). */
   draftToken?: unknown;
+  /** Motor concreto con el que redactar (comparativa multi-IA). */
+  provider?: unknown;
 }
+
+/** Motores que se pueden pedir explícitamente desde la comparativa. */
+const COMPARABLE_PROVIDERS: AiProvider[] = ['gemini', 'groq', 'openrouter', 'nvidia', 'ollama'];
 
 /**
  * Cómo explicó el profesor el tema, con las palabras del alumno.
@@ -268,6 +280,23 @@ export async function POST(request: Request) {
   const preview = body.preview === true;
   /** Vale de un borrador ya redactado que hay que guardar tal cual. */
   const draftToken = typeof body.draftToken === 'string' ? body.draftToken.trim() : '';
+  /**
+   * Motor elegido a mano para esta versión del apunte. Es opcional: sin él, la
+   * cadena decide como siempre. Con él, la pestaña de la comparativa enseña la
+   * versión de ESE motor y ninguna otra.
+   */
+  const requestedProvider = COMPARABLE_PROVIDERS.includes(body.provider as AiProvider)
+    ? (body.provider as AiProvider)
+    : null;
+
+  if (requestedProvider && !getConfiguredProviders().includes(requestedProvider)) {
+    return NextResponse.json(
+      {
+        error: 'Ese motor no está configurado ahora mismo. Elige otro de los disponibles o añade su clave en Ajustes.',
+      },
+      { status: 400 }
+    );
+  }
 
   if (!agentId) {
     return NextResponse.json({ error: 'Falta el catedrático.' }, { status: 400 });
@@ -557,6 +586,10 @@ export async function POST(request: Request) {
         maxTokens: NOTE_MAX_TOKENS,
         budgetMs: NOTE_BUDGET_MS,
         attemptMs: NOTE_ATTEMPT_MS,
+        // La versión de esta pestaña la escribe EL motor que ha pedido el
+        // alumno: si la cadena eligiera por su cuenta, dos pestañas podrían
+        // acabar firmadas por el mismo modelo y la comparación sería mentira.
+        provider: requestedProvider ?? undefined,
       });
       const clean = sanitizeNoteContent(reply.text);
       return { reply, clean, quality: noteQualityReport(clean) };
