@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import MarkdownMessage from './MarkdownMessage';
+import StudyToolPanel from './StudyToolPanel';
 import NoteSplitPanel, {
   type EngineOption,
   type NoteVariant,
@@ -766,6 +767,19 @@ export default function TutorChat({
 
   /** ¿Hay algún archivo subiendo todavía? (entonces no se puede enviar el turno) */
   const uploading = pending.some((attachment) => attachment.progress !== null);
+
+  /**
+   * Último mensaje del alumno: es el foco que recibe el generador de material.
+   * Sin él, las flashcards se generarían de la unidad entera y no de la duda
+   * concreta que acaba de plantear.
+   */
+  const lastUserText = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role === 'user' && message.content.trim().length > 0) return message.content;
+    }
+    return '';
+  }, [messages]);
 
   // Autoscroll inteligente: baja solo si ya estabas abajo. Si estás releyendo
   // un mensaje de hace diez turnos, una respuesta nueva no te arranca la vista.
@@ -1937,6 +1951,13 @@ export default function TutorChat({
           </span>
         )}
       </div>
+
+      {/* Herramientas de estudio: se generan sin salir del chat */}
+      <StudyToolPanel
+        agentId={agent.id}
+        subjectColor={agent.subject.color}
+        focus={lastUserText}
+      />
 
       {/* Cuadro de escritura, pegado al borde inferior */}
       <div className="shrink-0 bg-[#0b0b0d] px-4 pb-3 pt-1 sm:px-6">

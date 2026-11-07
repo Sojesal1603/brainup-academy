@@ -5,6 +5,7 @@ import { reviewDayProgress } from '@/lib/dayPlan';
 import { StudyMode } from '@/lib/types';
 import nextDynamic from 'next/dynamic';
 import ModeSwitcher from '@/components/dashboard/ModeSwitcher';
+import NightCloseCard from '@/components/planificador/NightCloseCard';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
 
 // El generador de plan (controles interactivos) baja aparte: la revisión del
@@ -211,6 +212,9 @@ export default async function PlannerPage() {
           </div>
         )}
       </div>
+
+      {/* Auditoría de cierre: a partir de las 21:00 el día no se cierra con tareas vivas */}
+      <NightCloseCard />
 
       {/* Generador: tiempo disponible y plan calculado */}
       <PlannerControls />
