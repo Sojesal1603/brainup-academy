@@ -1,6 +1,6 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, updateTag } from 'next/cache';
 import { prisma } from './prisma';
 import {
   applySrsReview,
@@ -144,6 +144,8 @@ export async function recordSrsReview(input: {
     },
   });
 
+  updateTag('temario');
+  updateTag('cuartel');
   revalidatePath('/repaso');
   revalidatePath('/');
   revalidatePath('/planificador');

@@ -1693,7 +1693,7 @@ export default function TutorChat({
   return (
     <>
       <div
-        className="chat-shell flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0a0a0b]"
+        className="chat-shell flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#0a0a0b]"
       >
       {/* Barra de herramientas: el estado del catedrático, sin ruido. */}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-2.5">
@@ -1819,7 +1819,7 @@ export default function TutorChat({
         onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6"
       >
-        <div className="mx-auto w-full max-w-3xl space-y-8">
+        <div className="mx-auto w-full max-w-4xl space-y-8 2xl:max-w-5xl">
         {/* Apertura proactiva del catedrático (sin gastar API) */}
         {!hasMessages && (
           <div className="chat-message flex gap-3">
@@ -1840,7 +1840,7 @@ export default function TutorChat({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {starters.map((starter) => (
                   <button
                     key={starter.label}
@@ -2040,7 +2040,7 @@ export default function TutorChat({
 
       {/* Cuadro de escritura, pegado al borde inferior */}
       <div className="shrink-0 bg-[#0b0b0d] px-4 pb-3 pt-1 sm:px-6">
-        <div className="mx-auto w-full max-w-3xl">
+        <div className="mx-auto w-full max-w-4xl 2xl:max-w-5xl">
         {/* Archivos listos para enviar */}
         {pending.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">

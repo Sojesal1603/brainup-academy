@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { cache } from 'react';
+import { unstable_cache, updateTag } from 'next/cache';
 import { prisma } from './prisma';
 
 /**
@@ -18,6 +19,42 @@ import { prisma } from './prisma';
  */
 export const DEFAULT_PROFILE_ID = 'user_default';
 
+/** Campos que necesitan la cabecera y el Cuartel, sin fechas ni datos pesados. */
+export interface ProfileSummary {
+  name: string;
+  modality: string;
+  targetGradePau: number;
+  studyMode: string;
+  streakCurrent: number;
+  challengeXp: number;
+}
+
+/**
+ * Perfil de cabecera cacheado entre peticiones.
+ *
+ * La cabecera se monta en todas las rutas y no puede consultar la base en cada
+ * clic: con el pooler de Supabase en otra región, un `findUnique` puede costar
+ * más de dos segundos. Esta lectura es de solo campos ligeros y se invalida con
+ * la etiqueta `perfil` desde las acciones que cambian el perfil.
+ */
+export const getCachedProfileSummary = unstable_cache(
+  async (): Promise<ProfileSummary | null> => {
+    return prisma.userProfile.findUnique({
+      where: { id: DEFAULT_PROFILE_ID },
+      select: {
+        name: true,
+        modality: true,
+        targetGradePau: true,
+        studyMode: true,
+        streakCurrent: true,
+        challengeXp: true,
+      },
+    });
+  },
+  ['profile-summary-v1'],
+  { revalidate: 10, tags: ['perfil'] }
+);
+
 /**
  * Devuelve el perfil, creándolo si la base está recién migrada.
  *
@@ -25,11 +62,19 @@ export const DEFAULT_PROFILE_ID = 'user_default';
  * se está pintando lo piden a la vez, y así la base recibe una sola consulta en
  * vez de dos idénticas. No cachea entre peticiones: si cambias tus ajustes, el
  * siguiente render lo ve al instante.
+ *
+ * La ruta normal es un `findUnique` y NO un `upsert`: el upsert escribía (o al
+ * menos bloqueaba una fila) en cada carga de cada página, y el Header se monta
+ * en todas. La escritura solo ocurre la primera vez, cuando la fila no existe.
  */
 export const ensureUserProfile = cache(async () => {
+  const existing = await prisma.userProfile.findUnique({
+    where: { id: DEFAULT_PROFILE_ID },
+  });
+  if (existing) return existing;
+
   return prisma.userProfile.upsert({
     where: { id: DEFAULT_PROFILE_ID },
-    // Si ya existe no se toca nada: es un «find or create» atómico.
     update: {},
     create: { id: DEFAULT_PROFILE_ID },
   });
@@ -45,8 +90,11 @@ export const ensureUserProfile = cache(async () => {
  */
 export async function updateDefaultProfile(data: Prisma.UserProfileUpdateInput) {
   await ensureUserProfile();
-  return prisma.userProfile.update({
+  const updated = await prisma.userProfile.update({
     where: { id: DEFAULT_PROFILE_ID },
     data,
   });
+  // La cabecera y el Cuartel leen esta foto cacheada: que el cambio se vea ya.
+  updateTag('perfil');
+  return updated;
 }

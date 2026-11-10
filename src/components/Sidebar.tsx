@@ -107,13 +107,13 @@ export default function Sidebar() {
   return (
     <>
       {/* Barra lateral de escritorio: cristal translúcido sobre el fondo espacial. */}
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col justify-between border-r border-white/[0.08] bg-[#0a0a0c]/70 p-4 backdrop-blur-xl md:flex">
-        <div>
+      <aside className="sticky top-0 hidden h-dvh w-20 shrink-0 flex-col justify-between border-r border-white/[0.08] bg-[#0a0a0c]/70 p-3 backdrop-blur-xl md:flex xl:w-64 xl:p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Marca: logo destacado con aura de luz detrás (azul → púrpura → verde). */}
           <Link
             href="/"
             aria-label="BrainUp Academy — ir al Cuartel"
-            className="group relative mb-6 flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-2.5 py-3 transition-colors duration-300 hover:border-white/15"
+            className="group relative mb-6 flex items-center justify-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-2 py-3 transition-colors duration-300 hover:border-white/15 xl:justify-start xl:px-2.5"
           >
             <span
               aria-hidden="true"
@@ -133,7 +133,7 @@ export default function Sidebar() {
                 className="relative h-9 w-9 rounded-lg transition-transform duration-300 group-hover:scale-105"
               />
             </span>
-            <div className="min-w-0">
+            <div className="hidden min-w-0 xl:block">
               <h1 className="text-sm font-bold uppercase tracking-wider text-slate-100 drop-shadow-[0_0_10px_rgba(255,255,255,0.15)]">
                 BrainUp Academy
               </h1>
@@ -146,8 +146,14 @@ export default function Sidebar() {
           {/* Menú por bloques: primero lo de hoy, al final la trastienda. */}
           <nav className="space-y-4" aria-label="Secciones">
             {GROUP_ORDER.map((group) => (
-              <div key={group} className="space-y-1">
-                <p className="px-3 pb-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <div
+                key={group}
+                className={clsx(
+                  'space-y-1',
+                  group !== 'Hoy' && 'md:border-t md:border-white/[0.06] md:pt-3 xl:border-0 xl:pt-0'
+                )}
+              >
+                <p className="hidden px-3 pb-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500 xl:block">
                   {group}
                 </p>
                 {navItems
@@ -160,8 +166,10 @@ export default function Sidebar() {
                         key={item.href}
                         href={item.href}
                         aria-current={isActive ? 'page' : undefined}
+                        title={item.name}
+                        aria-label={item.name}
                         className={clsx(
-                          'group relative flex items-center gap-3 rounded-lg border px-3 py-2.5 text-xs font-medium transition-all duration-200 hover:translate-x-0.5',
+                          'group relative flex items-center justify-center gap-3 rounded-lg border px-2 py-2.5 text-xs font-medium transition-all duration-200 hover:translate-x-0.5 xl:justify-start xl:px-3',
                           isActive
                             ? 'border-emerald-400/30 bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-transparent text-emerald-200 shadow-[0_0_18px_rgba(16,185,129,0.16)]'
                             : 'border-transparent text-slate-400 hover:border-white/10 hover:bg-white/[0.035] hover:text-slate-200',
@@ -183,9 +191,9 @@ export default function Sidebar() {
                             item.highlight && !isActive && 'text-emerald-400'
                           )}
                         />
-                        <span>{item.name}</span>
+                        <span className="hidden xl:inline">{item.name}</span>
                         {item.highlight && (
-                          <span className="ml-auto rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300">
+                          <span className="ml-auto hidden rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300 xl:inline-flex">
                             LIVE
                           </span>
                         )}
@@ -198,7 +206,7 @@ export default function Sidebar() {
         </div>
 
         {/* Estado del sistema, en la misma tarjeta de cristal que el resto. */}
-        <div className="glass-card p-3 text-[11px] text-slate-400">
+        <div className="glass-card hidden p-3 text-[11px] text-slate-400 xl:block">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="font-mono text-[9px] font-semibold uppercase tracking-widest text-slate-500">
               Sistema Local
@@ -210,6 +218,17 @@ export default function Sidebar() {
           </div>
           <p className="font-medium text-slate-300">PostgreSQL Cloud</p>
           <p className="mt-0.5 text-[10px] text-slate-500">Datos persistidos 24/7</p>
+        </div>
+
+        {/* En el rail compacto, el estado se queda en un punto con tooltip. */}
+        <div
+          className="mt-2 hidden items-center justify-center py-2 md:flex xl:hidden"
+          title="Sistema local conectado · PostgreSQL Cloud"
+        >
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+          </span>
         </div>
       </aside>
 

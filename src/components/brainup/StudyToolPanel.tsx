@@ -369,7 +369,7 @@ export default function StudyToolPanel({
 
   return (
     <div className="shrink-0 border-t border-white/[0.06] px-4 pt-2 sm:px-6">
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-4xl 2xl:max-w-5xl">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="mr-1 flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.16em] text-stone-500">
             <Sparkles className="h-3 w-3" /> Herramientas

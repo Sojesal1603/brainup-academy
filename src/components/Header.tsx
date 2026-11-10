@@ -1,6 +1,8 @@
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { Flame, Target, Zap, Play, LogOut } from 'lucide-react';
-import { ensureUserProfile } from '@/lib/userProfile';
+import { ensureUserProfile, getCachedProfileSummary } from '@/lib/userProfile';
+import { safeDb } from '@/lib/dbTimeout';
 import { readAuthConfig } from '@/lib/authGate';
 import PwaRegister from './PwaRegister';
 
@@ -10,12 +12,11 @@ import PwaRegister from './PwaRegister';
  * Este componente vive en el layout raíz: se monta en TODAS las rutas. Si su
  * consulta lanza (Supabase inaccesible, `DATABASE_URL` sin definir, tablas sin
  * migrar, motor de Prisma que no carga), no falla una vista: falla el layout, y
- * React devuelve el error #441 en cada página, con la pantalla de «algo se ha
- * roto al arrancar» y ningún detalle en producción.
+ * React devuelve el error #441 en cada página.
  *
- * La cabecera es decorativa: con los valores por defecto se ve bien y el resto de
- * la app puede seguir funcionando. El fallo se apunta en la consola del servidor
- * (que es donde se puede leer) y nunca se propaga al render.
+ * La cabecera es decorativa: con los valores por defecto se ve bien y el resto
+ * de la app puede seguir funcionando. El fallo se apunta en la consola del
+ * servidor y nunca se propaga al render.
  */
 async function loadProfile() {
   try {
@@ -23,11 +24,16 @@ async function loadProfile() {
       console.warn('[header] DATABASE_URL no está definida: cabecera con valores por defecto.');
       return null;
     }
-    // La cabecera se pinta en TODAS las páginas: es el sitio natural para
-    // asegurar que el perfil existe aunque la base se acabe de migrar y nadie
-    // haya lanzado el seed. Sin esto, la primera acción que guardara ajustes
-    // fallaba con «Record to update not found».
-    return await ensureUserProfile();
+    // La foto ligera se reutiliza entre navegaciones; si aún no existe la fila,
+    // se crea una vez con el camino normal. El tope corto evita que una base
+    // lenta retenga el stream de la cabecera: los valores por defecto ya están
+    // pintados y la siguiente visita recibirá la foto cacheada.
+    return await safeDb(
+      'header.perfil',
+      async () => (await getCachedProfileSummary()) ?? (await ensureUserProfile()),
+      null,
+      1_200
+    );
   } catch (error) {
     console.error(
       '[header] no se ha podido leer el perfil:',
@@ -37,17 +43,40 @@ async function loadProfile() {
   }
 }
 
-export default async function Header() {
-  const user = await loadProfile();
+type HeaderUser = Awaited<ReturnType<typeof loadProfile>>;
 
-  const streak = user?.streakCurrent ?? 0;
-  const targetGrade = user?.targetGradePau ?? 13.5;
-  const mode = user?.studyMode ?? 'athlete';
-  // El botón de cerrar sesión solo tiene sentido si la puerta está puesta.
+/**
+ * Cabecera estática + perfil en streaming.
+ *
+ * El `<header>` y sus botones se pintan al instante con los valores por
+ * defecto. Solo el nombre, la racha y la nota objetivo esperan a la base, y lo
+ * hacen dentro de este Suspense: la Sidebar y el resto del layout nunca se
+ * quedan detrás de esa consulta en Render.
+ */
+export default function Header() {
   const authOn = Boolean(readAuthConfig());
 
   return (
-    <header className="sticky top-0 z-40 bg-[#0a0a0c]/90 backdrop-blur-md border-b border-white/10 px-4 py-3.5 sm:px-6 flex items-center justify-between gap-2">
+    <header className="sticky top-0 z-40 bg-[#0a0a0c]/90 backdrop-blur-md border-b border-white/10 px-4 py-3.5 sm:px-6">
+      <Suspense fallback={<HeaderChrome user={null} authOn={authOn} />}>
+        <HeaderProfile authOn={authOn} />
+      </Suspense>
+    </header>
+  );
+}
+
+async function HeaderProfile({ authOn }: { authOn: boolean }) {
+  const user = await loadProfile();
+  return <HeaderChrome user={user} authOn={authOn} />;
+}
+
+function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
+  const streak = user?.streakCurrent ?? 0;
+  const targetGrade = user?.targetGradePau ?? 13.5;
+  const mode = user?.studyMode ?? 'athlete';
+
+  return (
+    <div className="flex items-center justify-between gap-2">
       {/* Perfil & Modalidad */}
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-400 p-[1px] flex items-center justify-center">
@@ -115,6 +144,6 @@ export default async function Header() {
           </form>
         ) : null}
       </div>
-    </header>
+    </div>
   );
 }

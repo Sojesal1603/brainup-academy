@@ -1,3 +1,4 @@
+import { unstable_cache } from 'next/cache';
 import { prisma } from './prisma';
 import { isTopicStatus, TopicStatus, TOPIC_STATUSES } from './types';
 
@@ -171,23 +172,43 @@ function toUnit(topic: RawTopic): TemarioUnit {
   };
 }
 
-/** Todas las asignaturas con su temario, ordenado y con estadísticas. */
-export async function getTemarioSubjects(now = new Date()): Promise<TemarioSubject[]> {
-  const subjects = await prisma.subject.findMany({
-    orderBy: [{ order: 'asc' }, { name: 'asc' }],
-    include: { topics: true },
-  });
+/**
+ * Lectura compartida del temario.
+ *
+ * El temario se consulta al abrir `/temario`, al calcular el chequeo de clase
+ * del Cuartel y en varias acciones. Es la misma foto para todos esos sitios,
+ * así que se cachea 20 s con la etiqueta `temario`. Las mutaciones de unidades
+ * llaman a `revalidateTag('temario')`, de modo que un cambio se ve al instante
+ * y no se paga una consulta completa en cada navegación.
+ */
+type TemarioSubjectBase = Omit<TemarioSubject, 'stats'>;
 
-  return subjects.map((subject) => {
-    const units = sortUnits(subject.topics.map(toUnit));
-    return {
+const loadTemarioBase = unstable_cache(
+  async (): Promise<TemarioSubjectBase[]> => {
+    const subjects = await prisma.subject.findMany({
+      orderBy: [{ order: 'asc' }, { name: 'asc' }],
+      include: { topics: true },
+    });
+
+    return subjects.map((subject) => ({
       id: subject.id,
       name: subject.name,
       color: subject.color,
-      units,
-      stats: computeStats(units, now),
-    };
-  });
+      units: sortUnits(subject.topics.map(toUnit)),
+    }));
+  },
+  ['temario-base-v1'],
+  { revalidate: 20, tags: ['temario'] }
+);
+
+/** Todas las asignaturas con su temario, ordenado y con estadísticas. */
+export async function getTemarioSubjects(now = new Date()): Promise<TemarioSubject[]> {
+  const subjects = await loadTemarioBase();
+
+  return subjects.map((subject) => ({
+    ...subject,
+    stats: computeStats(subject.units, now),
+  }));
 }
 
 export interface CheckInItem {

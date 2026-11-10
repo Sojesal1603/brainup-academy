@@ -199,7 +199,7 @@ export default function NoteSplitPanel({
 
   return (
     <section
-      className="chat-panel fixed inset-0 z-[70] flex min-h-0 flex-col overflow-hidden bg-[#0c0b0a] lg:static lg:z-auto lg:h-full lg:border-l lg:border-white/[0.07]"
+      className="chat-panel fixed inset-0 z-[70] flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#0c0b0a] md:static md:z-auto md:h-full md:border-l md:border-white/[0.07]"
       aria-label={note ? `Documento: ${note.title}` : 'Visor de documentos'}
     >
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.07] px-4 py-3 sm:px-5">

@@ -219,7 +219,7 @@ export default async function TutorPage({
         </div>
       </div>
 
-      <div className="chat-grid flex min-h-0 flex-1 lg:grid lg:grid-cols-1">
+      <div className="chat-grid flex min-h-0 flex-1 md:grid md:grid-cols-1">
         {/* Chat */}
         <TutorChat
           agent={{

@@ -1,11 +1,15 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, updateTag } from 'next/cache';
 import { prisma } from './prisma';
 import { markSetupCompleted, reopenSetup } from './setupApply';
 import { SETUP_CONVERSATION_TITLE } from './setup';
 
 function revalidateSetup() {
+  updateTag('setup');
+  updateTag('temario');
+  updateTag('cuartel');
+  updateTag('perfil');
   revalidatePath('/');
   revalidatePath('/puesta-a-punto');
   revalidatePath('/temario');

@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { resolveDatabaseUrl } from './databaseDiagnostics';
 import { withDbRetry } from './prismaRetry';
+import { DB_QUERY_TIMEOUT_MS, withDbTimeout } from './dbTimeout';
 
 /**
  * El cliente de Prisma, uno solo por proceso.
@@ -54,10 +55,14 @@ function createClient() {
     name: 'brainup-db-retry',
     query: {
       async $allOperations({ operation, model, args, query }) {
-        return withDbRetry(() => query(args), {
-          label: `${model ?? 'db'}.${operation}`,
-          reconnect,
-        });
+        const label = `${model ?? 'db'}.${operation}`;
+        // El deadline envuelve también los reintentos: una conexión muerta no
+        // puede sumar 4,5 s por intento y dejar la vista colgada tres veces.
+        return withDbTimeout(
+          withDbRetry(() => query(args), { label, reconnect }),
+          label,
+          DB_QUERY_TIMEOUT_MS
+        );
       },
     },
   });

@@ -224,11 +224,16 @@ body:has(.chat-fullscreen) {
   contain-intrinsic-size: auto 180px;
 }
 
-@media (min-width: 1024px) {
-  /* Vista dividida: dos columnas iguales y perfectamente delimitadas; cada una
-     se desplaza por su cuenta (el chat por dentro, el documento por dentro). */
+@media (min-width: 768px) {
+  /* Vista dividida en tablets apaisadas y escritorio: dos columnas iguales y
+     delimitadas; cada una se desplaza por su cuenta (el chat por dentro, el
+     documento por dentro). En móvil el documento sigue siendo un panel completo. */
   .chat-grid:has(.chat-panel) {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .chat-grid > * {
+    min-width: 0;
   }
 }
 

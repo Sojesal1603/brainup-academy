@@ -36,9 +36,10 @@ export function prismaErrorCode(error: unknown): string | null {
  *   - `sslmode=require` fuera de local: Supabase rechaza conexiones sin TLS y el
  *     error que da entonces (P1011) no dice nada útil.
  *   - Pooler de Supabase (puerto 6543): `pgbouncer=true` (sin él Prisma usa
- *     sentencias preparadas que pgbouncer no conserva) y `connection_limit=1`
- *     (cada función serverless abre su propia conexión; con muchas a la vez se
- *     agota el cupo del plan gratuito).
+ *     sentencias preparadas que pgbouncer no conserva) y un pool pequeño
+ *     (`connection_limit=3`) para que las consultas paralelas no esperen detrás
+ *     de una única conexión. Render mantiene el proceso vivo, así que este pool
+ *     se reutiliza entre peticiones.
  * Nunca se registra con credenciales: solo se devuelve la cadena ya limpia.
  */
 export function resolveDatabaseUrl(rawInput?: string): string | undefined {
@@ -61,7 +62,12 @@ export function resolveDatabaseUrl(rawInput?: string): string | undefined {
       // queda «cargando» para siempre. Con `connect_timeout` el fallo llega en
       // segundos, se registra y la pantalla de error explica qué cambiar.
       if (!url.searchParams.has('connect_timeout')) {
-        url.searchParams.set('connect_timeout', '10');
+        url.searchParams.set('connect_timeout', '5');
+      }
+      // Si la conexión se queda muda, no esperar indefinidamente a un socket
+      // que ya no responde.
+      if (!url.searchParams.has('socket_timeout')) {
+        url.searchParams.set('socket_timeout', '5');
       }
     }
 
@@ -85,12 +91,16 @@ export function resolveDatabaseUrl(rawInput?: string): string | undefined {
         url.searchParams.set('pgbouncer', 'true');
       }
       if (!url.searchParams.has('connection_limit')) {
-        url.searchParams.set('connection_limit', '1');
+        // Tres conexiones bastan para el `Promise.all` del Cuartel y evitan la
+        // cola artificial de `connection_limit=1` sin disparar el cupo de
+        // Supabase. Si Render escala a varias instancias, cada una tiene su
+        // propio pool.
+        url.searchParams.set('connection_limit', '3');
       }
       // Sin tope, una conexión que no responde deja la consulta esperando y la
       // página se queda cargando para siempre.
       if (!url.searchParams.has('pool_timeout')) {
-        url.searchParams.set('pool_timeout', '10');
+        url.searchParams.set('pool_timeout', '5');
       }
     }
 
@@ -169,7 +179,7 @@ export function databaseHint(detail: string, code?: string | null): string {
     text.includes('server has closed the connection') ||
     text.includes('connection closed')
   ) {
-    return 'La conexión con la base se ha cortado (el pooler de Supabase cierra las conexiones que quedan inactivas). La app la descarta y reintenta sola; si insiste, usa la cadena del pooler en modo transacción (puerto 6543) con pgbouncer=true y connection_limit=1.';
+    return 'La conexión con la base se ha cortado (el pooler de Supabase cierra las conexiones que quedan inactivas). La app la descarta y reintenta sola; si insiste, usa la cadena del pooler en modo transacción (puerto 6543) con pgbouncer=true y un pool pequeño (connection_limit=3).';
   }
   if (code === 'P1000' || text.includes('authentication failed')) {
     return 'Usuario o contraseña incorrectos en DATABASE_URL. Si la contraseña tiene caracteres especiales (@, #, /), van escapados en la URL.';
@@ -178,7 +188,7 @@ export function databaseHint(detail: string, code?: string | null): string {
     return 'La base responde pero faltan las tablas: aplica las migraciones con `npx prisma migrate deploy` usando la conexión directa (5432) de Supabase.';
   }
   if (text.includes('timeout') || code === 'P1008') {
-    return 'La conexión se agota: con serverless, usa la URL del POOLER de Supabase (puerto 6543) con connection_limit=1 y comprueba que el proyecto no esté pausado.';
+    return 'La conexión se agota: usa la URL del POOLER de Supabase (puerto 6543) con un pool pequeño y comprueba que el proyecto no esté pausado. La app ya limita la espera a 5 s.';
   }
   return 'Revisa el detalle de arriba y el parte de /api/salud.';
 }

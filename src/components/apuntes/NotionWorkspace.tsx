@@ -468,9 +468,9 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
       </div>
 
       {/* Grid del Workspace: Lista tipo Notion a la izquierda + Editor en grande a la derecha */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[650px]">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 lg:gap-6 min-h-[560px] md:min-h-[620px]">
         {/* Columna Izquierda: Páginas / Base de Datos Notion (4 cols) */}
-        <div className="lg:col-span-4 rounded-2xl bg-[#0b101c] border border-white/10 p-4 flex flex-col justify-between space-y-3">
+        <div className="min-w-0 md:col-span-4 rounded-2xl bg-[#0b101c] border border-white/10 p-4 flex flex-col justify-between space-y-3">
           <div className="space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -494,7 +494,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
               )}
             </div>
 
-            <div className="space-y-3 max-h-[550px] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1 md:max-h-[calc(100dvh-19rem)]">
               {sections.map((section) => (
                 <div key={section.id} className="space-y-2">
                   {/* Una sección por asignatura: el apartado de cada materia */}
@@ -533,7 +533,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
         </div>
 
         {/* Columna Derecha: Editor Enriquecido Notion (8 cols) */}
-        <div className="lg:col-span-8 rounded-2xl bg-[#0b101c] border border-white/10 p-6 flex flex-col justify-between space-y-4">
+        <div className="min-w-0 md:col-span-8 rounded-2xl bg-[#0b101c] border border-white/10 p-4 lg:p-6 flex flex-col justify-between space-y-4">
           {activeNote ? (
             <div className="space-y-4 flex-1 flex flex-col">
               {/* Barra superior de la página */}
@@ -658,13 +658,13 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
               />
 
               {viewMode === 'view' ? (
-                <div className="flex-1 min-h-[380px] max-h-[65vh] overflow-y-auto p-5 sm:p-7 bg-[#080d17] border border-slate-800 rounded-2xl">
+                <div className="flex-1 min-h-[380px] max-h-[65vh] overflow-y-auto p-5 sm:p-7 md:max-h-[calc(100dvh-17rem)] bg-[#080d17] border border-slate-800 rounded-2xl">
                   <NoteRenderer content={content} />
                 </div>
               ) : viewMode === 'pdf' ? (
                 // Folio DIN-A4 pintado dentro de la app: papel cálido y letra de
                 // libro, sin abrir el diálogo de impresión.
-                <div className="flex-1 min-h-[380px] max-h-[65vh] overflow-y-auto rounded-2xl bg-[#151412] p-3 sm:p-5">
+                <div className="flex-1 min-h-[380px] max-h-[65vh] overflow-y-auto rounded-2xl bg-[#151412] p-3 sm:p-5 md:max-h-[calc(100dvh-17rem)]">
                   <div className="note-paper mx-auto w-full max-w-[210mm] min-h-[297mm] px-7 py-10 sm:px-[16mm] sm:py-[14mm]">
                     <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-stone-600">
                       BrainUp Academy · {activeNote.topic.subject.name} · Documento de estudio
@@ -764,7 +764,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   placeholder="Comienza a escribir tus apuntes aquí... Usa Markdown, tablas, fórmulas o las herramientas de arriba."
-                  className="w-full flex-1 min-h-[380px] p-4 bg-[#070b14] border border-slate-800 rounded-2xl text-xs sm:text-sm text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-emerald-500/60 resize-y"
+                  className="w-full flex-1 min-h-[380px] md:min-h-[420px] p-4 bg-[#070b14] border border-slate-800 rounded-2xl text-xs sm:text-sm text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-emerald-500/60 resize-y"
                 />
               </div>
                 </>

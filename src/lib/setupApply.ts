@@ -1,3 +1,4 @@
+import { unstable_cache } from 'next/cache';
 import { prisma } from './prisma';
 import { updateDefaultProfile } from './userProfile';
 import { regenerateWeeklyPlan } from './planner';
@@ -163,10 +164,24 @@ export async function getSetupSnapshot(): Promise<SetupSnapshot> {
   };
 }
 
-export async function getSetupState(): Promise<{ snapshot: SetupSnapshot; checklist: SetupChecklist }> {
+async function computeSetupState(): Promise<{
+  snapshot: SetupSnapshot;
+  checklist: SetupChecklist;
+}> {
   const snapshot = await getSetupSnapshot();
   return { snapshot, checklist: buildSetupChecklist(snapshot) };
 }
+
+/**
+ * La tarjeta de puesta a punto calcula perfil, asignaturas, unidades, exámenes y
+ * horario. Es la consulta más ancha del Cuartel y no cambia entre clics, así que
+ * se reutiliza 30 s. Las acciones que montan el curso invalidan la etiqueta
+ * `setup` para que el porcentaje no se quede viejo.
+ */
+export const getSetupState = unstable_cache(computeSetupState, ['setup-state-v1'], {
+  revalidate: 30,
+  tags: ['setup', 'perfil', 'temario'],
+});
 
 function guessExamType(title: string): string {
   const text = normalizeTopicTitle(title);

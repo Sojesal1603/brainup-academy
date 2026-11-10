@@ -1,6 +1,6 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, updateTag } from 'next/cache';
 import { prisma } from './prisma';
 import { writeTemarioBackup } from './temarioBackup';
 import { regenerateWeeklyPlan } from './planner';
@@ -18,8 +18,12 @@ import { isTemarioSource, normalizeTopicTitle, parseTemarioText, TemarioSource }
 
 /** Todo lo que depende del temario se refresca con cada cambio de estado. */
 function revalidateTemario() {
+  // Invalida la lectura compartida de `getTemarioSubjects` en esta misma
+  // petición: el alumno ve su cambio al instante, sin esperar 20 s.
+  updateTag('temario');
   revalidatePath('/temario');
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   revalidatePath('/horario');
 }
@@ -63,6 +67,7 @@ export async function toggleStudyBlock(blockId: string) {
   }
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   return { success: true, isCompleted: updated.isCompleted };
 }
@@ -108,6 +113,7 @@ export async function pauseSession(blockId: string, spentMinutes: number) {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   return { success: true, spentMinutes: spent };
 }
@@ -144,6 +150,7 @@ export async function completeSession(blockId: string) {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   revalidatePath('/enfoque');
   return { success: true };
@@ -160,6 +167,7 @@ export async function abandonSession(blockId: string) {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   return { success: true };
 }
@@ -169,6 +177,7 @@ export async function recalculateToday() {
   const plan = await regenerateTodayPlan();
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
 
   return {
@@ -219,6 +228,7 @@ export async function toggleHabit(habitId: string) {
   }
 
   revalidatePath('/');
+  updateTag('cuartel');
   return { success: true };
 }
 
@@ -340,9 +350,12 @@ export async function recordStudySession(data: {
   }
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   revalidatePath('/enfoque');
   revalidatePath('/estadisticas');
+  // La racha vive en la cabecera cacheada.
+  updateTag('perfil');
 
   return { success: true, newMastery };
 }
@@ -386,6 +399,7 @@ export async function createErrorLog(data: {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/errores');
   revalidatePath('/planificador');
   return { success: true, errorId: error.id };
@@ -408,6 +422,7 @@ export async function toggleMasterError(errorId: string) {
 
   revalidatePath('/errores');
   revalidatePath('/');
+  updateTag('cuartel');
   return { success: true, isMastered: updated.isMastered };
 }
 
@@ -438,6 +453,7 @@ export async function createExam(data: {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/examenes');
   revalidatePath('/planificador');
   return { success: true };
@@ -483,6 +499,7 @@ export async function updateExam(
   await prisma.exam.update({ where: { id: examId }, data: next });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/examenes');
   revalidatePath('/planificador');
   return { success: true };
@@ -503,6 +520,7 @@ export async function deleteExam(examId: string) {
   await prisma.exam.delete({ where: { id: examId } });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/examenes');
   revalidatePath('/planificador');
   return { success: true, title: existing.title };
@@ -524,6 +542,7 @@ export async function toggleExamCompleted(examId: string) {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/examenes');
   revalidatePath('/planificador');
   return { success: true, isCompleted: updated.isCompleted };
@@ -534,7 +553,9 @@ export async function toggleExamCompleted(examId: string) {
  */
 export async function switchStudyMode(mode: StudyMode) {
   await regenerateWeeklyPlan(mode);
+  updateTag('perfil');
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   return { success: true };
 }
@@ -547,6 +568,7 @@ export async function triggerRecalculatePlan() {
   const mode = (user?.studyMode as StudyMode) || 'athlete';
   await regenerateWeeklyPlan(mode);
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   return { success: true };
 }
@@ -571,6 +593,7 @@ export async function createNote(data: {
 
   revalidatePath('/apuntes');
   revalidatePath('/');
+  updateTag('cuartel');
   return { success: true, noteId: note.id };
 }
 
@@ -637,6 +660,7 @@ export async function createCustomSubject(data: {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   revalidatePath('/apuntes');
   return { success: true, subjectId: subject.id };
@@ -664,6 +688,7 @@ export async function createCustomTopic(data: {
   });
 
   revalidatePath('/');
+  updateTag('cuartel');
   revalidatePath('/planificador');
   revalidatePath('/apuntes');
   return { success: true, topicId: topic.id };

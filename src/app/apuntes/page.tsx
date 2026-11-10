@@ -48,8 +48,8 @@ export default async function NotesPage() {
       {/* Cabecera */}
       <div className="pb-4 border-b border-white/10">
         <div className="flex items-center gap-2">
-          <BookOpen className="w-6 h-6 text-emerald-400" />
-          <h1 className="text-2xl font-black tracking-tight text-slate-100 uppercase font-mono">
+          <BookOpen className="w-6 h-6 shrink-0 text-emerald-400" />
+          <h1 className="text-xl sm:text-2xl leading-tight font-black tracking-tight text-slate-100 uppercase font-mono">
             Cuaderno de Apuntes & Base de Datos Notion
           </h1>
         </div>
