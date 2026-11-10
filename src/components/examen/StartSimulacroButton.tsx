@@ -5,22 +5,27 @@ import NeuralLoader from '@/components/ui/NeuralLoader';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Play } from 'lucide-react';
+import { EBAU_COMMUNITIES } from '@/lib/ebauCommunities';
 
 /**
- * Lanza un simulacro PAU: pide la generación al servidor (IA o plantillas
- * locales) y navega a la sesión cronometrada.
+ * Lanza un simulacro EBAU con la estructura de la comunidad elegida. La
+ * comunidad se guarda en el perfil al arrancar, así el siguiente examen sale
+ * con la misma configuración.
  */
 export default function StartSimulacroButton({
   subjectId,
   subjectName,
+  defaultCommunity,
   disabled,
 }: {
   subjectId: string;
   subjectName: string;
+  defaultCommunity: string;
   disabled?: boolean;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [community, setCommunity] = useState(defaultCommunity);
   const [error, setError] = useState('');
 
   async function start() {
@@ -32,7 +37,7 @@ export default function StartSimulacroButton({
       const res = await fetch('/api/examinador/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subjectId }),
+        body: JSON.stringify({ subjectId, community }),
       });
       const data = (await res.json().catch(() => null)) as
         | { sessionId?: string; error?: string }
@@ -51,6 +56,22 @@ export default function StartSimulacroButton({
 
   return (
     <div className="space-y-2">
+      <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Comunidad del examen
+      </label>
+      <select
+        value={community}
+        onChange={(event) => setCommunity(event.target.value)}
+        disabled={loading}
+        className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-2.5 py-2 text-[11px] text-slate-200 focus:border-emerald-500 focus:outline-none disabled:opacity-60"
+      >
+        {EBAU_COMMUNITIES.map((option) => (
+          <option key={option.code} value={option.code}>
+            {option.name} · {option.durationMinutes} min
+          </option>
+        ))}
+      </select>
+
       <button
         type="button"
         onClick={() => void start()}
@@ -76,9 +97,9 @@ export default function StartSimulacroButton({
           compact
           title="Generando el simulacro"
           messages={[
-            'Cruzando el temario con los criterios PAU...',
-            'Calibrando dificultad y tiempo...',
-            'Sintetizando preguntas de tu nivel real...',
+            'Aplicando la estructura de tu comunidad...',
+            'Cruzando el temario con los criterios de tu centro...',
+            'Calibrando dificultad, apartados y notación...',
           ]}
         />
       )}

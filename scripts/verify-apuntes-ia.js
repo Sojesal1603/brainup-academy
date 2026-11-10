@@ -117,6 +117,16 @@ function offline() {
     apuntes.stripHiddenTags('Deja   sitio   aquí') === 'Deja sitio aquí'
   );
 
+  console.log('\n2 bis) La apertura de un apunte guardado: [[abrir:N3]]');
+  const abrir = apuntes.parseNoteOpenRequest('Te abro el esquema que ya tienes guardado. [[abrir:N3]]');
+  check('se extrae la clave de la etiqueta', abrir.request && abrir.request.key === 'N3', JSON.stringify(abrir.request));
+  check('y la etiqueta no queda en el texto visible', !abrir.text.includes('[['), JSON.stringify(abrir.text));
+  check('sin etiqueta no hay apertura', apuntes.parseNoteOpenRequest('Sigamos con el ejercicio 3.').request === null);
+  check(
+    'la red de seguridad también quita la etiqueta de apertura',
+    !/\[\[/.test(apuntes.stripHiddenTags('Mira el documento. [[abrir:N2]]'))
+  );
+
   console.log('\n3) El título se separa del cuerpo (una sola vez en el cuaderno)');
   const withH1 = apuntes.splitNoteTitle('# Derivadas\n\n> Qué es.\n\n## Lo que tienes que saber\n- algo', 'respaldo');
   check('el título sale del `# `', withH1.title === 'Derivadas', withH1.title);

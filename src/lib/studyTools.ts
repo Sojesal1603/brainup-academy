@@ -76,6 +76,8 @@ export interface Flashcard {
   front: string;
   back: string;
   source: string | null;
+  /** Id de la tarjeta en el motor SM-2 (lo asigna el servidor al guardarla). */
+  cardId?: string;
 }
 
 export interface QuizQuestion {
@@ -84,6 +86,8 @@ export interface QuizQuestion {
   correctIndex: number;
   explanation: string;
   source: string | null;
+  /** Id de la tarjeta SM-2 asociada a esta pregunta. */
+  cardId?: string;
 }
 
 export interface FlashcardsTool {

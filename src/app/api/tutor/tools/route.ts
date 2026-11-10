@@ -8,6 +8,7 @@ import {
   parseStudyToolPayload,
   type StudyToolInput,
 } from '@/lib/studyTools';
+import { registerStudyToolCards } from '@/lib/reviewCards';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -146,9 +147,22 @@ export async function POST(request: Request) {
       );
     }
 
+    // Las flashcards y los tests se guardan como tarjetas SM-2 para que el
+    // alumno pueda valorar su recuerdo y el plan sepa qué vence hoy. Si la base
+    // falla, la herramienta se entrega igual sin ids: mejor estudiar sin SM-2
+    // que perder el material ya generado.
+    let persisted = tool;
+    if (tool.kind === 'flashcards' || tool.kind === 'test') {
+      try {
+        persisted = await registerStudyToolCards({ topicId: topic.id, tool });
+      } catch (error) {
+        console.error('[tutor/herramientas] no se pudieron guardar las tarjetas SM-2:', error);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
-      tool,
+      tool: persisted,
       topic: { id: topic.id, title: topic.title, unitNumber: topic.unitNumber },
       provider: result.provider,
       model: result.model,

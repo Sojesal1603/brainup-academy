@@ -127,7 +127,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
   const [topicId, setTopicId] = useState(activeNote?.topicId || subjects[0]?.topics[0]?.id || '');
   const [tags, setTags] = useState(activeNote?.tags || '');
   const [saveStatus, setSaveStatus] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'view' | 'edit'>('view');
+  const [viewMode, setViewMode] = useState<'view' | 'pdf' | 'edit'>('view');
 
   // Modales
   const [isNewSubjectModalOpen, setIsNewSubjectModalOpen] = useState(false);
@@ -576,6 +576,19 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
                       <span className="hidden sm:inline">Vista</span>
                     </button>
                     <button
+                      onClick={() => setViewMode('pdf')}
+                      className={clsx(
+                        'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all',
+                        viewMode === 'pdf'
+                          ? 'bg-slate-800 text-slate-100 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      )}
+                      title="Vista PDF digital: folio DIN-A4 para leer sin pasar por la impresora"
+                    >
+                      <FileText className="w-3 h-3" />
+                      <span className="hidden sm:inline">Vista PDF digital</span>
+                    </button>
+                    <button
                       onClick={() => setViewMode('edit')}
                       className={clsx(
                         'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all',
@@ -647,6 +660,43 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
               {viewMode === 'view' ? (
                 <div className="flex-1 min-h-[380px] max-h-[65vh] overflow-y-auto p-5 sm:p-7 bg-[#080d17] border border-slate-800 rounded-2xl">
                   <NoteRenderer content={content} />
+                </div>
+              ) : viewMode === 'pdf' ? (
+                // Folio DIN-A4 pintado dentro de la app: papel cálido y letra de
+                // libro, sin abrir el diálogo de impresión.
+                <div className="flex-1 min-h-[380px] max-h-[65vh] overflow-y-auto rounded-2xl bg-[#151412] p-3 sm:p-5">
+                  <div className="note-paper mx-auto w-full max-w-[210mm] min-h-[297mm] px-7 py-10 sm:px-[16mm] sm:py-[14mm]">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-stone-600">
+                      BrainUp Academy · {activeNote.topic.subject.name} · Documento de estudio
+                    </p>
+                    <h1 className="mt-3 font-serif text-[26px] font-semibold leading-tight tracking-[-0.01em]">
+                      {title.trim() || activeNote.title}
+                    </h1>
+                    <p className="mt-1 text-[10.5px] text-stone-600">
+                      {[
+                        activeNote.topic.unitNumber
+                          ? `Unidad ${activeNote.topic.unitNumber} · ${activeNote.topic.title}`
+                          : activeNote.topic.title,
+                        isFromTutor(activeNote) && activeNote.agent?.name
+                          ? `Del catedrático ${activeNote.agent.name}`
+                          : 'Tuyo',
+                        new Date(activeNote.updatedAt).toLocaleDateString('es-ES', {
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric',
+                        }),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                    <hr className="my-5 border-stone-400/60" />
+                    <article className="note-paper-body">
+                      <NoteRenderer content={content} revealAnswers />
+                    </article>
+                    <p className="mt-10 border-t border-stone-400/40 pt-2 text-center font-mono text-[8.5px] uppercase tracking-[0.22em] text-stone-500">
+                      BrainUp Academy · apunte de estudio
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <>

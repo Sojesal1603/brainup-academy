@@ -3,10 +3,16 @@ import Link from 'next/link';
 import { AlertTriangle, Award, Brain, RotateCcw, Target } from 'lucide-react';
 import MathText from './MathText';
 import type { ExamBlock, ExamGrade } from '@/lib/examenTypes';
+import { getEbauCommunity } from '@/lib/ebauCommunities';
 
 /** Formatea números con coma decimal (estilo español). */
 function fmt(value: number): string {
   return value.toFixed(1).replace(/\.0$/, '').replace('.', ',');
+}
+
+/** Los apartados se corrigen en cuartos de punto: no se redondean a décimas. */
+function fmtGrade(value: number): string {
+  return value.toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
 }
 
 function scoreColor(total: number): string {
@@ -32,6 +38,7 @@ export default function ExamResults({
     grade.mode === 'ai'
       ? `Corregido por IA${grade.model ? ` · ${grade.model}` : ''}`
       : 'Autoevaluación guiada';
+  const communityLabel = grade.community ? getEbauCommunity(grade.community).name : null;
 
   return (
     <div className="space-y-6">
@@ -47,6 +54,7 @@ export default function ExamResults({
                 Simulacro corregido · {subjectName}
               </h2>
               <p className="text-xs text-slate-400">
+                {communityLabel ? `${communityLabel} · ` : ''}
                 {modeLabel} · entregado en {elapsedMinutes} min
               </p>
             </div>
@@ -78,6 +86,23 @@ export default function ExamResults({
           </p>
         )}
       </div>
+
+      {/* Auditoría: lo que ha entrado en el planificador */}
+      {grade.audit && (grade.audit.errorsCreated > 0 || grade.audit.pillsCreated > 0) && (
+        <div className="p-4 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/30 space-y-1">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+            Auditoría del simulacro
+          </p>
+          <p className="text-xs text-emerald-100/90 leading-relaxed">
+            {grade.audit.errorsCreated > 0
+              ? `${grade.audit.errorsCreated} ficha(s) nueva(s) en el Banco de Errores. `
+              : 'Sin fichas nuevas: los fallos ya estaban registrados. '}
+            {grade.audit.pillsCreated > 0
+              ? `${grade.audit.pillsCreated} píldora(s) de 15 min añadidas al plan de hoy.`
+              : 'No ha hecho falta añadir píldoras nuevas al plan.'}
+          </p>
+        </div>
+      )}
 
       {/* Temas débiles detectados */}
       {grade.weakTopicTitles.length > 0 && (
@@ -153,6 +178,38 @@ export default function ExamResults({
                   <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">
                     {result.feedback}
                   </p>
+                </div>
+              )}
+
+              {result?.apartados && result.apartados.length > 0 && (
+                <div className="space-y-1.5 rounded-lg border border-slate-800 bg-[#080d18] p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                    Desglose por apartados
+                  </p>
+                  {result.apartados.map((apartado, apartadoIndex) => (
+                    <div
+                      key={`${apartado.label}-${apartadoIndex}`}
+                      className="flex items-center justify-between gap-2 text-[11px]"
+                    >
+                      <span className="truncate text-slate-300">{apartado.label}</span>
+                      <span className="shrink-0 font-mono text-slate-400">
+                        {fmtGrade(apartado.score)} / {fmtGrade(apartado.max)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {result?.notationIssues && result.notationIssues.length > 0 && (
+                <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-3">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                    Fallos de notación
+                  </p>
+                  <ul className="list-inside list-disc space-y-0.5 text-[11px] text-amber-100/85">
+                    {result.notationIssues.map((issue) => (
+                      <li key={issue}>{issue}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 

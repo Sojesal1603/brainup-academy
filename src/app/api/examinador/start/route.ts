@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { buildExamPackage, PAU_TIMED_MINUTES } from '@/lib/examinador';
+import { buildEbauPackage } from '@/lib/ebauSimulator';
+import {
+  getEbauCommunity,
+  isEbauCommunity,
+} from '@/lib/ebauCommunities';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Crea una sesión de simulacro PAU: genera los bloques (IA o plantillas
- * locales) y los guarda en la sesión para poder retomarla aunque se recargue.
+ * Crea una sesión de simulacro EBAU con la estructura de la comunidad del
+ * alumno. Si el cuerpo trae una comunidad válida, se guarda en el perfil para
+ * que el siguiente simulacro la use por defecto.
  */
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => null)) as { subjectId?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { subjectId?: unknown; community?: unknown }
+    | null;
   const subjectId = typeof body?.subjectId === 'string' ? body.subjectId : '';
 
   if (!subjectId) {
@@ -18,20 +25,35 @@ export async function POST(request: NextRequest) {
 
   const subject = await prisma.subject.findUnique({
     where: { id: subjectId },
-    select: { name: true },
+    select: { name: true, user: { select: { community: true } } },
   });
 
   if (!subject) {
     return NextResponse.json({ error: 'Asignatura no encontrada.' }, { status: 404 });
   }
 
+  const requested = isEbauCommunity(body?.community) ? body.community : null;
+  const community = getEbauCommunity(requested ?? subject.user?.community);
+
+  if (requested && requested !== subject.user?.community) {
+    await prisma.userProfile.updateMany({
+      where: { id: 'user_default' },
+      data: { community: community.code },
+    });
+  }
+
   try {
-    const pkg = await buildExamPackage(subjectId);
+    const pkg = await buildEbauPackage({
+      subjectId,
+      communityCode: community.code,
+    });
 
     const session = await prisma.pauExamSession.create({
       data: {
         subjectName: subject.name,
-        timedMinutes: PAU_TIMED_MINUTES,
+        subjectId,
+        community: community.code,
+        timedMinutes: community.durationMinutes,
         elapsedMinutes: 0,
         questionsJson: JSON.stringify(pkg),
       },
@@ -42,6 +64,9 @@ export async function POST(request: NextRequest) {
       sessionId: session.id,
       source: pkg.source,
       model: pkg.model ?? null,
+      community: community.code,
+      communityName: community.name,
+      structure: pkg.structure ?? null,
     });
   } catch (error) {
     const message =

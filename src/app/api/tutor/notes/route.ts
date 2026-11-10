@@ -21,6 +21,9 @@ import {
 } from '@/lib/aiEngine';
 import { rememberNoteDraft, takeNoteDraft } from '@/lib/noteDrafts';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
+import { MAX_TUTOR_ATTACHMENTS } from '@/lib/attachmentLimits';
+import { readUpload, type StoredUpload } from '@/lib/docStore';
+import { buildDocumentContext, type IndexedDoc } from '@/lib/docContext';
 
 /**
  * Escribe los apuntes que el catedrático ha propuesto.
@@ -106,6 +109,12 @@ interface NotesBody {
   draftToken?: unknown;
   /** Motor concreto con el que redactar (comparativa multi-IA). */
   provider?: unknown;
+  /**
+   * Documentos que el alumno subió en la consulta (páginas del libro, esquemas
+   * del profesor). Viajan al redactor para que el apunte sea la teoría de SU
+   * examen y no un temario genérico.
+   */
+  uploadIds?: unknown;
 }
 
 /** Motores que se pueden pedir explícitamente desde la comparativa. */
@@ -288,6 +297,11 @@ export async function POST(request: Request) {
   const requestedProvider = COMPARABLE_PROVIDERS.includes(body.provider as AiProvider)
     ? (body.provider as AiProvider)
     : null;
+  const uploadIds = Array.isArray(body.uploadIds)
+    ? body.uploadIds
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+        .slice(0, MAX_TUTOR_ATTACHMENTS)
+    : [];
 
   if (requestedProvider && !getConfiguredProviders().includes(requestedProvider)) {
     return NextResponse.json(
@@ -483,6 +497,19 @@ export async function POST(request: Request) {
       );
     }
 
+    // La fuente real del examen: los documentos que el alumno acaba de subir.
+    // Se extrae su texto y se le pasa al redactor como material prioritario.
+    const uploads = (
+      await Promise.all(uploadIds.map((id) => readUpload(id).catch(() => null)))
+    ).filter((upload): upload is StoredUpload => upload !== null);
+    const documentIndexes: IndexedDoc[] = uploads
+      .map((upload) => upload.index)
+      .filter((index): index is IndexedDoc => index !== null);
+    const sourceDocuments =
+      documentIndexes.length > 0
+        ? buildDocumentContext(documentIndexes, `${unit.title} ${proposedTitle} ${focus}`.trim())
+        : null;
+
     const [
       student,
       syllabus,
@@ -573,8 +600,15 @@ export async function POST(request: Request) {
       existingNoteExcerpts,
       teacherMaterials,
       teacherMethodology: buildTeacherMethodology(unit, teacherMethods),
+      sourceDocuments,
       focus: focus.length > 0 ? focus : null,
     };
+
+    if (documentIndexes.length > 0) {
+      console.log(
+        `[apuntes] redactando con ${documentIndexes.length} documento(s) del alumno: ${documentIndexes.map((doc) => `${doc.name} (${doc.pages} pág.)`).join(' | ')}`
+      );
+    }
 
     const writerInput = { ...context, proposedTitle: proposedTitle || unit.title };
 

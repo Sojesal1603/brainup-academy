@@ -2,6 +2,7 @@ import { prisma } from './prisma';
 import { updateDefaultProfile } from './userProfile';
 import { effectiveMastery } from './knowledge';
 import { estimateRetention, isDue, overdueDays, startOfDay } from './srs';
+import { dueReviewCardsByTopic } from './reviewCards';
 import {
   calibrationByTechnique,
   calibrationFor,
@@ -619,6 +620,67 @@ export async function persistDayPlan(
     plannedMinutes += session.durationMinutes;
   }
 
+  // 5. Tarjetas SM-2 que vencen hoy: Active Recall obligatorio en el plan.
+  //
+  // No se inyecta la unidad entera: se crea una sesión corta (15 min) por cada
+  // una de las dos unidades con más tarjetas vencidas. Así el repaso espaciado
+  // deja de ser una pantalla aparte y aparece en la agenda del día.
+  if (isToday && effectiveMinutes >= 10) {
+    try {
+      const dueGroups = (await dueReviewCardsByTopic(now)).slice(0, 2);
+      if (dueGroups.length > 0) {
+        const dueTopics = await prisma.topic.findMany({
+          where: { id: { in: dueGroups.map((group) => group.topicId) } },
+          select: { id: true, title: true, subject: { select: { isTracked: true } } },
+        });
+        const alreadyScheduled = new Set(
+          (
+            await prisma.studyBlock.findMany({
+              where: { date: { gte: start, lt: end }, technique: 'srs_review' },
+              select: { topicId: true },
+            })
+          ).map((block) => block.topicId)
+        );
+
+        let injected = 0;
+        for (const group of dueGroups) {
+          const topic = dueTopics.find((row) => row.id === group.topicId);
+          if (!topic || !topic.subject.isTracked || alreadyScheduled.has(topic.id)) continue;
+
+          await prisma.studyBlock.create({
+            data: {
+              topicId: topic.id,
+              date: start,
+              durationMinutes: 15,
+              technique: 'srs_review',
+              mode: ctx.mode,
+              isCompleted: false,
+              orderIndex: 90 + injected,
+              objective: `Active Recall: ${group.count} tarjeta(s) vencidas de «${topic.title}»`,
+              reason:
+                'Repaso espaciado obligatorio (SM-2): estas tarjetas vencen hoy. No es una sugerencia del plan: es recuperación activa programada.',
+              material: 'Flashcards y tests del cuaderno · motor SM-2',
+              stage: 'repaso',
+              breakMinutes: 5,
+              status: 'pendiente',
+              priorityScore: 88,
+              origin: 'plan',
+              spentMinutes: 0,
+            },
+          });
+
+          alreadyScheduled.add(topic.id);
+          injected += 1;
+          createdAt += 1;
+          plannedMinutes += 15;
+        }
+      }
+    } catch (error) {
+      // El plan no puede caerse porque falle el repaso de tarjetas.
+      console.error('[plan] no se pudo inyectar el repaso SM-2 de hoy:', error);
+    }
+  }
+
   return {
     created: createdAt,
     plannedMinutes,
@@ -627,7 +689,7 @@ export async function persistDayPlan(
     carried,
     abandoned: stale.length,
     reason:
-      sessions.length === 0
+      createdAt === 0
         ? effectiveMinutes < 10
           ? 'No hay ventana suficiente para una sesión (mínimo 10 minutos): ya has cubierto el tiempo de hoy.'
           : 'No queda trabajo pendiente que merezca una sesión.'

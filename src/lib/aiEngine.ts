@@ -423,6 +423,19 @@ const COOLDOWN_MISSING_MS = 60 * 60 * 1000;
 const COOLDOWN_ERROR_MS = 3 * 60 * 1000;
 const COOLDOWN_AUTH_MS = 10 * 60 * 1000;
 
+/**
+ * MODELO PREFERENTE DE LA APP: Gemini 1.5 Flash.
+ *
+ * Es el motor que queremos por defecto: tier gratuito, ventana de contexto
+ * enorme (cabe el temario, los apuntes y los documentos) y respuesta casi
+ * instantánea. Ahora bien, Google ha retirado `gemini-1.5-flash` de la API
+ * pública (devuelve 404), así que solo se usa si el catálogo real todavía lo
+ * sirve o si se fuerza con `GEMINI_MODEL=gemini-1.5-flash`. Cuando no está, la
+ * cadena cae al mejor Flash disponible del catálogo: mismo proveedor, misma
+ * latencia y mismo tier gratuito, sin gastar un intento en un 404.
+ */
+export const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
+
 /** Cadena estática de respaldo si el catálogo de Gemini no se puede consultar. */
 const GEMINI_STATIC_POOL = [
   'gemini-3.8-flash',
@@ -693,6 +706,11 @@ export function modelSupportsVision(provider: AiProvider, model: string): boolea
  * Gemma con tier gratuito).
  */
 function scoreGeminiModel(name: string): number | null {
+  // Gemini 1.5 Flash manda cuando el catálogo lo sirve: es el preferente de la
+  // casa y puntúa por encima de cualquier otro. Si ya no aparece, la cadena usa
+  // el mejor Flash del catálogo sin intentar un modelo retirado.
+  if (name === DEFAULT_GEMINI_MODEL || name === `${DEFAULT_GEMINI_MODEL}-001`) return 20_000;
+  if (name === `${DEFAULT_GEMINI_MODEL}-8b` || name === `${DEFAULT_GEMINI_MODEL}-8b-001`) return 19_900;
   const flashLite = name.match(/^gemini-(\d+)\.(\d+)-flash-lite$/);
   if (flashLite) {
     return 9000 + Number(flashLite[1]) * 100 + Number(flashLite[2]) * 10 + 1;

@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlarmClock, ArrowLeft, ClipboardCheck, Loader2, Send, ShieldAlert, Timer } from 'lucide-react';
+import {
+  AlarmClock,
+  ArrowLeft,
+  ClipboardCheck,
+  FileText,
+  Loader2,
+  Paperclip,
+  Send,
+  ShieldAlert,
+  Timer,
+  X,
+} from 'lucide-react';
 import MathText from './MathText';
 import ExamResults from './ExamResults';
 import type { ExamBlock, ExamGrade } from '@/lib/examenTypes';
@@ -57,6 +68,12 @@ export default function PauExamRunner({
   });
   const [selfScores, setSelfScores] = useState<number[]>(() => blocks.map(() => 0));
   const [notice, setNotice] = useState('');
+  /** Resoluciones escaneadas: se suben aparte y viajan como ids al corregir. */
+  const [uploadIds, setUploadIds] = useState<string[]>([]);
+  const [uploadNames, setUploadNames] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const autoSubmitted = useRef(false);
 
   /* ---- Borrador local: la sesión se retoma aunque se recargue la página ---- */
@@ -122,6 +139,7 @@ export default function PauExamRunner({
             sessionId,
             answers,
             elapsedMinutes,
+            uploadIds,
             ...(extra ? { selfScores: extra.selfScores } : {}),
           }),
         });
@@ -153,7 +171,7 @@ export default function PauExamRunner({
         setSubmitting(false);
       }
     },
-    [answers, elapsedMinutes, grade, sessionId, storageKey, submitting]
+    [answers, elapsedMinutes, grade, sessionId, storageKey, submitting, uploadIds]
   );
 
   /* ---- Entrega automática al agotarse el tiempo ---- */
@@ -166,6 +184,40 @@ export default function PauExamRunner({
   }, [remainingSeconds, grade, submitting, submit]);
 
   const answeredCount = answers.filter((a) => a.trim().length > 0).length;
+
+  /** Sube una captura o PDF de la resolución y guarda su id para la corrección. */
+  const uploadResolution = async (file: File) => {
+    setUploading(true);
+    setUploadError('');
+    try {
+      const res = await fetch('/api/tutor/attachments', {
+        method: 'PUT',
+        headers: {
+          'x-file-name': encodeURIComponent(file.name),
+          'x-file-type': encodeURIComponent(file.type || 'application/octet-stream'),
+          'x-file-size': String(file.size),
+        },
+        body: file,
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { upload?: { id: string; name: string }; error?: string }
+        | null;
+
+      if (!res.ok || !data?.upload?.id) {
+        throw new Error(data?.error || 'No se ha podido subir la resolución.');
+      }
+
+      setUploadIds((prev) => [...prev, data.upload!.id]);
+      setUploadNames((prev) => ({ ...prev, [data.upload!.id]: data.upload!.name }));
+    } catch (caught) {
+      setUploadError(
+        caught instanceof Error ? caught.message : 'No se ha podido subir la resolución.'
+      );
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   /* ---- Vista de resultados tras la corrección ---- */
   if (grade) {
@@ -196,13 +248,13 @@ export default function PauExamRunner({
               </Link>
               <div>
                 <h2 className="text-sm font-black text-slate-100 uppercase font-mono tracking-tight">
-                  Simulacro PAU · {subjectName}
+                  Simulacro EBAU · {subjectName}
                 </h2>
                 <p className="text-[10px] text-slate-500">
                   {source === 'ai'
                     ? `Enunciados generados por IA${model ? ` (${model})` : ''}`
                     : 'Enunciados por plantilla local (IA no disponible)'}{' '}
-                  · 4 bloques · 10 puntos
+                  · {blocks.length} bloques · {fmt(blocks.reduce((total, block) => total + block.points, 0))} puntos
                 </p>
               </div>
             </div>
@@ -321,6 +373,75 @@ export default function PauExamRunner({
             )}
           </div>
         ))}
+      </div>
+
+      {/* Resolución adjunta: el corrector la lee y la cruza con los bloques */}
+      <div className="p-4 rounded-2xl glass-card space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+            <Paperclip className="h-3.5 w-3.5 text-emerald-400" />
+            Resolución adjunta (PDF o foto)
+          </p>
+          <span className="text-[10px] text-slate-500">{uploadIds.length}/4</span>
+        </div>
+        <p className="text-[10px] leading-relaxed text-slate-500">
+          Si has hecho el examen en papel, súbelo aquí: el corrector lee el documento y lo cruza con
+          los bloques. También puedes escribirlo arriba.
+        </p>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,image/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void uploadResolution(file);
+          }}
+        />
+
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || uploadIds.length >= 4 || selfMode.active}
+          className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-semibold text-slate-300 transition-colors hover:border-emerald-500/40 disabled:opacity-50"
+        >
+          {uploading ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Paperclip className="h-3 w-3" />
+          )}
+          {uploading ? 'Subiendo…' : 'Adjuntar resolución'}
+        </button>
+
+        {uploadIds.length > 0 && (
+          <ul className="space-y-1">
+            {uploadIds.map((id) => (
+              <li
+                key={id}
+                className="flex items-center justify-between gap-2 rounded border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-[10px] text-slate-300"
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <FileText className="h-3 w-3 shrink-0 text-emerald-400" />
+                  <span className="truncate">{uploadNames[id] ?? 'resolución'}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadIds((prev) => prev.filter((value) => value !== id));
+                    void fetch(`/api/tutor/attachments?id=${id}`, { method: 'DELETE' });
+                  }}
+                  className="text-slate-500 hover:text-rose-300"
+                  title="Quitar"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {uploadError && <p className="text-[10px] text-rose-300">{uploadError}</p>}
       </div>
 
       {/* Acciones */}

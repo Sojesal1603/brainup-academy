@@ -37,6 +37,8 @@ import NoteSplitPanel, {
   type SplitNote,
 } from './NoteSplitPanel';
 import type { NoteProposal } from '@/lib/apuntesIa';
+import { FOCUS_SESSION_STORAGE_KEY } from '@/lib/focusLock';
+import { registerTutorTime } from '@/lib/focusActions';
 import {
   ALLOWED_ATTACHMENT_HINT,
   ATTACHMENT_ACCEPT,
@@ -57,9 +59,9 @@ import {
  * colgada (red, servidor reiniciándose). Sin él, el spinner giraba para siempre
  * y el alumno no sabía si esperar o recargar.
  */
-const CHAT_TIMEOUT_MS = 150_000;
+const CHAT_TIMEOUT_MS = 60_000;
 /** Redactar un apunte es la llamada más cara del sistema: más margen. */
-const NOTES_TIMEOUT_MS = 240_000;
+const NOTES_TIMEOUT_MS = 180_000;
 
 /** Un error HTTP con su estado, para poder decidir si merece la pena reintentar. */
 class HttpStatusError extends Error {
@@ -747,6 +749,12 @@ export default function TutorChat({
   const [attachmentWarning, setAttachmentWarning] = useState<string | null>(null);
   // Compartir los apuntes es la opción cómoda: se puede apagar en cualquier momento.
   const [shareNotes, setShareNotes] = useState(true);
+  /**
+   * Documentos que viajaron en el último turno. Se reenvían al redactor de
+   * apuntes para que escriba con las páginas reales del libro o del profesor,
+   * no con un temario genérico.
+   */
+  const [lastUploadIds, setLastUploadIds] = useState<string[]>([]);
   const [sharedNotes, setSharedNotes] = useState<SharedNoteRef[]>([]);
   // Propuestas de apunte: pendientes, en redacción, escritas o rechazadas.
   const [noteJobs, setNoteJobs] = useState<Record<string, NoteJob>>({});
@@ -764,6 +772,29 @@ export default function TutorChat({
   const router = useRouter();
   /** Adjuntos que el alumno ha quitado mientras subían (hay que borrarlos del servidor). */
   const removedRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Focus & Lock: si hay un bloque de estudio activo, cada 15 s se suman los
+   * segundos de consulta al catedrático. Así el Cuartel puede separar «tiempo
+   * leyendo y estudiando» de «tiempo preguntando en el chat».
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const raw = localStorage.getItem(FOCUS_SESSION_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { id?: unknown };
+        if (typeof parsed.id === 'string' && parsed.id.length > 0) {
+          void registerTutorTime(parsed.id, 15);
+        }
+      } catch {
+        // Sin localStorage o con un valor corrupto: no se cuenta nada.
+      }
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   /** ¿Hay algún archivo subiendo todavía? (entonces no se puede enviar el turno) */
   const uploading = pending.some((attachment) => attachment.progress !== null);
@@ -863,6 +894,14 @@ export default function TutorChat({
             notRead?: string[];
             sharedNotes?: SharedNoteRef[];
             noteProposal?: NoteProposal | null;
+            /** Apunte guardado que el catedrático ha pedido abrir en el panel. */
+            openNote?: {
+              id: string;
+              title: string;
+              unitNumber: number | null;
+              unitTitle: string | null;
+              subjectId: string;
+            } | null;
             reply?: { id: string; content: string; stage: TutorStage | null };
             error?: string;
           }
@@ -880,6 +919,11 @@ export default function TutorChat({
       }
 
       setFailedTurn(null);
+      setLastUploadIds(
+        outgoing
+          .map((attachment) => attachment.uploadId)
+          .filter((id): id is string => Boolean(id))
+      );
 
       if (data.conversationId) setConversationId(data.conversationId);
       if (data.model) setActiveModel(data.model);
@@ -936,6 +980,27 @@ export default function TutorChat({
           noteProposal: data.noteProposal ?? null,
         },
       ]);
+
+      // «Ábreme los apuntes de…»: el catedrático ha identificado el documento
+      // guardado y lo proyecta al lado del chat, sin volver a redactarlo.
+      if (data.openNote) {
+        const opened = data.openNote;
+        const replyId = data.reply.id;
+        setNoteJobs((prev) => ({
+          ...prev,
+          [replyId]: {
+            status: 'done',
+            note: {
+              id: opened.id,
+              title: opened.title,
+              unitNumber: opened.unitNumber,
+              unitTitle: opened.unitTitle ?? 'Apunte',
+              subjectId: opened.subjectId,
+            },
+          },
+        }));
+        void openNoteById(opened.id, replyId);
+      }
     } catch (err) {
       // Se retira el mensaje optimista y se devuelven el texto y los adjuntos
       // al cuadro de escritura: nada se pierde por un fallo de la IA.
@@ -983,6 +1048,9 @@ export default function TutorChat({
           unitNumber: proposal.unitNumber,
           title: proposal.title,
           confirmed: true,
+          // Las páginas y documentos que acaba de subir son la fuente que manda
+          // para que los apuntes coincidan con lo que entra en su examen.
+          uploadIds: lastUploadIds,
           // Redactar y devolvérnoslo, sin escribir nada en el cuaderno todavía.
           preview: true,
         }),
@@ -1277,6 +1345,7 @@ export default function TutorChat({
     setAttachmentError(null);
     setAttachmentWarning(null);
     setSharedNotes([]);
+    setLastUploadIds([]);
     setPanel(null);
     setPanelMode('chat');
   };
@@ -1321,13 +1390,17 @@ export default function TutorChat({
     setPanelMode('markdown');
   };
 
-  /** Trae del servidor un apunte ya guardado y lo abre al lado del chat. */
-  const openSavedNotePanel = async (message: ChatMessage) => {
-    const note = noteJobs[message.id]?.note;
-    if (!note) return;
+  /**
+   * Carga un apunte guardado y lo proyecta en el panel derecho.
+   *
+   * Lo usan el botón «Abrir documento» y el propio catedrático cuando el alumno
+   * le pide recuperar unos apuntes (`[[abrir:N3]]`): en los dos casos se lee el
+   * documento que ya está en el cuaderno, sin regenerarlo.
+   */
+  const openNoteById = async (noteId: string, messageId: string) => {
     setError(null);
     try {
-      const res = await fetch(`/api/notes/${note.id}`, {
+      const res = await fetch(`/api/notes/${noteId}`, {
         signal: timeoutSignal(NOTES_TIMEOUT_MS),
       });
       const data = (await res.json().catch(() => null)) as
@@ -1350,7 +1423,7 @@ export default function TutorChat({
       if (!data?.note) throw new Error(data?.error || 'No se ha podido abrir el apunte.');
       const opened = data.note;
       setPanel({
-        messageId: message.id,
+        messageId,
         title: opened.title,
         unitLabel: opened.unitNumber
           ? `Unidad ${opened.unitNumber} · ${opened.unitTitle}`
@@ -1373,6 +1446,12 @@ export default function TutorChat({
     } catch (err) {
       setError(describeFetchError(err));
     }
+  };
+
+  /** Abre desde el chat el apunte que ya se guardó en este mensaje. */
+  const openSavedNotePanel = (message: ChatMessage) => {
+    const note = noteJobs[message.id]?.note;
+    if (note) void openNoteById(note.id, message.id);
   };
 
   /**

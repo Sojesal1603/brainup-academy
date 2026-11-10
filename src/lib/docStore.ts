@@ -287,6 +287,17 @@ export async function readUpload(id: string): Promise<StoredUpload | null> {
   return { ...meta, index };
 }
 
+/** El texto extraído de una subida, o `null` si no tiene capa de texto. */
+export async function readUploadText(id: string): Promise<string | null> {
+  if (!isSafeId(id)) return null;
+  try {
+    const text = await readFile(textPath(id), 'utf8');
+    return text.trim().length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 /** El binario de una subida (para mirarlo o para servirlo de vuelta). */
 export async function readUploadBytes(id: string): Promise<Buffer | null> {
   if (!isSafeId(id)) return null;

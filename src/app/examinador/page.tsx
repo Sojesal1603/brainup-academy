@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/prisma';
+import { ensureUserProfile } from '@/lib/userProfile';
+import { getEbauCommunity, communityStructureLabel } from '@/lib/ebauCommunities';
 import { FileCheck2, Clock, BookOpen, Sparkles, History, AlertTriangle } from 'lucide-react';
 import StartSimulacroButton from '@/components/examen/StartSimulacroButton';
 
@@ -27,6 +29,9 @@ function isSelfGraded(raw: string | null): boolean {
 }
 
 export default async function ExaminerPage() {
+  const user = await ensureUserProfile();
+  const community = getEbauCommunity(user?.community);
+
   const subjects = await prisma.subject.findMany({
     include: {
       topics: true,
@@ -48,12 +53,13 @@ export default async function ExaminerPage() {
         <div className="flex items-center gap-2">
           <FileCheck2 className="w-6 h-6 text-emerald-400" />
           <h1 className="text-2xl font-black tracking-tight text-slate-100 uppercase font-mono">
-            Examinador PAU & Simulacros
+            Simulador EBAU & Corrección Cruzada
           </h1>
         </div>
         <p className="text-xs text-slate-400 mt-1">
-          Simulación real de Selectividad. Pruebas cronometradas de 90 minutos con corrección por
-          rúbrica e informe de puntos débiles.
+          Simulación real de tu EBAU · {community.name}. {communityStructureLabel(community)}. La IA
+          corrige con nota, desglose por apartados y fallos de notación, y cada fallo entra en tu
+          planificador.
         </p>
       </div>
 
@@ -146,6 +152,7 @@ export default async function ExaminerPage() {
                 <StartSimulacroButton
                   subjectId={sub.id}
                   subjectName={sub.name}
+                  defaultCommunity={community.code}
                   disabled={sub.topics.length === 0}
                 />
               </div>

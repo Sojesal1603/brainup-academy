@@ -23,6 +23,12 @@ import {
   type StudyToolKind,
   type StudyToolPayload,
 } from '@/lib/studyTools';
+import {
+  RECALL_RATINGS,
+  RECALL_RATING_ORDER,
+  type RecallRating,
+} from '@/lib/spacedRepetition';
+import { rateStudyCard } from '@/lib/spacedRepetitionActions';
 
 const KIND_ORDER: StudyToolKind[] = ['flashcards', 'test', 'mapa', 'guia'];
 
@@ -35,6 +41,74 @@ const ICONS: Record<StudyToolKind, ComponentType<{ className?: string }>> = {
 
 const TOOL_TIMEOUT_MS = 120_000;
 
+/**
+ * Valoración del recuerdo. Cada botón reprograma la tarjeta con SM-2 y enseña
+ * la fecha exacta del próximo repaso: sin ese número, el alumno no sabe si el
+ * sistema ha hecho algo o solo ha pintado un check.
+ */
+function RatingRow({ cardId }: { cardId?: string }) {
+  const [saving, setSaving] = useState<RecallRating | null>(null);
+  const [due, setDue] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  if (!cardId) return null;
+
+  const rate = async (rating: RecallRating) => {
+    if (saving) return;
+    setSaving(rating);
+    setError('');
+    try {
+      const result = await rateStudyCard(cardId, rating);
+      if (!result.success) throw new Error(result.error || 'No se ha podido guardar.');
+      setDue(result.dueLabel ?? 'Hoy');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se ha podido guardar.');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (due) {
+    return (
+      <p className="mt-2 text-[10px] font-semibold text-emerald-300">
+        Próximo repaso: {due}
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-[9px] uppercase tracking-wider text-slate-500">
+        ¿Cómo lo has recordado?
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {RECALL_RATING_ORDER.map((rating) => (
+          <button
+            key={rating}
+            type="button"
+            disabled={saving !== null}
+            onClick={() => void rate(rating)}
+            title={RECALL_RATINGS[rating].description}
+            className={clsx(
+              'rounded border px-1.5 py-1 text-[9px] font-semibold transition-colors disabled:opacity-50',
+              rating === 'again'
+                ? 'border-rose-500/30 text-rose-300 hover:border-rose-400'
+                : rating === 'hard'
+                  ? 'border-amber-500/30 text-amber-300 hover:border-amber-400'
+                  : rating === 'good'
+                    ? 'border-emerald-500/30 text-emerald-300 hover:border-emerald-400'
+                    : 'border-sky-500/30 text-sky-300 hover:border-sky-400'
+            )}
+          >
+            {saving === rating ? '…' : RECALL_RATINGS[rating].label}
+          </button>
+        ))}
+      </div>
+      {error && <p className="text-[9px] text-rose-300">{error}</p>}
+    </div>
+  );
+}
+
 function FlashcardsView({ cards }: { cards: Flashcard[] }) {
   const [shown, setShown] = useState<Record<number, boolean>>({});
 
@@ -43,30 +117,39 @@ function FlashcardsView({ cards }: { cards: Flashcard[] }) {
       {cards.map((card, index) => {
         const flipped = shown[index] === true;
         return (
-          <button
+          <div
             key={`${index}-${card.front.slice(0, 16)}`}
-            type="button"
-            onClick={() => setShown((prev) => ({ ...prev, [index]: !flipped }))}
             className={clsx(
-              'rounded-lg border px-3 py-2.5 text-left transition-colors',
+              'rounded-lg border transition-colors',
               flipped
                 ? 'border-emerald-500/40 bg-emerald-500/[0.07]'
                 : 'border-white/[0.07] bg-white/[0.02] hover:border-white/20'
             )}
           >
-            <p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-slate-500">
-              {flipped ? 'Respuesta' : 'Pregunta'}
-            </p>
-            <p className="text-[12px] leading-relaxed text-slate-200">
-              {flipped ? card.back : card.front}
-            </p>
-            {flipped && card.source && (
-              <p className="mt-1.5 text-[10px] text-emerald-300/80">📌 {card.source}</p>
+            <button
+              type="button"
+              onClick={() => setShown((prev) => ({ ...prev, [index]: !flipped }))}
+              className="w-full px-3 py-2.5 text-left"
+            >
+              <p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                {flipped ? 'Respuesta' : 'Pregunta'}
+              </p>
+              <p className="text-[12px] leading-relaxed text-slate-200">
+                {flipped ? card.back : card.front}
+              </p>
+              {flipped && card.source && (
+                <p className="mt-1.5 text-[10px] text-emerald-300/80">📌 {card.source}</p>
+              )}
+              <p className="mt-1.5 text-[9px] text-slate-600">
+                {flipped ? 'Toca para volver a la pregunta' : 'Toca para ver la respuesta'}
+              </p>
+            </button>
+            {flipped && (
+              <div className="border-t border-white/[0.06] px-3 pb-2">
+                <RatingRow cardId={card.cardId} />
+              </div>
             )}
-            <p className="mt-1.5 text-[9px] text-slate-600">
-              {flipped ? 'Toca para volver a la pregunta' : 'Toca para ver la respuesta'}
-            </p>
-          </button>
+          </div>
         );
       })}
     </div>
@@ -142,6 +225,11 @@ function QuizView({ questions }: { questions: QuizQuestion[] }) {
                   <span className="text-slate-500"> · {question.source}</span>
                 ) : null}
               </p>
+            )}
+            {submitted && question.cardId && (
+              <div className="mt-1.5 border-t border-white/[0.06] pt-1.5">
+                <RatingRow cardId={question.cardId} />
+              </div>
             )}
           </div>
         );

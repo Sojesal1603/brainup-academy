@@ -21,11 +21,17 @@ import {
 import { buildStudentLevelLines, LEVEL_TAG_INSTRUCTION, parseLevelTag } from './knowledge';
 import {
   NOTE_PROPOSAL_TAG_INSTRUCTION,
+  parseNoteOpenRequest,
   parseNoteProposal,
   stripHiddenTags,
+  type NoteOpenRequest,
   type NoteProposal,
 } from './apuntesIa';
-import type { SharedNote } from './tutorNotes';
+import {
+  NOTE_OPEN_TAG_INSTRUCTION,
+  type NoteIndexEntry,
+  type SharedNote,
+} from './tutorNotes';
 
 export {
   getConfiguredModelLabel,
@@ -40,7 +46,7 @@ export {
   TutorError,
 } from './aiEngine';
 
-export type { NoteProposal } from './apuntesIa';
+export type { NoteOpenRequest, NoteProposal } from './apuntesIa';
 
 export type {
   AiAttachmentPart,
@@ -115,6 +121,13 @@ export interface TutorContext {
   /** Cuántos apuntes tiene en total de esta materia (aunque solo entren 6). */
   notesTotal: number;
   /**
+   * Índice completo del cuaderno (título, unidad y una clave corta por apunte).
+   * No viaja para leerlo, sino para poder **abrir** el documento que el alumno
+   * pide sin volver a redactarlo. Opcional para no romper a quien arme el
+   * contexto sin índice.
+   */
+  notesIndex?: NoteIndexEntry[];
+  /**
    * Lo que ya hablaste con él los días anteriores en esta materia (lo escribe
    * `agentMemory.ts`). Cadena vacía el primer día. Se le da como algo que **ya
    * sabe**: lo que tiene que hacer es no volver a preguntarlo.
@@ -128,6 +141,18 @@ export interface TutorContext {
    * hace falta. Cadena vacía si el turno no llevaba documentos.
    */
   documents?: string;
+  /**
+   * Lo que el Planificador ha programado para HOY (planificador → catedrático).
+   * Es la otra mitad de la conexión: el catedrático no puede proponer estudiar
+   * algo que la agenda ya descartó, ni ignorar la sesión que toca ahora.
+   */
+  todayPlan?: Array<{
+    subjectName: string;
+    topicTitle: string;
+    minutes: number;
+    technique: string;
+    done: boolean;
+  }>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -159,7 +184,10 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     'NÚCLEO AUTÓNOMO (identidad y disciplina): eres el responsable de que apruebe, no un asistente que espera órdenes. La agenda la lleva el Planificador, pero dentro de esta materia mandas tú: diagnosticas, exiges y no dejas cabos sueltos.'
   );
   lines.push(
-    'ADAPTACIÓN TOTAL: no sigas plantillas fijas. Si pide una tabla, un debate, un esquema puro, un caso práctico o una explicación desde cero, se lo das con ese formato exacto, con rigor de EBAU y sin cambiarle la petición por la que tú preferirías.'
+    'ADAPTACIÓN TOTAL: no sigas plantillas fijas. Si pide una tabla, un debate, un esquema puro, un caso práctico o una explicación desde cero, se lo das con ese formato exacto, con rigor de examen y sin cambiarle la petición por la que tú preferirías.'
+  );
+  lines.push(
+    'NIVEL CERO (PEDAGOGÍA OBLIGATORIA): explica SIEMPRE como si el alumno no supiera nada del concepto, aunque creas que ya lo sabe. Empieza por la idea más básica y concreta (qué es, para qué sirve, con un ejemplo cotidiano), define cada término la primera vez que lo usas y sube en escalones: base → mecanismo → caso formal → cómo lo pregunta el examen. No des por sabido ningún prerrequisito: si hace falta, recuérdalo en una línea. Al final de cada escalón, comprueba con una pregunta corta que lo ha entendido y no avances hasta que lo demuestre; si falla, vuelve al escalón anterior con OTRA explicación, no repitas la misma frase. Sube de nivel hasta que resuelva solo un caso completo.'
   );
   lines.push(
     'HERRAMIENTAS DE ESTUDIO BAJO DEMANDA: si pide flashcards, un test interactivo, un mapa mental o una guía de estudio, no lo mandes a otra pantalla ni se lo expliques de pasada. Dile en una frase que justo debajo tiene el panel «Herramientas de estudio» y qué botón pulsar (Flashcards, Test, Mapa o Guía), y ofrécele el foco exacto (unidad y apartado). Puedes adelantar dos o tres preguntas de muestra; el material completo lo genera el panel.'
@@ -172,7 +200,7 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
   );
   lines.push('');
   lines.push(
-    `Alumno: ${ctx.studentName}, ${ctx.modality}, preparando la PAU en España.`
+    `Alumno: ${ctx.studentName}, ${ctx.modality}, preparando los exámenes reales de su curso y su centro.`
   );
   lines.push(`Asignatura: ${agent.subject.name}.`);
 
@@ -205,6 +233,26 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     lines.push(`Tiene ${ctx.pendingErrors} errores pendientes en el banco de errores de esta materia.`);
   }
 
+  // Lo que el Planificador ha decidido para hoy. Se le da como contexto real:
+  // si el alumno quiere hacer otra cosa, el catedrático tiene que saber qué
+  // toca y por qué antes de negociarlo.
+  const todayPlan = ctx.todayPlan ?? [];
+  if (todayPlan.length > 0) {
+    lines.push('PLAN DE HOY (lo que ha programado el Planificador; no lo contradigas sin motivo):');
+    for (const session of todayPlan) {
+      lines.push(
+        `- ${session.done ? 'hecha' : 'pendiente'} · ${session.subjectName} · «${session.topicTitle}» · ${session.minutes} min · ${session.technique}`
+      );
+    }
+    lines.push(
+      'Si te pide estudiar algo que no está en el plan de hoy, dile qué toca primero y por qué; si insiste, que lo reajuste en el Planificador en lugar de improvisar aquí.'
+    );
+  } else {
+    lines.push(
+      'PLAN DE HOY: no hay sesiones programadas para hoy. Si te pide por dónde empezar, propónle lo que dicta su expediente y recuérdale que el Planificador lo guardará en cuanto recalcule.'
+    );
+  }
+
   // Apuntes del alumno: lo que ha escrito ÉL. Es contexto, no verdad revelada.
   if (!ctx.notesShared) {
     lines.push(
@@ -224,6 +272,19 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     lines.push(
       'Cómo usarlos: son SU material, no un examen. Apóyate en ellos cuando pregunten por algo que ya tiene escrito y cítalos («en tus apuntes de esa unidad pones…»); si algo no está en sus apuntes ni en su temario, no lo des por escrito y pregúntale. Nunca contradigas sus apuntes sin avisar: si ves un error en lo que ha escrito, señálalo y hazle razonar por qué.'
     );
+  }
+  // El índice del cuaderno, aparte de los extractos: aquí entran los títulos
+  // de todos sus apuntes (hasta el tope) aunque su texto no quepa. Es lo que
+  // convierte «ábreme los apuntes de matrices» en abrir el documento guardado.
+  const notesIndex = ctx.notesIndex ?? [];
+  if (ctx.notesShared && notesIndex.length > 0) {
+    lines.push('ÍNDICE DE APUNTES GUARDADOS (para abrirlos, no para copiarlos):');
+    for (const entry of notesIndex) {
+      lines.push(
+        `- [${entry.key}] «${entry.title}»${entry.topicLabel ? ` [${entry.topicLabel}]` : ''}`
+      );
+    }
+    lines.push(NOTE_OPEN_TAG_INSTRUCTION);
   }
   // Memoria entre días: lo hablado con él en esta materia los días anteriores.
   // Va aquí, con el resto del contexto real, y no al final del prompt: después
@@ -351,6 +412,8 @@ export interface TutorReply {
   stage: TutorStage | null;
   level: { unitNumber: number; mastery: number } | null;
   proposal: NoteProposal | null;
+  /** Apunte guardado que el alumno ha pedido recuperar en este turno. */
+  openNote: NoteOpenRequest | null;
   steps: unknown[];
   model: string;
   provider: AiProvider;
@@ -364,7 +427,8 @@ export interface TutorReply {
 export function parseTutorResult(result: AiTextResult): TutorReply {
   const measured = parseLevelTag(result.text);
   const proposed = parseNoteProposal(measured.text);
-  const { text: withoutLevel, stage } = parseTutorReply(proposed.text);
+  const opened = parseNoteOpenRequest(proposed.text);
+  const { text: withoutLevel, stage } = parseTutorReply(opened.text);
   const visibleText = stripHiddenTags(withoutLevel);
 
   // Un catedrático que contesta **solo** con las etiquetas internas deja el chat
@@ -386,6 +450,7 @@ export function parseTutorResult(result: AiTextResult): TutorReply {
     stage,
     level: measured.level,
     proposal: proposed.proposal,
+    openNote: opened.request,
     steps: result.steps,
     model: result.model,
     provider: result.provider,

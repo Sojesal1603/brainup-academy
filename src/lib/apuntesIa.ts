@@ -14,7 +14,7 @@
  *      para repetir) y qué material ha subido su profesor a Moodle. Todo eso se
  *      monta aquí, acotado.
  *   3. **El prompt de redacción.** Apuntes para imprimir y estudiar: estructura
- *      fija, fórmulas en LaTeX, ejemplo resuelto, errores típicos y bloques de
+ *      fija, fórmulas en LaTeX, errores típicos y bloques de
  *      Active Recall. Sin relleno.
  *
  * Módulo puro (sin Prisma ni red) para poder probarlo de forma aislada.
@@ -93,12 +93,49 @@ export function parseNoteProposal(raw: string): { text: string; proposal: NotePr
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* 1 bis. La apertura: [[abrir:N3]]                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * El catedrático proyecta un apunte que ya está guardado.
+ *
+ * La etiqueta lleva una **clave corta** (`N3`) y no el id del apunte: son las
+ * claves que el prompt le enseña en el índice del cuaderno, así que son fáciles
+ * de copiar sin equivocarse. El servidor es quien las traduce a un id real y
+ * comprueba que ese apunte es de su asignatura.
+ */
+export interface NoteOpenRequest {
+  key: string;
+}
+
+const NOTE_OPEN_TAG = /\[\[\s*abrir\s*:\s*([A-Za-z0-9_-]{1,32})\s*\]\]/i;
+
+/**
+ * Separa la etiqueta `[[abrir:…]]` del texto visible. Se acepta al final del
+ * mensaje y también suelta dentro del texto, porque el modelo a veces la cuela
+ * en medio de una frase.
+ */
+export function parseNoteOpenRequest(raw: string): {
+  text: string;
+  request: NoteOpenRequest | null;
+} {
+  const text = String(raw ?? '');
+  const match = text.match(NOTE_OPEN_TAG);
+  if (!match) return { text, request: null };
+
+  return {
+    text: tidySpace(text.replace(match[0], '')).trim(),
+    request: { key: match[1].toUpperCase() },
+  };
+}
+
 /**
  * Red de seguridad: quita cualquier etiqueta invisible que se haya colado en un
  * texto visible, sin tocar la indentación del Markdown.
  */
 export function stripHiddenTags(raw: string): string {
-  return tidySpace(String(raw ?? '').replace(/\[\[\s*(etapa|nivel|apunte)\s*:[^\]]*\]\]/gi, ''))
+  return tidySpace(String(raw ?? '').replace(/\[\[\s*(etapa|nivel|apunte|abrir)\s*:[^\]]*\]\]/gi, ''))
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -128,6 +165,12 @@ export interface NotebookContextInput {
   focus: string | null;
   /** Anotaciones sobre cómo explicó el profesor el tema en clase o sus criterios. */
   teacherMethodology?: string | null;
+  /**
+   * Texto real de los documentos que el alumno ha subido (páginas del libro,
+   * esquemas, apuntes del profesor). Es la fuente que manda: si algo no está
+   * aquí ni en el temario, no se escribe de memoria.
+   */
+  sourceDocuments?: string | null;
 }
 
 const LIMIT_SYLLABUS = 40;
@@ -232,6 +275,14 @@ export function buildNotebookContext(input: NotebookContextInput): string[] {
     );
   }
 
+  if (input.sourceDocuments && input.sourceDocuments.trim().length > 0) {
+    lines.push('');
+    lines.push(
+      'MATERIAL REAL QUE HA SUBIDO EL ALUMNO (páginas de su libro, esquemas o documentos de su profesor). Es la fuente que manda: contrasta cada apartado del apunte con este material y cita documento y página cuando una idea venga de ahí. Si el material contradice una idea general, gana el material.'
+    );
+    lines.push(input.sourceDocuments.trim());
+  }
+
   return lines;
 }
 
@@ -244,21 +295,27 @@ export function buildNotebookContext(input: NotebookContextInput): string[] {
  * estudia en el Cuaderno Notion, se imprime y se repasa encima.
  */
 export const NOTE_WRITER_INSTRUCTIONS = [
-  'Eres redactor de apuntes de cátedra para Bachillerato y PAU en España. Escribes el material definitivo que el alumno va a consultar en su cuaderno Notion, imprimir y estudiar encima: riguroso, ordenado, visualmente estructurado y sin una sola línea de relleno.',
+  'Eres redactor de apuntes de cátedra para Bachillerato en España. Escribes el material definitivo que el alumno va a consultar en su cuaderno Notion, imprimir y estudiar encima: riguroso, ordenado, visualmente estructurado y sin una sola línea de relleno.',
+  '',
+  'OBJETIVO ÚNICO: que el alumno domine la TEORÍA que le van a preguntar en SU examen, el de su centro y su profesor. Nada de discursos introductorios sobre pruebas externas ni de metodología generalista: teoría desarrollada, exacta y adaptada a cómo le evalúan.',
   '',
   'EMPIEZA por una única línea `# <Título del apunte>` (el sistema la usa como título de la página, así que no repitas el título después).',
   '',
   'DESPUÉS, esta estructura exacta en Markdown con callouts Notion e iconos destacados:',
-  '1. `> 📌 ` Una sola frase que resuma de qué va la unidad, su propósito e importancia en Bachillerato y PAU.',
+  '1. `> 📌 ` Una sola frase que resuma de qué va la unidad, qué problema resuelve y por qué importa para su examen.',
   '2. `## 🎯 Lo que tienes que saber` — los conceptos mínimos en viñetas ordenadas. Definiciones precisas con términos técnicos destacados en negrita.',
-  '3. `## 👨‍🏫 Criterio y Metodología del Profesor / PAU` — RIGOR DE CORRECCIÓN: Notaciones exactas, convenios de signos, pasos formales que exigen los profesores del instituto y criterios oficiales de la PAU para no perder décimas.',
-  '4. `## 📖 Desarrollo de la unidad` — EL CUERPO DEL APUNTE. Un apartado `### ` por CADA punto del tema, numerados (`### 1. ...`, `### 2. ...`). Dentro de cada punto: qué es (definición formal), justificación física/matemática o técnica, deducción o caso concreto, y contraste con conceptos vecinos. Usa callouts de apoyo cuando aporte valor: `> 💡 **Truco:**` o `> ⚡ **Fórmula clave:**`. Entre 140 y 280 palabras por punto desarrollado.',
+  '3. `## 👨‍🏫 Criterio de examen de tu centro` — RIGOR DE CORRECCIÓN: notaciones exactas, convenios de signos, exigencias formales y criterios de corrección de su profesor (usa lo que él te haya contado; si no lo sabes, no lo inventes). Nada de criterios genéricos.',
+  '4. `## 📖 Desarrollo de la unidad` — EL CUERPO DEL APUNTE. Un apartado `### ` por CADA punto del tema, numerados (`### 1. ...`, `### 2. ...`). Dentro de cada punto: qué es (definición formal), justificación física/matemática o técnica, deducción teórica y contraste con conceptos vecinos. Usa callouts de apoyo cuando aporte valor: `> 💡 **Truco:**` o `> ⚡ **Fórmula clave:**`. Entre 140 y 280 palabras por punto desarrollado.',
   '5. `## ⚡ Fórmulas, Leyes y Reglas` — una tabla Markdown con las columnas Fórmula/Ley | Cuándo se usa | Criterio / Aviso. TODAS las fórmulas matemáticas en LaTeX entre `$...$`.',
-  '6. `## 🛠️ Cómo se hace (método paso a paso)` — el algoritmo o procedimiento numerado para resolver los problemas típicos de examen.',
+  '6. `## 🧩 Relaciones y distinciones clave` — pares de conceptos que se confunden, jerarquías y conexiones con unidades anteriores. Solo teoría: qué se diferencia de qué y por qué.',
   '7. `## 🔗 Analogía para retenerlo` — una analogía corta, cotidiana y FIEL al concepto que sirva para recordarlo en el examen, con una frase que explique qué corresponde a qué. Si el concepto no admite una analogía honesta, escribe el recurso mnemotécnico que mejor funcione en su lugar.',
-  '8. `## 📝 Ejemplo resuelto de examen` — un ejercicio típico de examen o PAU desarrollado COMPLETO, paso a paso, con su justificación teórica y resultado final destacado.',
-  '9. `## ⚠️ Errores que te van a costar puntos` — los fallos más comunes cometidos por alumnos en exámenes y trampas de los correctores, con `> ⚠️ **Cuidado con:**` y cómo evitarlos.',
-  '10. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas de autoevaluación numeradas. La respuesta va inmediatamente después de la pregunta en la forma `**Respuesta:** ` para que el cuaderno la convierta en desplegable interactivo.',
+  '8. `## ⚠️ Errores que te van a costar puntos` — los fallos conceptuales más comunes en exámenes y trampas de los correctores, con `> ⚠️ **Cuidado con:**` y cómo evitarlos.',
+  '9. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas de autoevaluación numeradas. La respuesta va inmediatamente después de la pregunta en la forma `**Respuesta:** ` para que el cuaderno la convierta en desplegable interactivo.',
+  '',
+  'LO QUE NO ENTRA EN UN APUNTE (PROHIBIDO):',
+  '- Ejercicios resueltos, enunciados de problemas y desarrollos paso a paso de un ejercicio concreto. El apunte es TEORÍA: para resolver dudas y ejercicios está el chat con el catedrático, que es socrático. Si un concepto necesita un caso, explícalo como ejemplo teórico breve, nunca como ejercicio desarrollado.',
+  '- Cualquier introducción o sección sobre la prueba de acceso a la universidad, su estructura, ponderaciones o metodología generalista: no es temario y no entra en su examen.',
+  '- Relleno, motivación vacía, avisos de chat o frases sobre lo que vas a escribir.',
   '',
   'REGLAS DE FORMATO Y ESTÉTICA NOTION:',
   '- Callouts estilizados con formato: `> 💡 **Truco:** ...`, `> ⚠️ **Cuidado:** ...`, `> 📌 **Definición:** ...`, `> ⚡ **Fórmula:** ...` (el cuaderno los pinta con cajas de color e iconos temáticos).',
@@ -268,7 +325,7 @@ export const NOTE_WRITER_INSTRUCTIONS = [
   'REGLAS DE CONTENIDO:',
   '- Extensión: entre 1400 y 2400 palabras. Máxima densidad de conocimiento útil.',
   '- Si el alumno ha aportado anotaciones sobre cómo lo explicó su profesor de clase, adáptate prioritariamente a sus convenios y pasos.',
-  '- FIDELIDAD A LA FUENTE: el apunte se escribe solo con el temario, los apuntes y los documentos que tienes delante. Cuando una idea venga de un documento, cítalo (documento y página) en el propio texto; NO completes de memoria lo que no está en sus materiales. Si falta un dato imprescindible, déjalo señalado con `> 🔎 **Falta en tus materiales:** ...` en vez de inventarlo.',
+  '- FIDELIDAD A LA FUENTE: el apunte se escribe solo con el temario, los apuntes y los documentos que tienes delante. Cuando una idea venga de un documento, cítalo (documento y página) en el propio texto; NO completes de memoria lo que no está en sus materiales. Si falta un dato imprescindible, déjalo señalado con `> 🔎 **Falta en tus materiales:** ...` en vez de inventarlo. Si el alumno ha subido las páginas de su libro o los esquemas de su profesor, ESA es la fuente: lo que no aparezca ahí no se afirma como si entrara en su examen.',
   '- Todo lo que escribas tiene que ser matemáticamente y científicamente EXACTO.',
   '- Redacción en español, tono de cátedra cercana (tuteo respetuoso y motivador).',
   '- El apunte es un DOCUMENTO, no un mensaje: no te dirijas «a ti» al lector salvo en `## 🧠 Compruébalo tú`.',
@@ -345,7 +402,7 @@ export const NOTE_INCOMPLETE_ISSUE_TITLE = '[auto] Un apunte de cátedra ha sali
 const CRITICAL_SECTIONS: Array<{ key: string; label: string; test: RegExp }> = [
   { key: 'saber', label: '«Lo que tienes que saber»', test: /lo que tienes que saber|conceptos (?:clave|mínimos)/ },
   { key: 'desarrollo', label: '«Desarrollo de la unidad» con un apartado por punto', test: /desarrollo de la unidad|desarrollo del tema/ },
-  { key: 'ejemplo', label: '«Ejemplo resuelto»', test: /ejemplo resuelto|ejemplo (?:de examen|completo)/ },
+  { key: 'errores', label: '«Errores que te van a costar puntos»', test: /errores que te van a costar|errores t[ií]picos/ },
   { key: 'recall', label: '«Compruébalo tú» con las respuestas', test: /compru[eé]balo t[uú]|active recall|autoevaluaci[oó]n/ },
 ];
 

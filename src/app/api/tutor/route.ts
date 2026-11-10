@@ -23,7 +23,11 @@ import {
   storeAttachments,
   validateAttachments,
 } from '@/lib/tutorAttachments';
-import { selectNotesForTutor, type NoteRowForTutor } from '@/lib/tutorNotes';
+import {
+  buildNoteIndex,
+  selectNotesForTutor,
+  type NoteRowForTutor,
+} from '@/lib/tutorNotes';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
 import {
   MAX_INLINE_ATTACHMENT_BYTES,
@@ -33,6 +37,11 @@ import {
 } from '@/lib/attachmentLimits';
 import { readUpload, readUploadBytes, type StoredUpload } from '@/lib/docStore';
 import { buildDocumentContext, parsePageRequests, type IndexedDoc } from '@/lib/docContext';
+import { startOfDay } from '@/lib/srs';
+import {
+  syncTutorWithPlanner,
+  type TutorPlannerSyncResult,
+} from '@/lib/tutorPlannerSync';
 
 interface TutorRequestBody {
   agentId?: unknown;
@@ -286,6 +295,11 @@ export async function POST(request: Request) {
     // Expediente del alumno: SOLO entran las unidades con nivel medido. Las que
     // nadie ha medido se cuentan aparte para que el catedrático sepa que no sabe
     // nada de ellas (y las diagnostique él) en vez de leerlas como «puntos flojos».
+    // El día de hoy, una sola vez: se usa para el plan que se le cuenta al
+    // catedrático y para saber qué sesiones tiene ya en marcha el Planificador.
+    const nowStart = startOfDay(new Date());
+    const todayEnd = new Date(nowStart.getTime() + 86400000);
+
     const [
       student,
       measuredTopics,
@@ -293,6 +307,7 @@ export async function POST(request: Request) {
       subjectUnits,
       upcomingExams,
       pendingErrors,
+      todayBlocks,
       historyRows,
       noteRows,
       notesTotal,
@@ -321,6 +336,18 @@ export async function POST(request: Request) {
       }),
       prisma.errorLog.count({
         where: { subjectId: agent.subjectId, isMastered: false },
+      }),
+      // Planificador → catedrático: lo que hay programado para hoy, con su
+      // estado. Sin esto el chat podía proponer algo que la agenda ya descartó.
+      prisma.studyBlock.findMany({
+        where: { date: { gte: nowStart, lt: todayEnd } },
+        orderBy: [{ orderIndex: 'asc' }],
+        select: {
+          durationMinutes: true,
+          technique: true,
+          isCompleted: true,
+          topic: { select: { title: true, subject: { select: { name: true } } } },
+        },
       }),
       prisma.aiMessage.findMany({
         where: { conversationId: activeConversation.id },
@@ -376,6 +403,11 @@ export async function POST(request: Request) {
       null;
 
     const sharedNotes = selectNotesForTutor(noteRows);
+
+    // El índice completo del cuaderno (título + clave) es lo que permite abrir
+    // un apunte guardado en vez de reescribirlo. Sin apuntes compartidos no hay
+    // índice: el catedrático no conoce el cuaderno.
+    const noteIndex = shareNotes ? buildNoteIndex(noteRows) : [];
 
     const recentHistory = trimHistory(historyRows as StoredMessage[]);
 
@@ -452,9 +484,17 @@ export async function POST(request: Request) {
           : null,
         upcomingExams,
         pendingErrors,
+        todayPlan: todayBlocks.map((block) => ({
+          subjectName: block.topic.subject.name,
+          topicTitle: block.topic.title,
+          minutes: block.durationMinutes,
+          technique: block.technique,
+          done: block.isCompleted,
+        })),
         notes: sharedNotes,
         notesShared: shareNotes,
         notesTotal,
+        notesIndex: noteIndex,
         memory: memoryBlock,
         documents: documentsBlock,
       }
@@ -587,6 +627,7 @@ export async function POST(request: Request) {
         stage: null,
         level: null,
         proposal: null,
+        openNote: null,
         steps: [],
         model: 'catedrático local',
         provider: LOCAL_TUTOR_PROVIDER,
@@ -610,6 +651,27 @@ export async function POST(request: Request) {
       ? {
           ...reply.proposal,
           unitNumber: resolvedProposal?.unit?.unitNumber ?? reply.proposal.unitNumber,
+        }
+      : null;
+
+    // Apertura de un apunte guardado: la clave del índice se traduce aquí a un
+    // id real. Una clave inventada no abre nada (y se avisa en consola) en vez
+    // de hacer que el chat pida un apunte que no existe.
+    const requestedNote = reply.openNote
+      ? noteIndex.find((entry) => entry.key === reply.openNote!.key)
+      : undefined;
+    if (reply.openNote && !requestedNote) {
+      console.warn(
+        `[tutor] el catedrático ha pedido abrir «${reply.openNote.key}», que no está en el índice del cuaderno`
+      );
+    }
+    const openNote = requestedNote
+      ? {
+          id: requestedNote.id,
+          title: requestedNote.title,
+          unitNumber: requestedNote.unitNumber,
+          unitTitle: requestedNote.unitTitle,
+          subjectId: agent.subjectId,
         }
       : null;
 
@@ -674,6 +736,8 @@ export async function POST(request: Request) {
     // Medición real que aporta el catedrático: [[nivel:U4=55]] al final del
     // mensaje. Se anota como nivel diagnosticado, nunca como valor de fábrica.
     let measured: { unitNumber: number; title: string; mastery: number } | null = null;
+    /** Lo que el diagnóstico ha programado en la agenda (catedrático → planificador). */
+    let plannerSync: TutorPlannerSyncResult | null = null;
     if (reply.level) {
       const unit = subjectUnits.find((candidate) => candidate.unitNumber === reply.level!.unitNumber);
       if (unit) {
@@ -689,6 +753,27 @@ export async function POST(request: Request) {
         console.log(
           `[tutor] nivel diagnosticado: ${agent.subject.name} U${measured.unitNumber} = ${measured.mastery}%`
         );
+
+        // Catedrático → Planificador: si la unidad sale floja, entra en la
+        // agenda de hoy (ficha de error + plan rehecho). No se deja para luego:
+        // un diagnóstico sin sesión es una etiqueta, no una corrección.
+        plannerSync = await syncTutorWithPlanner({
+          subjectId: agent.subjectId,
+          topicId: unit.id,
+          unitNumber: unit.unitNumber,
+          unitTitle: unit.title,
+          mastery: reply.level.mastery,
+          agentName: agent.name,
+          conversationId: activeConversation.id,
+        }).catch((error) => {
+          console.error('[tutor] no se ha podido sincronizar con el Planificador:', error);
+          return null;
+        });
+        if (plannerSync) {
+          console.log(
+            `[tutor] Planificador: ${plannerSync.reason} · ${plannerSync.created} sesión(es) · ${plannerSync.plannedMinutes} min${plannerSync.registeredError ? ' · ficha de error abierta' : ''}`
+          );
+        }
       }
     }
 
@@ -777,7 +862,11 @@ export async function POST(request: Request) {
         topicLabel: note.topicLabel,
       })),
       notesTotal,
+      /** Qué ha programado el diagnóstico en la agenda (null si no tocaba refuerzo). */
+      plannerSync,
       noteProposal: correctedProposal,
+      /** Documento guardado que el catedrático ha pedido proyectar al lado del chat. */
+      openNote,
       userMessageId: userMessage.id,
       reply: {
         id: assistantMessage.id,

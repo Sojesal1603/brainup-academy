@@ -28,6 +28,9 @@ model UserProfile {
   id                   String    @id @default("user_default")
   name                 String    @default("Estudiante")
   modality             String    @default("1º de Bachillerato (Ciencias y Tecnología)")
+  // Comunidad autónoma del alumno: decide la estructura del simulacro EBAU
+  // (duración, opciones, peso de la notación). Se puede cambiar en el examinador.
+  community            String    @default("madrid")
   targetGradePau       Float     @default(13.5) // Nota objetivo sobre 14
   weeklyHoursCap       Float     @default(25.0) // Horas disponibles a la semana
   weeklyHoursDeclared  Boolean   @default(false) // ¿Las ha dicho él? (si no, es un valor de partida)
@@ -96,6 +99,8 @@ model UserProfile {
   weeklyChallenges WeeklyChallenge[]
   systemIssues     SystemIssue[]
   agentMemories    AgentMemory[]
+  reviewCards      ReviewCard[]
+  focusSessions    FocusSession[]
 }
 
 // 2. Asignaturas y Ponderaciones PAU
@@ -172,6 +177,8 @@ model Topic {
   errors          ErrorLog[]
   notes           Note[]
   srsReviews      SrsReview[]
+  reviewCards     ReviewCard[]
+  focusSessions   FocusSession[]
   challenges      WeeklyChallenge[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -383,6 +390,9 @@ model PauExamSession {
   examId         String?
   exam           Exam?       @relation(fields: [examId], references: [id], onDelete: SetNull)
   subjectName    String
+  subjectId      String?
+  // Comunidad autónoma con la que se generó el simulacro (madrid, cataluna…).
+  community      String?
   timedMinutes   Int
   elapsedMinutes Int
   questionsJson  String? // Bloques del simulacro generados (enunciados, puntos y tema)
@@ -415,6 +425,7 @@ model Note {
   sourceConversationId String?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
+  reviewCards          ReviewCard[]
 
   @@index([userId, topicId])
 }
@@ -603,4 +614,67 @@ model AgentMemory {
 
   @@unique([userId, scope, day])
   @@index([userId, scope, createdAt])
+}
+
+// 24. Repetición espaciada por tarjeta (SM-2).
+//
+// El SRS de `Topic` programa la UNIDAD; esto programa cada flashcard, concepto
+// o pregunta de test con su propio intervalo y factor de facilidad. Es lo que
+// permite decir «estas 6 tarjetas vencen hoy» y meterlas como Active Recall
+// obligatorio en el plan, en vez de repasar la unidad entera otra vez.
+model ReviewCard {
+  id             String    @id @default(uuid())
+  userId         String    @default("user_default")
+  user           UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topicId        String
+  topic          Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  noteId         String?
+  note           Note?     @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  // "flashcard" | "test" | "concepto" | "mapa"
+  kind           String    @default("flashcard")
+  front          String
+  back           String
+  source         String?
+  // SM-2: repeticiones seguidas con acierto, intervalo actual y facilidad.
+  repetition     Int       @default(0)
+  intervalDays   Int       @default(0)
+  efactor        Float     @default(2.5)
+  dueAt          DateTime  @default(now())
+  lastReviewedAt DateTime?
+  lapses         Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // La misma pregunta no se duplica dentro de una unidad: al regenerar las
+  // flashcards se conserva el historial SM-2 de las que ya existían.
+  @@unique([userId, topicId, front])
+  @@index([userId, dueAt])
+  @@index([userId, topicId])
+}
+
+// 25. Focus & Lock: cada bloque de enfoque, con el tiempo real de estudio y el
+// tiempo que el alumno ha pasado consultando al catedrático. Sin estos dos
+// números no se puede distinguir «estudiar» de «tener la app abierta».
+model FocusSession {
+  id              String    @id @default(uuid())
+  userId          String    @default("user_default")
+  user            UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topicId         String?
+  topic           Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  blockId         String?
+  plannedMinutes  Int       @default(25)
+  focusedSeconds  Int       @default(0)
+  pausedSeconds   Int       @default(0)
+  tutorSeconds    Int       @default(0)
+  interruptions   Int       @default(0)
+  // "running" | "paused" | "completed" | "abandoned"
+  status          String    @default("running")
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  abandonReason   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, startedAt])
+  @@index([userId, status])
 }

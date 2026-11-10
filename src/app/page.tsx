@@ -22,6 +22,7 @@ import ModeSwitcher from '@/components/dashboard/ModeSwitcher';
 import ClassCheckIn from '@/components/cuartel/ClassCheckIn';
 import { getTodayClassCheckIn } from '@/lib/temario';
 import SetupCard from '@/components/dashboard/SetupCard';
+import FocusLock from '@/components/enfoque/FocusLock';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
 import { StudyMode } from '@/lib/types';
 
@@ -143,6 +144,41 @@ export default async function DashboardPage() {
     include: { subject: true },
     take: 3,
   });
+
+  // 6b. Focus & Lock: unidades para elegir bloque y métricas de tiempo real.
+  const focusTopicsRaw = await prisma.topic.findMany({
+    where: { subject: { isTracked: true } },
+    select: {
+      id: true,
+      title: true,
+      subject: { select: { name: true, color: true } },
+    },
+    orderBy: [{ subject: { order: 'asc' } }, { unitNumber: 'asc' }],
+    take: 60,
+  });
+
+  const [focusAggregate, focusAbandoned] = await Promise.all([
+    prisma.focusSession.aggregate({
+      where: { startedAt: { gte: startOfDay } },
+      _sum: { focusedSeconds: true, tutorSeconds: true },
+    }),
+    prisma.focusSession.count({
+      where: { startedAt: { gte: startOfDay }, status: 'abandoned' },
+    }),
+  ]);
+
+  const focusTopics = focusTopicsRaw.map((topic) => ({
+    id: topic.id,
+    title: topic.title,
+    subjectName: topic.subject.name,
+    color: topic.subject.color,
+  }));
+
+  const focusToday = {
+    focusedMinutes: Math.round((focusAggregate._sum.focusedSeconds ?? 0) / 60),
+    tutorMinutes: Math.round((focusAggregate._sum.tutorSeconds ?? 0) / 60),
+    abandoned: focusAbandoned,
+  };
 
   return (
     <div className="space-y-8">
@@ -281,6 +317,8 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      <FocusLock topics={focusTopics} today={focusToday} />
 
       {/* Grid Principal: Bloques de Hoy (2 cols) + Radar Lateral (1 col) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

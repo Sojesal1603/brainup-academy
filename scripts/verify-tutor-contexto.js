@@ -157,6 +157,28 @@ function main() {
     notes.selectNotesForTutor([row({ title: '   ' })])[0].title === 'Sin título'
   );
 
+  console.log('\n5) Índice de apertura: claves cortas para abrir un apunte guardado');
+  const index = notes.buildNoteIndex([
+    row({ id: 'n1', title: 'Esquema de matrices', topicTitle: 'Matrices', unitNumber: 3, isPinned: true }),
+    row({ id: 'n2', title: 'Resumen de límites', topicTitle: 'Límites', unitNumber: 4, updatedAt: new Date('2026-10-12T10:00:00Z') }),
+  ]);
+  check(
+    'el fijado va primero y con una clave corta',
+    index[0].id === 'n1' && index[0].key === 'N1',
+    index.map((entry) => `${entry.key}=${entry.title}`).join(' | ')
+  );
+  check('el índice lleva la unidad para poder citarla', index[0].unitNumber === 3 && index[0].topicLabel === 'U3 · Matrices');
+  check('y guarda el id real, que es lo que usa el servidor', index[1].id === 'n2');
+  check('el índice no manda el texto de los apuntes', !('content' in index[0]) && !('excerpt' in index[0]));
+  const capped = notes.buildNoteIndex(Array.from({ length: 40 }, (_, i) => row({ id: `i${i}` })));
+  check(
+    'el índice está acotado',
+    capped.length === notes.MAX_NOTE_INDEX &&
+      capped[0].key === 'N1' &&
+      capped[capped.length - 1].key === `N${notes.MAX_NOTE_INDEX}`,
+    `${capped.length} entradas`
+  );
+
   console.log(failures === 0 ? '\nTODO EN VERDE' : `\n${failures} COMPROBACIONES FALLIDAS`);
   fs.rmSync(outDir, { recursive: true, force: true });
   process.exitCode = failures === 0 ? 0 : 1;

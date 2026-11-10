@@ -78,6 +78,68 @@ export function noteTopicLabel(note: Pick<NoteRowForTutor, 'topicTitle' | 'unitN
   return note.unitNumber ? `U${note.unitNumber} · ${note.topicTitle}` : note.topicTitle;
 }
 
+/* ------------------------------------------------------------------ */
+/* El índice del cuaderno: para ABRIR un apunte, no para volcarlo      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Apuntes que entran en el índice de apertura de un turno.
+ *
+ * Es memoria total del cuaderno: el catedrático ve el título y la unidad de TODO
+ * lo que el alumno tiene de la materia, no solo de los últimos seis. El texto
+ * sigue acotado aparte, así que el prompt no se dispara.
+ */
+export const MAX_NOTE_INDEX = 40;
+
+export interface NoteIndexEntry {
+  /** Clave corta que el modelo copia en su etiqueta: `N1`, `N2`… */
+  key: string;
+  /** Id real del apunte, que solo conoce el servidor. */
+  id: string;
+  title: string;
+  topicLabel: string | null;
+  unitNumber: number | null;
+  unitTitle: string | null;
+}
+
+/**
+ * Índice de apuntes guardados de la materia, con una clave corta por apunte.
+ *
+ * Es lo que hace que «ábreme los apuntes de matrices» abra el documento que ya
+ * existe en vez de reescribirlo: el catedrático ve el título, la unidad y una
+ * clave que puede devolver en su respuesta. El texto de cada apunte no viaja
+ * aquí; eso lo decide `selectNotesForTutor`.
+ */
+export function buildNoteIndex(
+  rows: NoteRowForTutor[],
+  limit: number = MAX_NOTE_INDEX
+): NoteIndexEntry[] {
+  const ordered = [...rows].sort((a, b) => {
+    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+    return b.updatedAt.getTime() - a.updatedAt.getTime();
+  });
+
+  return ordered.slice(0, Math.max(0, limit)).map((row, index) => ({
+    key: `N${index + 1}`,
+    id: row.id,
+    title: row.title.trim() || 'Sin título',
+    topicLabel: noteTopicLabel(row),
+    unitNumber: row.unitNumber,
+    unitTitle: row.topicTitle,
+  }));
+}
+
+/**
+ * Cómo se pide abrir un apunte guardado. Va en el prompt porque el catedrático
+ * tiene que saber que **no** se reescribe lo que ya está en el cuaderno.
+ */
+export const NOTE_OPEN_TAG_INSTRUCTION = [
+  'ABRIR APUNTES YA GUARDADOS (memoria del cuaderno):',
+  'Si te pide recuperar, abrir, leer o repasar unos apuntes que YA están en su cuaderno («ábreme los apuntes de…», «recupera mi esquema anterior», «enséñame el resumen de…»), NO los escribas otra vez ni los pegues en el chat: localízalos en el ÍNDICE DE APUNTES GUARDADOS y termina tu mensaje con una única etiqueta invisible [[abrir:N<clave>]] (por ejemplo [[abrir:N3]]).',
+  'La app cargará ese documento en el panel derecho. En el texto visible di en una frase cuál abres y qué conviene repasar, sin repetir su contenido. Si ninguno encaja de verdad con lo que pide, dilo y ofrécele escribirlo nuevo con la etiqueta de apuntes de siempre.',
+  'Nunca inventes una clave: usa solo una de las que aparecen en el índice.',
+].join('\n');
+
 /**
  * Elige qué apuntes entran y con cuánto texto: primero los fijados, después
  * los más recientes, hasta agotar el presupuesto total. Los apuntes sin
