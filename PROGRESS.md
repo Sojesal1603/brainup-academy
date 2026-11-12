@@ -5,8 +5,8 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 
 | Paso | Estado | Commit | Evidencia | Pendiente |
 | --- | --- | --- | --- | --- |
-| Docs (ENCARGO/PLAN/PROGRESS) | hecho | este commit | Los tres archivos existen y se commitean solos antes de seguir. | Sustituir `docs/ENCARGO.md` si el autor pega el texto literal. |
-| 1. Identidad única Supabase | en curso | — | 1a: `d424a11`, `26518c3`. 1b: `data/backups/brainup-pre-identity-20261112.dump` (499 KB, 66 tablas de datos) y `data/backups/counts-pre-identity-20261112.json`. 1c: `src/proxy.ts`, `/login`, rutas de auth, 401 de API. 1d: `grep` sin `user_default` en código/seed/scripts/SQL manual; `npx tsc --noEmit` y `npx prisma validate` limpios. | 1e y cierre: falta la cuenta real en `auth.users` (0 filas) y las variables `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` en `.env`. Sin eso no se puede crear el usuario de prueba, migrar el UUID ni ejecutar el test de aislamiento. |
+| Docs (ENCARGO/PLAN/PROGRESS) | hecho | `e170cf3` | Los tres archivos existen y se commitean solos antes de seguir. | Sustituir `docs/ENCARGO.md` si el autor pega el texto literal. |
+| 1. Identidad única Supabase | en curso | — | 1a: `d424a11`, `26518c3`. 1b: `data/backups/brainup-pre-identity-20261112.dump` (499 KB, 66 tablas de datos) y `data/backups/counts-pre-identity-20261112.json`. 1c: `src/proxy.ts`, `/login`, rutas de auth, 401 de API. 1d: `grep` sin `user_default` en código/seed/scripts/SQL manual; `npx tsc --noEmit` y `npx prisma validate` limpios. 1e preparada: `scripts/migrate-user-id.js` en preflight (24 tablas, 471 filas, 24 FKs con `ON UPDATE CASCADE`), sin escribir. | 1e y cierre: falta la cuenta real en `auth.users` (0 filas) y las variables `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` en `.env`. Sin eso no se puede crear el usuario de prueba, migrar el UUID ni ejecutar el test de aislamiento. |
 | 2. Modelos de plan | pendiente | — | — | — |
 | 3. Motor puro | pendiente | — | — | — |
 | 4. Orquestador | pendiente | — | — | — |
