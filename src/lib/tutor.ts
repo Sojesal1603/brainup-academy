@@ -153,6 +153,13 @@ export interface TutorContext {
     technique: string;
     done: boolean;
   }>;
+  /**
+   * Apunte que el alumno ha pedido abrir EXPLÍCITAMENTE en este turno y que la
+   * app ya ha localizado en su cuaderno. El prompt se lo señala al catedrático
+   * para que no se ponga a buscar: solo tiene que confirmar la apertura con la
+   * etiqueta que ya conoce.
+   */
+  requestedNote?: { key: string; title: string } | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -282,6 +289,11 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     for (const entry of notesIndex) {
       lines.push(
         `- [${entry.key}] «${entry.title}»${entry.topicLabel ? ` [${entry.topicLabel}]` : ''}`
+      );
+    }
+    if (ctx.requestedNote?.key) {
+      lines.push(
+        `PETICIÓN EXPLÍCITA DE APERTURA: el alumno ha pedido abrir «${ctx.requestedNote.title}» y la app ya lo ha localizado en su cuaderno con la clave ${ctx.requestedNote.key}. No lo busques ni lo reescribas: termina tu mensaje con [[abrir:${ctx.requestedNote.key}]] y di en una frase qué abres y qué conviene repasar.`
       );
     }
     lines.push(NOTE_OPEN_TAG_INSTRUCTION);

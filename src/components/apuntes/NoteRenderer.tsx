@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronRight,
   FileText,
+  GraduationCap,
   Lightbulb,
   Pin,
   Quote,
@@ -152,57 +153,76 @@ interface CalloutMeta {
   containerClass: string;
 }
 
-const CALLOUT_META: CalloutMeta[] = [
-  {
-    icon: Lightbulb,
-    iconClass: 'text-amber-400',
-    containerClass: 'border-amber-500/35 bg-amber-500/10',
-  },
-  {
-    icon: AlertTriangle,
-    iconClass: 'text-rose-400',
-    containerClass: 'border-rose-500/35 bg-rose-500/10',
-  },
-  {
-    icon: CheckCircle2,
-    iconClass: 'text-emerald-400',
-    containerClass: 'border-emerald-500/35 bg-emerald-500/10',
-  },
-  {
-    icon: Brain,
-    iconClass: 'text-violet-400',
-    containerClass: 'border-violet-500/35 bg-violet-500/10',
-  },
-  {
-    icon: Pin,
-    iconClass: 'text-sky-400',
-    containerClass: 'border-sky-500/35 bg-sky-500/10',
-  },
-  {
-    icon: Search,
-    iconClass: 'text-cyan-400',
-    containerClass: 'border-cyan-500/35 bg-cyan-500/10',
-  },
-  {
-    icon: FileText,
-    iconClass: 'text-slate-400',
-    containerClass: 'border-slate-600/50 bg-slate-700/15',
-  },
-  {
-    icon: Quote,
-    iconClass: 'text-slate-400',
-    containerClass: 'border-slate-700 bg-slate-800/30',
-  },
-];
+/** Caja de «Criterio de examen»: lo que el corrector premia o penaliza. */
+const CALLOUT_EXAM: CalloutMeta = {
+  icon: GraduationCap,
+  iconClass: 'text-amber-300',
+  containerClass: 'border-amber-500/45 bg-amber-500/10',
+};
 
-const CALLOUT_RULES: Array<{ test: RegExp; index: number }> = [
-  { test: /^\s*(💡|🔆|🟡|TRUCO)/iu, index: 0 },
-  { test: /^\s*(⚠️?|❗|🛑|ERROR|CUIDADO|OJO)/iu, index: 1 },
-  { test: /^\s*(✅|☑️|🎉|SOLUCIÓN|SOLUCION)/iu, index: 2 },
-  { test: /^\s*(🧠|🤔|ACTIVE RECALL|AUTOEVALUACIÓN)/iu, index: 3 },
-  { test: /^\s*(📌|📍|DEFINICIÓN|DEFINICION|CLAVE)/iu, index: 4 },
-  { test: /^\s*(🔍|🔎|LUPA|PISTA|INVESTIGA)/iu, index: 5 },
-  { test: /^\s*(📝|🗒️|NOTA|RESUMEN)/iu, index: 6 },
+/** Caja de «Truco del catedrático»: el atajo que ahorra puntos. */
+const CALLOUT_TRICK: CalloutMeta = {
+  icon: Lightbulb,
+  iconClass: 'text-amber-400',
+  containerClass: 'border-amber-500/35 bg-amber-500/10',
+};
+
+const CALLOUT_WARNING: CalloutMeta = {
+  icon: AlertTriangle,
+  iconClass: 'text-rose-400',
+  containerClass: 'border-rose-500/35 bg-rose-500/10',
+};
+
+const CALLOUT_OK: CalloutMeta = {
+  icon: CheckCircle2,
+  iconClass: 'text-emerald-400',
+  containerClass: 'border-emerald-500/35 bg-emerald-500/10',
+};
+
+const CALLOUT_RECALL: CalloutMeta = {
+  icon: Brain,
+  iconClass: 'text-violet-400',
+  containerClass: 'border-violet-500/35 bg-violet-500/10',
+};
+
+const CALLOUT_DEFINITION: CalloutMeta = {
+  icon: Pin,
+  iconClass: 'text-sky-400',
+  containerClass: 'border-sky-500/35 bg-sky-500/10',
+};
+
+const CALLOUT_SEARCH: CalloutMeta = {
+  icon: Search,
+  iconClass: 'text-cyan-400',
+  containerClass: 'border-cyan-500/35 bg-cyan-500/10',
+};
+
+const CALLOUT_NOTE: CalloutMeta = {
+  icon: FileText,
+  iconClass: 'text-slate-400',
+  containerClass: 'border-slate-600/50 bg-slate-700/15',
+};
+
+const CALLOUT_NEUTRAL: CalloutMeta = {
+  icon: Quote,
+  iconClass: 'text-slate-400',
+  containerClass: 'border-slate-700 bg-slate-800/30',
+};
+
+/**
+ * De más específico a más general: «CRITERIO DE EXAMEN» gana a un «⚠️» suelto,
+ * y «TRUCO DEL CATEDRÁTICO» no se confunde con una nota cualquiera.
+ */
+const CALLOUT_RULES: Array<{ test: RegExp; meta: CalloutMeta }> = [
+  { test: /^\s*(🎯|📋|CRITERIO DE EXAMEN|C[ÓO]MO TE CORRIGEN|BAREMO)/iu, meta: CALLOUT_EXAM },
+  { test: /^\s*(👨‍🏫|TRUCO DEL CATEDR[ÁA]TICO|TRUCO DEL PROFESOR)/iu, meta: CALLOUT_TRICK },
+  { test: /^\s*(💡|🔆|🟡|TRUCO)/iu, meta: CALLOUT_TRICK },
+  { test: /^\s*(⚠️?|❗|🛑|ERROR|CUIDADO|OJO)/iu, meta: CALLOUT_WARNING },
+  { test: /^\s*(✅|☑️|🎉|SOLUCIÓN|SOLUCION)/iu, meta: CALLOUT_OK },
+  { test: /^\s*(🧠|🤔|ACTIVE RECALL|AUTOEVALUACIÓN)/iu, meta: CALLOUT_RECALL },
+  { test: /^\s*(📌|📍|DEFINICIÓN|DEFINICION|CLAVE)/iu, meta: CALLOUT_DEFINITION },
+  { test: /^\s*(🔍|🔎|LUPA|PISTA|INVESTIGA)/iu, meta: CALLOUT_SEARCH },
+  { test: /^\s*(📝|🗒️|NOTA|RESUMEN)/iu, meta: CALLOUT_NOTE },
 ];
 
 function detectCallout(text: string): CalloutMeta {
@@ -210,10 +230,10 @@ function detectCallout(text: string): CalloutMeta {
   const normalized = text.replace(/^[\s*_>#\-▶►▸]+/, '');
   for (const rule of CALLOUT_RULES) {
     if (rule.test.test(text) || rule.test.test(normalized)) {
-      return CALLOUT_META[rule.index];
+      return rule.meta;
     }
   }
-  return CALLOUT_META[CALLOUT_META.length - 1]; // neutral
+  return CALLOUT_NEUTRAL;
 }
 
 function stripLeadingEmoji(text: string): string {

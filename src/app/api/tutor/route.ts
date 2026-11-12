@@ -28,6 +28,7 @@ import {
   type NoteRowForTutor,
 } from '@/lib/tutorNotes';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
+import { detectOpenNoteIntent, matchNoteIntent } from '@/lib/noteIntent';
 import {
   MAX_INLINE_ATTACHMENT_BYTES,
   MAX_TUTOR_ATTACHMENTS,
@@ -408,6 +409,41 @@ export async function POST(request: Request) {
     // índice: el catedrático no conoce el cuaderno.
     const noteIndex = shareNotes ? buildNoteIndex(noteRows) : [];
 
+    /*
+     * APERTURA DETERMINISTA: «ábreme los apuntes de la unidad 3 de filosofía»
+     * no puede depender de que el modelo recuerde escribir `[[abrir:N3]]`. La
+     * app reconoce la petición, busca el apunte en el cuaderno por unidad y
+     * título, y lo abre ella misma. El modelo recibe la pista para que su texto
+     * acompañe a la apertura; si aun así no pone la etiqueta, la apertura ya
+     * está resuelta aquí abajo.
+     */
+    const openIntent = shareNotes ? detectOpenNoteIntent(message) : null;
+    const intentNote = openIntent
+      ? matchNoteIntent(
+          openIntent,
+          noteRows.map((row) => ({
+            id: row.id,
+            title: row.title,
+            unitNumber: row.unitNumber,
+            unitTitle: row.topicTitle,
+          })),
+          agent.subject.name
+        )
+      : null;
+    if (openIntent) {
+      console.log(
+        `[tutor] petición de apertura: «${openIntent.raw.slice(0, 120)}» → ${
+          intentNote ? `«${intentNote.title}»` : 'sin coincidencia clara'
+        }`
+      );
+    }
+    const requestedNoteHint = intentNote
+      ? {
+          key: noteIndex.find((entry) => entry.id === intentNote.id)?.key ?? '',
+          title: intentNote.title,
+        }
+      : null;
+
     const recentHistory = trimHistory(historyRows as StoredMessage[]);
 
     /**
@@ -494,6 +530,7 @@ export async function POST(request: Request) {
         notesShared: shareNotes,
         notesTotal,
         notesIndex: noteIndex,
+        requestedNote: requestedNoteHint?.key ? requestedNoteHint : null,
         memory: memoryBlock,
         documents: documentsBlock,
       }
@@ -653,16 +690,23 @@ export async function POST(request: Request) {
         }
       : null;
 
-    // Apertura de un apunte guardado: la clave del índice se traduce aquí a un
-    // id real. Una clave inventada no abre nada (y se avisa en consola) en vez
-    // de hacer que el chat pida un apunte que no existe.
-    const requestedNote = reply.openNote
-      ? noteIndex.find((entry) => entry.key === reply.openNote!.key)
-      : undefined;
+    // Apertura de un apunte guardado: primero manda la petición explícita del
+    // alumno ya resuelta contra el cuaderno (aunque el modelo no haya puesto la
+    // etiqueta); después, la clave que haya escrito el catedrático. Una clave
+    // inventada no abre nada y se avisa en consola en vez de pedir un apunte
+    // que no existe.
+    const requestedNote = intentNote
+      ? noteIndex.find((entry) => entry.id === intentNote.id)
+      : reply.openNote
+        ? noteIndex.find((entry) => entry.key === reply.openNote!.key)
+        : undefined;
     if (reply.openNote && !requestedNote) {
       console.warn(
         `[tutor] el catedrático ha pedido abrir «${reply.openNote.key}», que no está en el índice del cuaderno`
       );
+    }
+    if (intentNote && requestedNote) {
+      console.log(`[tutor] abriendo apunte guardado por petición explícita: «${requestedNote.title}»`);
     }
     const openNote = requestedNote
       ? {

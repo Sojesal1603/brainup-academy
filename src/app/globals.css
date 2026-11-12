@@ -290,3 +290,76 @@ body:has(.chat-fullscreen) {
 .note-paper li {
   break-inside: avoid;
 }
+
+/* Cuerpo del folio: jerarquía tipográfica de libro y aire entre bloques. El
+   apunte se lee de arriba abajo y se imprime: la densidad importa menos que la
+   claridad de cada apartado. */
+.note-paper-body {
+  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  font-size: 11.5pt;
+  line-height: 1.75;
+}
+
+.note-paper-body p {
+  margin: 0 0 0.95em;
+  text-align: justify;
+  hyphens: auto;
+}
+
+.note-paper-body h2 {
+  margin: 1.9em 0 0.55em;
+  padding-bottom: 0.28em;
+  border-bottom: 1px solid #cfc7b5;
+  font-size: 1.3em;
+  line-height: 1.25;
+}
+
+.note-paper-body h3 {
+  margin: 1.45em 0 0.45em;
+  font-size: 1.08em;
+  line-height: 1.35;
+}
+
+.note-paper-body ul,
+.note-paper-body ol {
+  margin: 0 0 1em;
+  padding-left: 1.4em;
+}
+
+.note-paper-body li {
+  margin: 0.32em 0;
+}
+
+.note-paper-body blockquote {
+  margin: 1.1em 0;
+  padding: 0.75em 1em;
+  border-left: 3px solid #b9ad93;
+  background: #f4f0e6;
+  font-size: 0.98em;
+}
+
+.note-paper-body table {
+  width: 100%;
+  margin: 1.1em 0;
+  border-collapse: collapse;
+  font-size: 0.94em;
+}
+
+.note-paper-body th,
+.note-paper-body td {
+  padding: 0.5em 0.65em;
+  border: 1px solid #d9d3c4;
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-paper-body th {
+  background: #efe9da;
+  font-weight: 600;
+}
+
+.note-paper-body hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid #cfc7b5;
+}

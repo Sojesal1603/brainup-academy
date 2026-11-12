@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import {
   buildNoteWriterSystemPrompt,
   buildNoteWriterUserMessage,
+  classifyNoteSubject,
   noteQualityReport,
   sanitizeNoteContent,
   splitNoteTitle,
@@ -17,12 +18,18 @@ import {
   hasAnyFreeKey,
   runAiText,
   TutorError,
+  type AiAttachmentPart,
   type AiProvider,
 } from '@/lib/aiEngine';
+import { loadMemoryBlock } from '@/lib/agentMemory';
 import { rememberNoteDraft, takeNoteDraft } from '@/lib/noteDrafts';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
-import { MAX_TUTOR_ATTACHMENTS } from '@/lib/attachmentLimits';
-import { readUpload, type StoredUpload } from '@/lib/docStore';
+import {
+  MAX_INLINE_ATTACHMENT_BYTES,
+  MAX_TUTOR_ATTACHMENTS,
+  isImageMime,
+} from '@/lib/attachmentLimits';
+import { readUpload, readUploadBytes, type StoredUpload } from '@/lib/docStore';
 import { buildDocumentContext, type IndexedDoc } from '@/lib/docContext';
 
 /**
@@ -460,6 +467,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Catedrático no encontrado.' }, { status: 404 });
     }
 
+    // La memoria entre días: lo que este catedrático ya trabajó con él en esta
+    // asignatura. El apunte continúa el hilo en vez de empezar de cero.
+    const memoryBlock = await loadMemoryBlock(agent.id).catch(() => '');
+
     // La unidad tiene que ser SUYA: un catedrático no escribe apuntes de otra
     // asignatura, por mucho que se lo pidan. Se trae el temario entero porque el
     // número que llega se contrasta con los títulos: si el catedrático se ha
@@ -509,6 +520,55 @@ export async function POST(request: Request) {
       documentIndexes.length > 0
         ? buildDocumentContext(documentIndexes, `${unit.title} ${proposedTitle} ${focus}`.trim())
         : null;
+
+    /*
+     * ADEMÁS DEL TEXTO, LOS BYTES: las fotos de exámenes, los escaneos sin capa
+     * de texto y los PDFs con tablas o diagramas se le mandan a Gemini tal cual.
+     * Su ventana de contexto permite leer el documento completo de una vez, y
+     * es lo único que puede interpretar una tabla dibujada o un gráfico que el
+     * extractor de texto no ve. El texto sigue yendo en el prompt: así el
+     * redactor cita páginas incluso si el modelo no puede mirar los bytes.
+     *
+     * Se manda lo que cabe en una sola petición (15 MB en total), no lo que pesa
+     * el archivo en disco: un libro de 40 MB se sigue leyendo por su texto.
+     */
+    const noteAttachments: AiAttachmentPart[] = [];
+    let inlineBytes = 0;
+    for (const upload of uploads) {
+      const canBeSeen = isImageMime(upload.mimeType) || upload.mimeType === 'application/pdf';
+      if (!canBeSeen) continue;
+      if (
+        upload.sizeBytes > MAX_INLINE_ATTACHMENT_BYTES ||
+        inlineBytes + upload.sizeBytes > MAX_INLINE_ATTACHMENT_BYTES
+      ) {
+        continue;
+      }
+      const bytes = await readUploadBytes(upload.id).catch(() => null);
+      if (!bytes || inlineBytes + bytes.byteLength > MAX_INLINE_ATTACHMENT_BYTES) continue;
+      inlineBytes += bytes.byteLength;
+      noteAttachments.push({
+        name: upload.name,
+        mimeType: upload.mimeType,
+        data: bytes.toString('base64'),
+      });
+    }
+
+    /** Los documentos cuyo TEXTO ya viaja en el prompt: no hay que decir que no se han leído. */
+    const readableUploadNames = uploads
+      .filter((upload) => upload.chars > 0)
+      .map((upload) => upload.name);
+
+    // Gemini es el motor multimodal de referencia. Se fuerza solo cuando hay un
+    // archivo que SOLO se puede mirar (una foto o un escaneo sin capa de texto):
+    // ahí un modelo sin visión no puede hacer el trabajo. Con PDFs que sí tienen
+    // texto se deja la cadena normal —que ya pone Gemini primero— para que un
+    // cupo agotado no bloquee la redacción entera.
+    const geminiConfigured = getConfiguredProviders().includes('gemini');
+    const needsVision = uploads.some(
+      (upload) => isImageMime(upload.mimeType) || (upload.mimeType === 'application/pdf' && upload.chars === 0)
+    );
+    const writerProvider: AiProvider | undefined =
+      requestedProvider ?? (noteAttachments.length > 0 && needsVision && geminiConfigured ? 'gemini' : undefined);
 
     const [
       student,
@@ -601,6 +661,8 @@ export async function POST(request: Request) {
       teacherMaterials,
       teacherMethodology: buildTeacherMethodology(unit, teacherMethods),
       sourceDocuments,
+      memory: memoryBlock,
+      subjectKind: classifyNoteSubject(agent.subject.name),
       focus: focus.length > 0 ? focus : null,
     };
 
@@ -608,6 +670,14 @@ export async function POST(request: Request) {
       console.log(
         `[apuntes] redactando con ${documentIndexes.length} documento(s) del alumno: ${documentIndexes.map((doc) => `${doc.name} (${doc.pages} pág.)`).join(' | ')}`
       );
+    }
+    if (noteAttachments.length > 0) {
+      console.log(
+        `[apuntes] ${noteAttachments.length} archivo(s) se envían a ${writerProvider ?? 'la cadena'} para lectura multimodal: ${noteAttachments.map((part) => part.name).join(' | ')}`
+      );
+    }
+    if (memoryBlock.length > 0) {
+      console.log(`[apuntes] memoria de la asignatura: ${memoryBlock.length} caracteres`);
     }
 
     const writerInput = { ...context, proposedTitle: proposedTitle || unit.title };
@@ -620,10 +690,16 @@ export async function POST(request: Request) {
         maxTokens: NOTE_MAX_TOKENS,
         budgetMs: NOTE_BUDGET_MS,
         attemptMs: NOTE_ATTEMPT_MS,
+        // Los bytes de las fotos, escaneos y PDFs viajan con el turno: el
+        // redactor los mira además de leer su texto (tablas, diagramas y
+        // criterios escritos a mano que el extractor no puede reconstruir).
+        attachments: noteAttachments,
+        // Los documentos cuyo texto ya está en el prompt no son «ilegibles».
+        readableTextAttachments: readableUploadNames,
         // La versión de esta pestaña la escribe EL motor que ha pedido el
         // alumno: si la cadena eligiera por su cuenta, dos pestañas podrían
         // acabar firmadas por el mismo modelo y la comparación sería mentira.
-        provider: requestedProvider ?? undefined,
+        provider: writerProvider,
       });
       const clean = sanitizeNoteContent(reply.text);
       return { reply, clean, quality: noteQualityReport(clean) };

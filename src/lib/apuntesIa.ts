@@ -171,6 +171,17 @@ export interface NotebookContextInput {
    * aquí ni en el temario, no se escribe de memoria.
    */
   sourceDocuments?: string | null;
+  /**
+   * Lo que el catedrático ya habló con él los días anteriores (`agentMemory.ts`).
+   * Sirve para que el apunte continúe el hilo de la asignatura y no repita lo
+   * que el alumno ya trabajó.
+   */
+  memory?: string | null;
+  /**
+   * Perfil editorial de la asignatura. Si no se indica, se deduce del nombre con
+   * `classifyNoteSubject`.
+   */
+  subjectKind?: NoteSubjectKind;
 }
 
 const LIMIT_SYLLABUS = 40;
@@ -275,6 +286,14 @@ export function buildNotebookContext(input: NotebookContextInput): string[] {
     );
   }
 
+  if (input.memory && input.memory.trim().length > 0) {
+    lines.push('');
+    lines.push(
+      'MEMORIA DE LA ASIGNATURA (lo que ya hablaste con él en días anteriores; continúa desde ahí y no vuelvas a preguntar lo que ya sabes):'
+    );
+    lines.push(input.memory.trim());
+  }
+
   if (input.sourceDocuments && input.sourceDocuments.trim().length > 0) {
     lines.push('');
     lines.push(
@@ -291,29 +310,25 @@ export function buildNotebookContext(input: NotebookContextInput): string[] {
 /* ------------------------------------------------------------------ */
 
 /**
- * Instrucciones de estilo y estructura. Es el listón de calidad: el apunte se
- * estudia en el Cuaderno Notion, se imprime y se repasa encima.
+ * Reglas comunes a TODOS los apuntes, sea cual sea la asignatura: limpieza,
+ * exactitud, fidelidad a las fuentes y estética Notion. La estructura concreta
+ * la pone el perfil editorial de la materia (`buildNoteWriterInstructions`).
  */
-export const NOTE_WRITER_INSTRUCTIONS = [
+const NOTE_COMMON_INSTRUCTIONS = [
   'Eres redactor de apuntes de cátedra para Bachillerato en España. Escribes el material definitivo que el alumno va a consultar en su cuaderno Notion, imprimir y estudiar encima: riguroso, ordenado, visualmente estructurado y sin una sola línea de relleno.',
   '',
   'OBJETIVO ÚNICO: que el alumno domine la TEORÍA que le van a preguntar en SU examen, el de su centro y su profesor. Nada de discursos introductorios sobre pruebas externas ni de metodología generalista: teoría desarrollada, exacta y adaptada a cómo le evalúan.',
   '',
   'EMPIEZA por una única línea `# <Título del apunte>` (el sistema la usa como título de la página, así que no repitas el título después).',
   '',
-  'DESPUÉS, esta estructura exacta en Markdown con callouts Notion e iconos destacados:',
+  'DESPUÉS, la ESTRUCTURA OBLIGATORIA que aparece al final de este prompt. Cúmplela al pie de la letra, con callouts Notion e iconos destacados:',
   '1. `> 📌 ` Una sola frase que resuma de qué va la unidad, qué problema resuelve y por qué importa para su examen.',
   '2. `## 🎯 Lo que tienes que saber` — los conceptos mínimos en viñetas ordenadas. Definiciones precisas con términos técnicos destacados en negrita.',
   '3. `## 👨‍🏫 Criterio de examen de tu centro` — RIGOR DE CORRECCIÓN: notaciones exactas, convenios de signos, exigencias formales y criterios de corrección de su profesor (usa lo que él te haya contado; si no lo sabes, no lo inventes). Nada de criterios genéricos.',
-  '4. `## 📖 Desarrollo de la unidad` — EL CUERPO DEL APUNTE. Un apartado `### ` por CADA punto del tema, numerados (`### 1. ...`, `### 2. ...`). Dentro de cada punto: qué es (definición formal), justificación física/matemática o técnica, deducción teórica y contraste con conceptos vecinos. Usa callouts de apoyo cuando aporte valor: `> 💡 **Truco:**` o `> ⚡ **Fórmula clave:**`. Entre 140 y 280 palabras por punto desarrollado.',
-  '5. `## ⚡ Fórmulas, Leyes y Reglas` — una tabla Markdown con las columnas Fórmula/Ley | Cuándo se usa | Criterio / Aviso. TODAS las fórmulas matemáticas en LaTeX entre `$...$`.',
-  '6. `## 🧩 Relaciones y distinciones clave` — pares de conceptos que se confunden, jerarquías y conexiones con unidades anteriores. Solo teoría: qué se diferencia de qué y por qué.',
-  '7. `## 🔗 Analogía para retenerlo` — una analogía corta, cotidiana y FIEL al concepto que sirva para recordarlo en el examen, con una frase que explique qué corresponde a qué. Si el concepto no admite una analogía honesta, escribe el recurso mnemotécnico que mejor funcione en su lugar.',
-  '8. `## ⚠️ Errores que te van a costar puntos` — los fallos conceptuales más comunes en exámenes y trampas de los correctores, con `> ⚠️ **Cuidado con:**` y cómo evitarlos.',
-  '9. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas de autoevaluación numeradas. La respuesta va inmediatamente después de la pregunta en la forma `**Respuesta:** ` para que el cuaderno la convierta en desplegable interactivo.',
+  '4. A partir de ahí, continúa con los apartados de la ESTRUCTURA OBLIGATORIA de tu asignatura, en el orden indicado y sin omitir ninguno.',
   '',
   'LO QUE NO ENTRA EN UN APUNTE (PROHIBIDO):',
-  '- Ejercicios resueltos, enunciados de problemas y desarrollos paso a paso de un ejercicio concreto. El apunte es TEORÍA: para resolver dudas y ejercicios está el chat con el catedrático, que es socrático. Si un concepto necesita un caso, explícalo como ejemplo teórico breve, nunca como ejercicio desarrollado.',
+  '- Una colección de ejercicios sueltos o un boletín de problemas. El apunte es teoría; los casos prácticos (en Ciencias, como máximo tres) van guiados y con su comprobación, nunca como una lista interminable de ejercicios. Para resolver dudas está el chat con el catedrático.',
   '- Cualquier introducción o sección sobre la prueba de acceso a la universidad, su estructura, ponderaciones o metodología generalista: no es temario y no entra en su examen.',
   '- Relleno, motivación vacía, avisos de chat o frases sobre lo que vas a escribir.',
   '',
@@ -331,6 +346,160 @@ export const NOTE_WRITER_INSTRUCTIONS = [
   '- El apunte es un DOCUMENTO, no un mensaje: no te dirijas «a ti» al lector salvo en `## 🧠 Compruébalo tú`.',
   '- La fecha y el encabezado los pone el sistema: no los escribas.',
 ].join('\n');
+
+/* ------------------------------------------------------------------ */
+/* 3 bis. El perfil editorial de la asignatura                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Cómo se escribe un apunte según la materia. No es una etiqueta decorativa:
+ * decide la estructura, el tono y los recursos didácticos del redactor.
+ */
+export type NoteSubjectKind = 'ciencias' | 'humanidades' | 'idiomas' | 'tecnologia' | 'general';
+
+/** Cómo se le cuenta al modelo el perfil que va a usar. */
+const NOTE_SUBJECT_LABEL: Record<NoteSubjectKind, string> = {
+  ciencias:
+    'Ciencias y Matemáticas (rigor analítico, deducción paso a paso, unidades y resolución de casos tipo EBAU)',
+  humanidades:
+    'Humanidades y Filosofía / Historia (ensayo académico, genealogía de conceptos, contraposición estricta de autores y citas clave)',
+  idiomas:
+    'Idiomas (reglas de uso, ejemplos contrastados, producción y trampas de traducción)',
+  tecnologia:
+    'Tecnología e Ingeniería (procedimientos, cálculos, normativa y verificación de resultados)',
+  general: 'Apunte de cátedra completo y equilibrado',
+};
+
+/**
+ * Deduce el perfil editorial a partir del nombre de la asignatura. Se mira sin
+ * acentos y en minúsculas porque los nombres llegan de todas las formas
+ * («Matemáticas I», «FISICA Y QUIMICA», «Historia de la Filosofía»).
+ */
+export function classifyNoteSubject(subjectName: string): NoteSubjectKind {
+  const name = String(subjectName ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (/\b(matematicas?|fisica|quimica|biologia|geologia|ciencias?|estadistica|calculo|algebra|analisis|geometria)\b/.test(name)) {
+    return 'ciencias';
+  }
+  if (/\b(tecnologia|ingenieria|informatica|programacion|electronica|robotica|dibujo tecnico)\b/.test(name)) {
+    return 'tecnologia';
+  }
+  if (/\b(ingles|frances|aleman|italiano|portugues|latin|griego|idioma|lengua extranjera)\b/.test(name)) {
+    return 'idiomas';
+  }
+  if (/\b(filosofia|historia|literatura|lengua|geografia|arte|humanidades|etica|religion|economia|clasica)\b/.test(name)) {
+    return 'humanidades';
+  }
+  return 'general';
+}
+
+/**
+ * Estructura obligatoria del apunte de Ciencias y Matemáticas.
+ *
+ * El corazón es la deducción: no basta con enunciar una fórmula, hay que
+ * justificar de dónde sale, qué unidades lleva y qué pasa si se cambia una
+ * condición. Los errores numéricos y de signo se señalan aparte porque son los
+ * que más puntos cuestan en un examen real.
+ */
+const NOTE_STRUCTURE_CIENCIAS = [
+  'ESTRUCTURA OBLIGATORIA (Ciencias, Matemáticas, Física y Química):',
+  '4. `## 📖 Desarrollo de la unidad` — EL CUERPO DEL APUNTE. Un apartado `### ` por CADA punto del tema, numerado (`### 1. ...`). Dentro de cada punto: definición formal y notación; por qué es así (justificación física/matemática); deducción paso a paso; unidades y convenios de signos; un ejemplo teórico breve. Entre 180 y 320 palabras por punto desarrollado. Usa `> 💡 **Truco del catedrático:**` y `> ⚡ **Fórmula clave:**` cuando aporten valor.',
+  '5. `## 🧮 Demostraciones y deducciones paso a paso` — las deducciones importantes, en pasos numerados, indicando la propiedad o ley aplicada en cada uno. Empieza por lo que se sabe, termina por lo que se quiere demostrar y no saltes ningún paso algebraico.',
+  '6. `## ⚡ Fórmulas, Leyes y Reglas` — una tabla Markdown con las columnas Fórmula/Ley | Cuándo se usa | Criterio / Aviso. TODAS las fórmulas matemáticas en LaTeX entre `$...$`, con sus unidades y el rango de validez cuando importe.',
+  '7. `## 🧪 Casos prácticos tipo EBAU` — dos o tres casos guiados (planteamiento, pasos, resultado y comprobación de coherencia). No son un boletín: son la teoría aplicada tal y como la corrige su profesor.',
+  '8. `## 🧩 Relaciones y distinciones clave` — pares de conceptos que se confunden (masa/peso, velocidad/aceleración, derivada/integral…), jerarquías y conexiones con unidades anteriores.',
+  '9. `## 🔗 Analogía para retenerlo` — una analogía corta, cotidiana y FIEL al concepto, con una frase que explique qué corresponde a qué. Si no hay una analogía honesta, usa el recurso mnemotécnico que mejor funcione.',
+  '10. `## ⚠️ Errores que te van a costar puntos` — errores conceptuales, numéricos, de unidades, de signos y de redondeo; trampas típicas del corrector con `> ⚠️ **Cuidado con:**` y cómo evitarlos.',
+  '11. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas numeradas. La respuesta va justo después en la forma `**Respuesta:** ` para que el cuaderno la convierta en desplegable interactivo.',
+].join('\n');
+
+/**
+ * Estructura obligatoria del apunte de Humanidades y Filosofía / Historia.
+ *
+ * Aquí el rigor no está en una fórmula, sino en la genealogía del concepto y en
+ * la contraposición de autores: quién dijo qué, contra quién y con qué cita. El
+ * apunte tiene que sonar a ensayo académico, no a lista de definiciones.
+ */
+const NOTE_STRUCTURE_HUMANIDADES = [
+  'ESTRUCTURA OBLIGATORIA (Filosofía, Historia, Literatura y Humanidades):',
+  '4. `## 📖 Desarrollo de la unidad` — EL CUERPO DEL APUNTE, con estilo de ensayo académico riguroso. Un apartado `### ` por CADA punto del tema, numerado. Dentro de cada punto: contexto histórico y problema que se plantea; tesis del autor o corriente; genealogía del concepto (de dónde viene y a quién responde); contraposición estricta con otro autor o corriente (por ejemplo, Sartre frente a Ortega); una cita textual breve y pertinente; y la trampa de examen asociada. Entre 180 y 320 palabras por punto desarrollado. Usa `> 🎯 **Criterio de examen:**` y `> 👨‍🏫 **Truco del catedrático:**` cuando aporten valor.',
+  '5. `## 🧬 Genealogía y contraposición de autores` — una tabla Markdown con las columnas Autor / Corriente | Tesis central | Concepto clave | Objeción o contraste. Al menos tres filas y, si el tema lo permite, un cara a cara explícito entre dos autores.',
+  '6. `## 📜 Citas clave y comentario` — de tres a cinco citas textuales breves (entre comillas, con autor y obra). Debajo de cada una, una o dos frases que expliquen qué demuestra y cómo se usa en un examen.',
+  '7. `## 🧩 Relaciones y distinciones clave` — pares de conceptos que se confunden (libertad/voluntad, esencia/existencia, causa/motivo…), jerarquías y conexiones con unidades anteriores.',
+  '8. `## 🔗 Analogía para retenerlo` — una analogía corta, cotidiana y FIEL al concepto, con una frase que explique qué corresponde a qué.',
+  '9. `## ⚠️ Errores que te van a costar puntos` — anacronismos, atribuciones falsas, citas mal asignadas, simplificaciones y trampas de comentario de texto, con `> ⚠️ **Cuidado con:**` y cómo evitarlos.',
+  '10. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas numeradas. La respuesta va justo después en la forma `**Respuesta:** ` para que el cuaderno la convierta en desplegable interactivo.',
+].join('\n');
+
+/** Estructura obligatoria del apunte de Idiomas. */
+const NOTE_STRUCTURE_IDIOMAS = [
+  'ESTRUCTURA OBLIGATORIA (Idiomas):',
+  '4. `## 📖 Desarrollo de la unidad` — un apartado `### ` por cada punto del tema (gramática, léxico, funciones comunicativas). Dentro de cada punto: regla de uso, forma afirmativa/negativa/interrogativa, ejemplos contrastados en el idioma de la materia y traducción al español. Entre 180 y 320 palabras por punto desarrollado.',
+  '5. `## ⚡ Reglas, estructuras y fórmulas de uso` — tabla Markdown con Estructura | Cuándo se usa | Error típico.',
+  '6. `## 🧩 Relaciones y distinciones clave` — pares que se confunden (present perfect/past simple, ser/estar, por/para…), con un ejemplo que deje clara la diferencia.',
+  '7. `## 🔗 Analogía para retenerlo` — una analogía corta, cotidiana y FIEL a la regla.',
+  '8. `## ⚠️ Errores que te van a costar puntos` — interferencias con el español, traducciones literales y fallos de producción, con `> ⚠️ **Cuidado con:**`.',
+  '9. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas numeradas con `**Respuesta:** ` justo después.',
+].join('\n');
+
+/** Estructura obligatoria del apunte de Tecnología e Ingeniería. */
+const NOTE_STRUCTURE_TECNOLOGIA = [
+  'ESTRUCTURA OBLIGATORIA (Tecnología e Ingeniería):',
+  '4. `## 📖 Desarrollo de la unidad` — un apartado `### ` por cada punto del tema. Dentro de cada punto: principio técnico, magnitudes y unidades, procedimiento de cálculo o montaje, y verificación del resultado. Entre 180 y 320 palabras por punto desarrollado.',
+  '5. `## ⚙️ Procedimientos, cálculos y normativa` — pasos numerados de los procedimientos y la normativa o convenio que se aplica.',
+  '6. `## ⚡ Fórmulas, Leyes y Reglas` — tabla Fórmula/Ley | Cuándo se usa | Criterio / Aviso, con LaTeX y unidades.',
+  '7. `## 🧪 Casos prácticos tipo EBAU` — dos o tres casos guiados con planteamiento, desarrollo y comprobación.',
+  '8. `## 🧩 Relaciones y distinciones clave` — conceptos que se confunden y conexiones con unidades anteriores.',
+  '9. `## 🔗 Analogía para retenerlo` — una analogía cotidiana y fiel al principio técnico.',
+  '10. `## ⚠️ Errores que te van a costar puntos` — errores de unidades, redondeo, signos, normativa y montaje, con `> ⚠️ **Cuidado con:**`.',
+  '11. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas con `**Respuesta:** ` justo después.',
+].join('\n');
+
+/** Estructura obligatoria del apunte de una materia sin perfil específico. */
+const NOTE_STRUCTURE_GENERAL = [
+  'ESTRUCTURA OBLIGATORIA (materia sin perfil específico):',
+  '4. `## 📖 Desarrollo de la unidad` — EL CUERPO DEL APUNTE. Un apartado `### ` por CADA punto del tema, numerado. Dentro de cada punto: definición formal, justificación, desarrollo y contraste con conceptos vecinos. Entre 180 y 320 palabras por punto desarrollado.',
+  '5. `## ⚡ Fórmulas, Leyes y Reglas` — una tabla Markdown con Fórmula/Ley | Cuándo se usa | Criterio / Aviso. TODAS las fórmulas en LaTeX entre `$...$`.',
+  '6. `## 🧩 Relaciones y distinciones clave` — pares de conceptos que se confunden y conexiones con unidades anteriores.',
+  '7. `## 🔗 Analogía para retenerlo` — una analogía corta, cotidiana y FIEL al concepto.',
+  '8. `## ⚠️ Errores que te van a costar puntos` — fallos conceptuales y trampas de los correctores, con `> ⚠️ **Cuidado con:**` y cómo evitarlos.',
+  '9. `## 🧠 Compruébalo tú (Active Recall)` — de 5 a 7 preguntas numeradas. La respuesta va justo después en la forma `**Respuesta:** ` para que el cuaderno la convierta en desplegable interactivo.',
+].join('\n');
+
+/**
+ * Instrucciones completas de redacción para un perfil de asignatura. El bloque
+ * común manda en el estilo; el bloque final manda en la estructura.
+ */
+export function buildNoteWriterInstructions(kind: NoteSubjectKind = 'general'): string {
+  const structure =
+    kind === 'ciencias'
+      ? NOTE_STRUCTURE_CIENCIAS
+      : kind === 'humanidades'
+        ? NOTE_STRUCTURE_HUMANIDADES
+        : kind === 'idiomas'
+          ? NOTE_STRUCTURE_IDIOMAS
+          : kind === 'tecnologia'
+            ? NOTE_STRUCTURE_TECNOLOGIA
+            : NOTE_STRUCTURE_GENERAL;
+
+  return [
+    NOTE_COMMON_INSTRUCTIONS,
+    '',
+    `PERFIL EDITORIAL DE LA ASIGNATURA: ${NOTE_SUBJECT_LABEL[kind]}.`,
+    '',
+    structure,
+  ].join('\n');
+}
+
+/**
+ * Instrucciones generales. Se mantiene exportado porque otras pantallas
+ * (NotebookLM) las usan como contrato de formato; el redactor de apuntes usa la
+ * versión especializada de `buildNoteWriterInstructions`.
+ */
+export const NOTE_WRITER_INSTRUCTIONS = buildNoteWriterInstructions('general');
 
 export interface NoteWriterInput extends NotebookContextInput {
   /** Título pedido por el catedrático al proponerlo (se usa como respaldo). */
@@ -518,11 +687,12 @@ export function sanitizeNoteContent(raw: string): string {
 
 /** Prompt de sistema para la llamada que redacta el apunte. */
 export function buildNoteWriterSystemPrompt(input: NoteWriterInput): string {
+  const kind = input.subjectKind ?? classifyNoteSubject(input.subjectName);
   return [
-    NOTE_WRITER_INSTRUCTIONS,
+    buildNoteWriterInstructions(kind),
     '',
     'CONTEXTO REAL DEL ALUMNO (es lo único que sabes de él; no inventes nada más):',
-    ...buildNotebookContext(input),
+    ...buildNotebookContext({ ...input, subjectKind: kind }),
   ].join('\n');
 }
 
