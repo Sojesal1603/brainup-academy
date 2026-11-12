@@ -131,6 +131,14 @@ export default async function DiagnosticoPage() {
         <Fila etiqueta="Puerto" valor={target.port ?? 'por defecto (5432)'} />
         <Fila etiqueta="Pooler" valor={target.pooled ? 'sí (pgbouncer)' : 'no'} />
         <Fila
+          etiqueta="Conexiones"
+          valor={target.connectionLimit !== null ? String(target.connectionLimit) : 'por defecto'}
+        />
+        <Fila
+          etiqueta="DIRECT_URL"
+          valor={process.env.DIRECT_URL?.trim() ? 'definida (migraciones)' : 'NO definida'}
+        />
+        <Fila
           etiqueta="Host directo Supabase"
           valor={target.supabaseDirect ? 'sí (solo IPv6)' : 'no'}
         />

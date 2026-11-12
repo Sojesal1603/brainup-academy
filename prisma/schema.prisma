@@ -10,8 +10,21 @@ generator client {
 datasource db {
   // PostgreSQL (Vercel Postgres, Neon, Supabase, Railway…). La cadena de
   // conexión se define en DATABASE_URL, nunca en el repositorio.
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  //
+  // Dos puertas a propósito:
+  //   · DATABASE_URL → pooler de Supabase en modo transacción (6543) con
+  //     pgbouncer=true y connection_limit=1. Es la que usa la app en runtime:
+  //     aguanta que decenas de funciones serverless se enciendan y se apaguen.
+  //   · DIRECT_URL → conexión directa o de sesión (5432), sin pgbouncer. Las
+  //     migraciones necesitan una conexión de verdad: en modo transacción, los
+  //     locks y las sentencias de DDL de `prisma migrate deploy` no son fiables
+  //     y dejan migraciones a medias.
+  //
+  // Si DIRECT_URL no existe, `prisma migrate`/`db push` fallan con «Environment
+  // variable not found: DIRECT_URL». Está documentada en .env.example.
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // --- Fase 1 multiusuario ---------------------------------------------------

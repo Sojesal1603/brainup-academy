@@ -36,12 +36,36 @@ export function prismaErrorCode(error: unknown): string | null {
  *   - `sslmode=require` fuera de local: Supabase rechaza conexiones sin TLS y el
  *     error que da entonces (P1011) no dice nada útil.
  *   - Pooler de Supabase (puerto 6543): `pgbouncer=true` (sin él Prisma usa
- *     sentencias preparadas que pgbouncer no conserva) y un pool pequeño
- *     (`connection_limit=3`) para que las consultas paralelas no esperen detrás
- *     de una única conexión. Render mantiene el proceso vivo, así que este pool
- *     se reutiliza entre peticiones.
+ *     sentencias preparadas que pgbouncer no conserva) y un pool pequeño. El
+ *     tamaño depende del tipo de proceso: **1 conexión** por función
+ *     serverless (Netlify/Vercel/Lambda), porque cada contenedor abre su propio
+ *     pool y el cupo de Supabase es uno solo para todo el proyecto; **3** en un
+ *     proceso que se queda encendido (Render, `next start`, local), donde el
+ *     pool se reutiliza entre peticiones.
  * Nunca se registra con credenciales: solo se devuelve la cadena ya limpia.
  */
+
+/**
+ * ¿Este proceso vive poco? Las funciones de Netlify/Vercel/Lambda arrancan y
+ * mueren: cada contenedor abre su PROPIO pool contra el pooler de Supabase, así
+ * que el tamaño del pool se multiplica por el número de contenedores vivos a la
+ * vez. Ese es el camino directo al P1008 que veía el alumno: no es que la base
+ * tarde, es que las conexiones del proyecto ya están repartidas entre funciones
+ * y la consulta espera en la cola del pooler hasta pasarse del plazo.
+ *
+ * Render, `next start` y `localhost` mantienen el proceso encendido: allí el
+ * pool se reutiliza entre peticiones y tres conexiones sí compensan.
+ */
+export function isEphemeralRuntime(): boolean {
+  return Boolean(
+    process.env.NETLIFY ||
+      process.env.NETLIFY_BLOBS_CONTEXT ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.env.VERCEL ||
+      process.env.CF_PAGES
+  );
+}
+
 export function resolveDatabaseUrl(rawInput?: string): string | undefined {
   const raw = (rawInput ?? process.env.DATABASE_URL ?? '').trim().replace(/^["']|["']$/g, '');
   if (!raw) return undefined;
@@ -80,9 +104,10 @@ export function resolveDatabaseUrl(rawInput?: string): string | undefined {
        * un turno, y el turno se pierde. En modo transacción cada consulta toma
        * una conexión del pool y la devuelve, que es lo que aguanta Netlify.
        *
-       * Se respeta el puerto si ya es el 6543. Las migraciones no pasan por
-       * aquí (`prisma migrate deploy` usa DATABASE_URL tal cual), así que pueden
-       * seguir usando la conexión directa o la de sesión.
+       * Se respeta el puerto si ya es el 6543 y cualquier parámetro que ya
+       * venga escrito. Las migraciones no pasan por aquí: `prisma migrate` usa
+       * `DIRECT_URL` (conexión directa o de sesión, 5432), que además es la
+       * única forma fiable de ejecutar DDL a través de este esquema.
        */
       if (!url.port || url.port === '5432') {
         url.port = '6543';
@@ -91,16 +116,21 @@ export function resolveDatabaseUrl(rawInput?: string): string | undefined {
         url.searchParams.set('pgbouncer', 'true');
       }
       if (!url.searchParams.has('connection_limit')) {
-        // Tres conexiones bastan para el `Promise.all` del Cuartel y evitan la
-        // cola artificial de `connection_limit=1` sin disparar el cupo de
-        // Supabase. Si Render escala a varias instancias, cada una tiene su
-        // propio pool.
-        url.searchParams.set('connection_limit', '3');
+        // UNA conexión por contenedor en serverless. Cada función de Netlify
+        // tiene su propio pool, y Supabase da un cupo fijo de conexiones por
+        // proyecto: con `connection_limit=3`, cinco contenedores ya agotan el
+        // cupo y la siguiente consulta se queda esperando hasta el P1008. Con
+        // una, el cupo se reparte entre tres veces más funciones. PgBouncer, en
+        // modo transacción, reutiliza esa conexión entre peticiones, así que no
+        // se pierde paralelismo real.
+        url.searchParams.set('connection_limit', isEphemeralRuntime() ? '1' : '3');
       }
-      // Sin tope, una conexión que no responde deja la consulta esperando y la
-      // página se queda cargando para siempre.
+      // El tope del pool es MÁS CORTO que el plazo de las consultas (4,5 s) a
+      // propósito: así, si el cupo está agotado, Prisma lo dice con P2024 («no
+      // hubo conexión a tiempo») en vez de llegar al plazo genérico y aparecer
+      // como un P1008 que parece un fallo de la base.
       if (!url.searchParams.has('pool_timeout')) {
-        url.searchParams.set('pool_timeout', '5');
+        url.searchParams.set('pool_timeout', '4');
       }
     }
 
@@ -124,27 +154,45 @@ export interface DatabaseTarget {
    * nuevos: la conexión se queda colgada o da P1001 mientras en local funciona.
    */
   supabaseDirect: boolean;
+  /** Conexiones que abre ESTE proceso (`connection_limit`), o null si es el valor por defecto. */
+  connectionLimit: number | null;
 }
 
 export function databaseTarget(): DatabaseTarget {
   const raw = (process.env.DATABASE_URL ?? '').trim().replace(/^["']|["']$/g, '');
   if (!raw) {
-    return { configured: false, host: null, port: null, pooled: false, supabaseDirect: false };
+    return {
+      configured: false,
+      host: null,
+      port: null,
+      pooled: false,
+      supabaseDirect: false,
+      connectionLimit: null,
+    };
   }
   try {
     // Se mira la cadena YA normalizada: el parte de salud debe decir el puerto
     // por el que conecta la app de verdad (6543 en el pooler de Supabase), no el
     // que esté escrito en el archivo.
     const url = new URL(resolveDatabaseUrl(raw) ?? raw);
+    const limit = Number(url.searchParams.get('connection_limit'));
     return {
       configured: true,
       host: url.hostname || null,
       port: url.port || null,
       pooled: url.hostname.endsWith('pooler.supabase.com'),
       supabaseDirect: /^db\..+\.supabase\.co$/i.test(url.hostname),
+      connectionLimit: Number.isFinite(limit) && limit > 0 ? limit : null,
     };
   } catch {
-    return { configured: true, host: null, port: null, pooled: false, supabaseDirect: false };
+    return {
+      configured: true,
+      host: null,
+      port: null,
+      pooled: false,
+      supabaseDirect: false,
+      connectionLimit: null,
+    };
   }
 }
 
@@ -185,10 +233,13 @@ export function databaseHint(detail: string, code?: string | null): string {
     return 'Usuario o contraseña incorrectos en DATABASE_URL. Si la contraseña tiene caracteres especiales (@, #, /), van escapados en la URL.';
   }
   if (code === 'P2021' || code === 'P2010' || text.includes('does not exist')) {
-    return 'La base responde pero faltan las tablas: aplica las migraciones con `npx prisma migrate deploy` usando la conexión directa (5432) de Supabase.';
+    return 'La base responde pero faltan las tablas: aplica las migraciones con `npx prisma migrate deploy`. Las migraciones usan DIRECT_URL (conexión directa o de sesión, puerto 5432), no el pooler de transacciones.';
+  }
+  if (code === 'P2024') {
+    return 'El pool de conexiones de esta función está ocupado: con el pooler de Supabase, cada función debe abrir UNA sola conexión (connection_limit=1). La app ya la pone sola en Netlify/Vercel; si el aviso sigue, comprueba que el proyecto de Supabase no esté pausado y que no haya otra app usando el mismo proyecto.';
   }
   if (text.includes('timeout') || code === 'P1008') {
-    return 'La conexión se agota: usa la URL del POOLER de Supabase (puerto 6543) con un pool pequeño y comprueba que el proyecto no esté pausado. La app ya limita la espera a 5 s.';
+    return 'La base no ha contestado a tiempo. Con serverless, la causa habitual es el cupo de conexiones del pooler agotado: usa el puerto 6543 con pgbouncer=true y connection_limit=1 (la app ya lo aplica sola en Netlify/Vercel) y comprueba que el proyecto de Supabase no esté pausado.';
   }
   return 'Revisa el detalle de arriba y el parte de /api/salud.';
 }

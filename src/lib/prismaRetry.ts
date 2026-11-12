@@ -15,16 +15,55 @@ import { prismaErrorCode } from './databaseDiagnostics';
  * lanza tal cual: insistir no lo arregla y esconde la causa real.
  */
 
-/** Códigos de Prisma que significan «la conexión no está / se ha perdido». */
+/**
+ * Códigos de Prisma que significan «la conexión no está / se ha perdido».
+ *
+ * No están P1008 (la operación agotó su tiempo) ni P2024 (el pool no dio
+ * conexión a tiempo) a propósito: en ambos la consulta puede seguir viva en el
+ * servidor. Reintentarla duplica el trabajo justo cuando el proyecto está
+ * saturado y es la forma más fácil de convertir una lentitud en una caída.
+ */
 const TRANSIENT_CODES = new Set([
   'P1001', // no se alcanza el servidor
   'P1002', // se agotó el tiempo al conectar
-  'P1008', // la operación agotó su tiempo
   'P1011', // TLS cerrado a mitad
   'P1017', // el servidor ha cerrado la conexión  ← el habitual con Supabase
-  'P2024', // el pool no dio conexión a tiempo
   'P2034', // conflicto de escritura (deadlock)
 ]);
+
+/**
+ * Códigos en los que el socket ya no sirve y hay que descartar el pool.
+ * Es un subconjunto de los reintentables: P2034 (deadlock) se reintenta, pero
+ * la conexión está sana y no hay que cerrarla.
+ */
+const DEAD_CONNECTION_CODES = new Set(['P1001', 'P1002', 'P1011', 'P1017']);
+
+const DEAD_CONNECTION_PATTERNS = [
+  'server has closed the connection',
+  'connection closed',
+  'connection terminated',
+  'terminating connection',
+  'connection reset',
+  'socket hang up',
+  'econnreset',
+  'epipe',
+  'ssl connection has been closed',
+  "can't reach database server",
+];
+
+/**
+ * ¿Hay que descartar la conexión antes de reintentar? Solo si el socket ha
+ * muerto. Un timeout (P1008/P2024) no significa socket muerto: cerrar el pool
+ * ahí abre conexiones nuevas en el peor momento posible.
+ */
+export function needsFreshConnection(error: unknown): boolean {
+  if (!error) return false;
+  const code = prismaErrorCode(error);
+  if (code) return DEAD_CONNECTION_CODES.has(code);
+
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return DEAD_CONNECTION_PATTERNS.some((pattern) => message.includes(pattern));
+}
 
 /**
  * Mensajes equivalentes sin código. No es redundancia: con el pooler, Prisma a
@@ -62,11 +101,11 @@ export interface DbRetryOptions {
   /** Etiqueta para el log: qué consulta ha fallado. */
   label?: string;
   /**
-   * Qué hacer antes de reintentar. Con Prisma conviene cerrar el pool
-   * (`$disconnect`): la conexión muerta sigue en el pool y, si no se descarta,
-   * el reintento falla por el mismo motivo.
+   * Qué hacer antes de reintentar. Recibe el error para poder decidir: cerrar
+   * el pool (`$disconnect`) solo sirve si la conexión está muerta; la conexión
+   * muerta sigue en el pool y, sin descartarla, el reintento falla igual.
    */
-  reconnect?: () => Promise<void> | void;
+  reconnect?: (error: unknown) => Promise<void> | void;
   delays?: readonly number[];
 }
 
@@ -95,7 +134,7 @@ export async function withDbRetry<T>(run: () => Promise<T>, options: DbRetryOpti
 
       if (options.reconnect) {
         try {
-          await options.reconnect();
+          await options.reconnect(error);
         } catch {
           // Volver a conectar es lo mejor que se puede intentar: si falla, el
           // reintento decidirá si la base está caída de verdad.
