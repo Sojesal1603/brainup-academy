@@ -2,6 +2,59 @@ import type { Prisma } from '@prisma/client';
 import { cache } from 'react';
 import { unstable_cache, updateTag } from 'next/cache';
 import { prisma } from './prisma';
+import { db } from './db';
+
+/**
+ * --- Multiusuario ---
+ *
+ * `ensureTenantProfile(userId)` es la versión nueva: recibe el UUID de la sesión
+ * (el `id` de `requireUser()`) y trabaja siempre a través de `db(userId)`, así
+ * que no puede leer ni crear el perfil de otra cuenta. Se llama en el primer
+ * acceso del alumno (tras el login de Supabase), no en cada consulta.
+ *
+ * El resto de funciones de este archivo siguen usando el perfil singleton
+ * histórico (`user_default`) mientras las rutas terminan de migrarse. No se
+ * usan desde código nuevo.
+ */
+
+export interface TenantProfileSummary extends ProfileSummary {
+  timezone: string;
+}
+
+/**
+ * Perfil del alumno autenticado, creado si es su primer acceso.
+ *
+ * El `upsert` no duplica: `db(userId)` acota el `where` y el `create` al UUID
+ * de la sesión. La lectura previa evita escribir en cada visita (el perfil se
+ * pide en el layout y en el Cuartel).
+ */
+export async function ensureTenantProfile(userId: string) {
+  const scoped = db(userId);
+  const existing = await scoped.userProfile.findUnique({ where: { id: userId } });
+  if (existing) return existing;
+
+  return scoped.userProfile.upsert({
+    where: { id: userId },
+    update: {},
+    create: {},
+  });
+}
+
+/** Datos ligeros del alumno autenticado (sin fechas ni credenciales). */
+export async function getTenantProfileSummary(userId: string): Promise<TenantProfileSummary | null> {
+  return db(userId).userProfile.findUnique({
+    where: { id: userId },
+    select: {
+      name: true,
+      modality: true,
+      targetGradePau: true,
+      studyMode: true,
+      streakCurrent: true,
+      challengeXp: true,
+      timezone: true,
+    },
+  });
+}
 
 /**
  * El perfil es un singleton (`user_default`), pero **no nace con la migración**:

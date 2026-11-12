@@ -66,6 +66,22 @@ export function isEphemeralRuntime(): boolean {
   );
 }
 
+/**
+ * La URL que usa la app en runtime.
+ *
+ * Si existe `PRISMA_APP_DATABASE_URL`, se usa esa: es la del rol `prisma_app`
+ * (mínimos privilegios, con `statement_timeout` e `idle_in_transaction_session_timeout`
+ * puestos en el propio rol). `DATABASE_URL` se queda como respaldo para una
+ * instalación que aún no ha separado el rol de migraciones.
+ *
+ * Las migraciones NO pasan por aquí: siguen usando `DIRECT_URL`, que necesita
+ * privilegios de DDL y una conexión sin pgbouncer.
+ */
+export function resolveRuntimeDatabaseUrl(): string | undefined {
+  const appUrl = (process.env.PRISMA_APP_DATABASE_URL ?? '').trim().replace(/^["']|["']$/g, '');
+  return resolveDatabaseUrl(appUrl || undefined);
+}
+
 export function resolveDatabaseUrl(rawInput?: string): string | undefined {
   const raw = (rawInput ?? process.env.DATABASE_URL ?? '').trim().replace(/^["']|["']$/g, '');
   if (!raw) return undefined;
@@ -156,10 +172,20 @@ export interface DatabaseTarget {
   supabaseDirect: boolean;
   /** Conexiones que abre ESTE proceso (`connection_limit`), o null si es el valor por defecto. */
   connectionLimit: number | null;
+  /**
+   * Rol de PostgreSQL de la conexión de runtime (`prisma_app` si está separado).
+   * No se registran credenciales: solo el nombre del rol.
+   */
+  role: string | null;
+  /** ¿La app usa `PRISMA_APP_DATABASE_URL` (rol de runtime) en vez de `DATABASE_URL`? */
+  dedicatedRole: boolean;
 }
 
 export function databaseTarget(): DatabaseTarget {
-  const raw = (process.env.DATABASE_URL ?? '').trim().replace(/^["']|["']$/g, '');
+  const dedicatedRole = Boolean((process.env.PRISMA_APP_DATABASE_URL ?? '').trim());
+  const raw = (process.env.PRISMA_APP_DATABASE_URL || process.env.DATABASE_URL || '')
+    .trim()
+    .replace(/^["']|["']$/g, '');
   if (!raw) {
     return {
       configured: false,
@@ -168,13 +194,15 @@ export function databaseTarget(): DatabaseTarget {
       pooled: false,
       supabaseDirect: false,
       connectionLimit: null,
+      role: null,
+      dedicatedRole,
     };
   }
   try {
     // Se mira la cadena YA normalizada: el parte de salud debe decir el puerto
     // por el que conecta la app de verdad (6543 en el pooler de Supabase), no el
     // que esté escrito en el archivo.
-    const url = new URL(resolveDatabaseUrl(raw) ?? raw);
+    const url = new URL(resolveRuntimeDatabaseUrl() ?? raw);
     const limit = Number(url.searchParams.get('connection_limit'));
     return {
       configured: true,
@@ -183,6 +211,8 @@ export function databaseTarget(): DatabaseTarget {
       pooled: url.hostname.endsWith('pooler.supabase.com'),
       supabaseDirect: /^db\..+\.supabase\.co$/i.test(url.hostname),
       connectionLimit: Number.isFinite(limit) && limit > 0 ? limit : null,
+      role: decodeURIComponent(url.username) || null,
+      dedicatedRole,
     };
   } catch {
     return {
@@ -192,6 +222,8 @@ export function databaseTarget(): DatabaseTarget {
       pooled: false,
       supabaseDirect: false,
       connectionLimit: null,
+      role: null,
+      dedicatedRole,
     };
   }
 }

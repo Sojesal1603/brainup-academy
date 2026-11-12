@@ -1,5 +1,5 @@
 import { NextResponse, after } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, withTransaction } from '@/lib/prisma';
 import { loadMemoryBlock, rememberConversation } from '@/lib/agentMemory';
 import { polishMemoryWithAi } from '@/lib/agentMemoryPolish';
 import {
@@ -15,7 +15,6 @@ import {
 } from '@/lib/tutor';
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
-import { withDbRetry } from '@/lib/prismaRetry';
 import { isLocalModeReply } from '@/lib/setupFallback';
 import {
   ATTACHMENT_LIVE_TURNS,
@@ -687,10 +686,11 @@ export async function POST(request: Request) {
       })),
     ];
 
-    // El turno se reintenta si la conexión con la base se corta (P1017 con el
-    // pooler de Supabase): perder la respuesta ya cobrada al modelo es lo peor
-    // que puede pasar aquí.
-    const [userMessage, assistantMessage] = await withDbRetry(() => prisma.$transaction(async (tx) => {
+    // El turno se guarda en una transacción interactiva y SIN reintento: son
+    // `create` y, si la conexión cae justo después de confirmar, repetirlos
+    // duplicaría el mensaje del alumno y la respuesta. La transacción se
+    // revierte entera si falla antes de confirmar.
+    const [userMessage, assistantMessage] = await withTransaction(async (tx) => {
       const user = await tx.aiMessage.create({
         data: { conversationId: activeConversation.id, role: 'user', content: message },
       })
@@ -731,7 +731,7 @@ export async function POST(request: Request) {
       })
 
       return [user, assistant] as const;
-    }), { label: 'tutor: guardar turno' })
+    });
 
     // Medición real que aporta el catedrático: [[nivel:U4=55]] al final del
     // mensaje. Se anota como nivel diagnosticado, nunca como valor de fábrica.

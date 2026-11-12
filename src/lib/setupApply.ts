@@ -1,5 +1,5 @@
 import { unstable_cache } from 'next/cache';
-import { prisma } from './prisma';
+import { prisma, withTransaction } from './prisma';
 import { updateDefaultProfile } from './userProfile';
 import { regenerateWeeklyPlan } from './planner';
 import { normalizeTopicTitle } from './temarioImport';
@@ -15,7 +15,6 @@ import {
 import { consumePendingReplace, hasPendingReplace } from './setupReplaceIntent';
 import { auditSetup } from './setupAudit';
 import { prismaErrorCode } from './databaseDiagnostics';
-import { withDbRetry } from './prismaRetry';
 
 /** Opciones de aplicación de un turno. */
 export interface SetupApplyOptions {
@@ -1053,7 +1052,10 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
   const classIds = snapshot.classes.map((row) => row.id);
 
   try {
-    const outcome = await withDbRetry(() => prisma.$transaction(
+    // Deshacer son muchas escrituras encadenadas: transacción interactiva y sin
+    // reintento. Repetir un `deleteMany`/`create` después de un corte de red
+    // puede dejar el curso a medias de una forma peor que el fallo original.
+    const outcome = await withTransaction(
       async (tx) => {
         // 1. Fuera lo que se creó en este turno.
         const removedTopics = await tx.topic.deleteMany({
@@ -1122,7 +1124,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
         };
       },
       { timeout: 20_000 }
-    ), { label: 'deshacer el último cambio' });
+    );
 
     lastUndo = null;
 

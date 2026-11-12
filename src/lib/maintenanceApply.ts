@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { prisma, withTransaction } from './prisma';
 import { sanitizeNoteContent } from './apuntesIa';
 import { loadMaintenanceInput } from './maintenanceData';
 import { restartAppServer, startWatchedServer } from './serverControl';
@@ -53,7 +53,7 @@ function isMissingRecord(error: unknown): boolean {
  * con datos» deja de depender de que la foto siga siendo cierta.
  */
 async function deleteTopicIfStillEmpty(topicId: string): Promise<boolean> {
-  return prisma.$transaction(async (tx) => {
+  return withTransaction(async (tx) => {
     const row = await tx.topic.findUnique({
       where: { id: topicId },
       select: {

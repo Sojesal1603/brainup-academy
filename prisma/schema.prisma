@@ -28,13 +28,20 @@ datasource db {
 }
 
 // --- Fase 1 multiusuario ---------------------------------------------------
-// Cada tabla de contenido lleva `userId` apuntando a `UserProfile`. Mientras no
-// exista Supabase Auth (Fase 2), el valor por defecto sigue siendo la cuenta
-// única `user_default`: los datos de hoy no se pierden ni cambian de dueño.
+// Cada tabla de contenido lleva `userId` apuntando a `UserProfile`, y el dueño
+// es el `sub` de Supabase Auth (un UUID). El acceso a datos pasa por
+// `db(userId)` (`src/lib/db.ts`), que inyecta el dueño en cada consulta y no
+// admite `user_default`.
+//
+// Los `@default("user_default")` que quedan son **transitorios**: existen para
+// que las rutas que aún no se han migrado sigan funcionando durante el
+// despliegue por partes. El cliente acotado los ignora (siempre escribe el
+// userId real) y rechaza el UUID de la cuenta antigua. Al terminar la migración
+// de todas las Server Actions se quitan en una migración final; entonces un
+// `create` sin dueño fallará en vez de escribir en la cuenta compartida.
 // Los índices y uniques compuestos (`@@unique([userId, …])`) permiten que dos
 // cuentas tengan la misma materia, el mismo curso de Moodle o la misma semana
-// de retos sin chocar entre sí. Una consulta sin `userId` es, desde ya, una fuga
-// entre cuentas: la Fase 2 sustituye el valor por el de la sesión.
+// de retos sin chocar entre sí.
 
 // 1. Perfil del Estudiante
 model UserProfile {
@@ -44,6 +51,11 @@ model UserProfile {
   // Comunidad autónoma del alumno: decide la estructura del simulacro EBAU
   // (duración, opciones, peso de la notación). Se puede cambiar en el examinador.
   community            String    @default("madrid")
+  // Zona horaria IANA del alumno. Todo lo que depende del día (rachas, hábitos,
+  // cierre nocturno, «hoy» del plan) se calcula con esta zona, no con la del
+  // servidor: en Netlify el proceso corre en UTC y un alumno en Madrid vería el
+  // cambio de día a las 02:00. Por defecto, Europe/Madrid.
+  timezone             String    @default("Europe/Madrid")
   targetGradePau       Float     @default(13.5) // Nota objetivo sobre 14
   weeklyHoursCap       Float     @default(25.0) // Horas disponibles a la semana
   weeklyHoursDeclared  Boolean   @default(false) // ¿Las ha dicho él? (si no, es un valor de partida)

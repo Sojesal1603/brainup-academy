@@ -1,16 +1,17 @@
 /**
  * ¿De quién son los datos que se leen o se escriben?
  *
- * Fase 1 del multiusuario: la base ya está preparada (`userId` en todas las
- * tablas, uniques compuestos), pero la autenticación real —Supabase Auth, una
- * cuenta por alumno— llega en la Fase 2. Mientras tanto, aquí se devuelve la
- * cuenta única que existe hoy. **Este es el único sitio que hay que cambiar**
- * cuando la sesión traiga identidad: el resto del código ya pregunta por ella.
+ * ⚠️ LEGADO. La identidad nueva es `requireUser()` (`src/lib/auth.ts`) y el
+ * acceso a datos es `db(userId)` (`src/lib/db.ts`). Esta función solo existe
+ * para las rutas que todavía no se han migrado (memoria de la IA y Moodle);
+ * devuelve la cuenta histórica `user_default` y **no se puede usar en código
+ * nuevo**.
  *
- * Ningún dato se filtra por cuenta todavía: con una sola cuenta no hay nada que
- * separar. En cuanto exista una segunda, toda consulta que no pase por aquí (o
- * que no filtre por `userId`) mezclará alumnos, y las políticas RLS de Supabase
- * no ayudan si Prisma sigue conectando con el rol dueño de la base.
+ * Por qué no se cambia aquí y ya está: estas consultas no tienen sesión que
+ * leer en su contexto (las llama el vigilante y rutas antiguas), y devolver un
+ * UUID inventado mezclaría los datos de la cuenta histórica con los de un
+ * alumno real. La migración correcta es pasar el `userId` desde la ruta que sí
+ * tiene `requireUser()` y sustituir estas llamadas por `db(userId)`.
  */
 export const SINGLE_USER_ID = 'user_default';
 

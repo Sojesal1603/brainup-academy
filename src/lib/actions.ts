@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath, updateTag } from 'next/cache';
-import { prisma } from './prisma';
+import { prisma, withTransaction } from './prisma';
 import { writeTemarioBackup } from './temarioBackup';
 import { regenerateWeeklyPlan } from './planner';
 import { regenerateTodayPlan } from './dayPlan';
@@ -1288,11 +1288,17 @@ export async function moveTemarioUnit(topicId: string, direction: 'up' | 'down')
   const reordered = [...siblings];
   [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
 
-  await prisma.$transaction(
-    reordered.map((unit, position) =>
-      prisma.topic.update({ where: { id: unit.id }, data: { unitNumber: position + 1 } })
-    )
-  );
+  // Transacción interactiva: dentro de ella la extensión de Prisma no reintenta
+  // ninguna escritura y no se cierra el pool. La renumeración entra entera o no
+  // entra (una batalla a medias dejaría dos unidades con el mismo número).
+  await withTransaction(async (tx) => {
+    for (const [position, unit] of reordered.entries()) {
+      await tx.topic.update({
+        where: { id: unit.id },
+        data: { unitNumber: position + 1 },
+      });
+    }
+  });
 
   revalidateTemario();
   return { success: true, moved: true };

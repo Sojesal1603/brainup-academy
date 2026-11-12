@@ -1,5 +1,5 @@
 import { NextResponse, after } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, withTransaction } from '@/lib/prisma';
 import {
   MEMORY_SCOPE_COORDINATOR,
   loadMemoryBlock,
@@ -26,7 +26,7 @@ import {
   stripLocalModeNotice,
 } from '@/lib/setupFallback';
 import { prismaErrorCode } from '@/lib/databaseDiagnostics';
-import { isTransientDbError, withDbRetry } from '@/lib/prismaRetry';
+import { isTransientDbError } from '@/lib/prismaRetry';
 
 /**
  * Un turno de la puesta a punto: el coordinador pregunta, el alumno responde y
@@ -311,20 +311,23 @@ export async function POST(request: Request) {
     let assistantId = `local-${Date.now()}`;
     let assistantCreatedAt = new Date();
     try {
-      // Guardar el turno se reintenta: con el pooler de Supabase una conexión
-      // puede cerrarse a mitad (P1017) y el chat no debe perder lo hablado.
-      const [, assistantMessage] = await withDbRetry(() => prisma.$transaction([
-        prisma.aiMessage.create({
+      // El turno se guarda en una transacción interactiva, SIN reintento: son
+      // dos `create` y un reintento tras un P1017 puede duplicar el mensaje
+      // (el primero pudo confirmarse antes de cortarse la conexión). Perder el
+      // turno es un fallo visible; duplicarlo ensucia el historial para siempre.
+      const [, assistantMessage] = await withTransaction(async (tx) => {
+        const userMessage = await tx.aiMessage.create({
           data: { conversationId: activeConversation.id, role: 'user', content: message },
-        }),
-        prisma.aiMessage.create({
+        });
+        const assistant = await tx.aiMessage.create({
           data: {
             conversationId: activeConversation.id,
             role: 'assistant',
             content: assistantText,
           },
-        }),
-      ]), { label: 'puesta-a-punto: guardar turno' });
+        });
+        return [userMessage, assistant] as const;
+      });
       assistantId = assistantMessage.id;
       assistantCreatedAt = assistantMessage.createdAt;
     } catch (persistError) {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, withTransaction } from '@/lib/prisma';
 import { ensureUserProfile } from '@/lib/userProfile';
 import { reviewDayProgress } from '@/lib/dayPlan';
 import {
@@ -217,15 +217,30 @@ export async function POST(request: Request) {
       900
     );
 
-    await prisma.$transaction([
-      prisma.studyBlock.updateMany({
+    const factsJson = JSON.stringify({
+      closed: false,
+      postponed: rows.length,
+      penalty: NIGHT_PENALTY_POINTS,
+      justification,
+      pending: rows.map((row) => ({
+        topic: row.topic.title,
+        minutes: row.durationMinutes,
+      })),
+    });
+
+    // Dentro de la transacción no hay reintentos de escritura ni cierres del
+    // pool: o se aplican las dos cosas (prioridad + memoria) o no se aplica
+    // ninguna. Antes era una transacción por lotes, que la extensión no podía
+    // reconocer como «transacción abierta».
+    await withTransaction(async (tx) => {
+      await tx.studyBlock.updateMany({
         where: { userId: user.id, id: { in: rows.map((row) => row.id) } },
         data: {
           priorityScore: { increment: NIGHT_PENALTY_POINTS },
           origin: 'reprogramada',
         },
-      }),
-      prisma.agentMemory.upsert({
+      });
+      await tx.agentMemory.upsert({
         where: {
           userId_scope_day: {
             userId: user.id,
@@ -238,34 +253,12 @@ export async function POST(request: Request) {
           scope: NIGHT_DELAY_SCOPE,
           day: review.dayKey,
           summary,
-          factsJson: JSON.stringify({
-            closed: false,
-            postponed: rows.length,
-            penalty: NIGHT_PENALTY_POINTS,
-            justification,
-            pending: rows.map((row) => ({
-              topic: row.topic.title,
-              minutes: row.durationMinutes,
-            })),
-          }),
+          factsJson,
           writtenBy: 'reglas',
         },
-        update: {
-          summary,
-          factsJson: JSON.stringify({
-            closed: false,
-            postponed: rows.length,
-            penalty: NIGHT_PENALTY_POINTS,
-            justification,
-            pending: rows.map((row) => ({
-              topic: row.topic.title,
-              minutes: row.durationMinutes,
-            })),
-          }),
-          writtenBy: 'reglas',
-        },
-      }),
-    ]);
+        update: { summary, factsJson, writtenBy: 'reglas' },
+      });
+    });
 
     return NextResponse.json({
       ok: true,
