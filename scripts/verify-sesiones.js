@@ -237,6 +237,42 @@ console.log('\n3 · Calibración con el historial');
   check('la técnica sin datos usa el valor por defecto', E.calibrationFor(tres, 'simulacro') === 1);
 }
 
+console.log('\n3b · Calibración de las horas de una unidad');
+{
+  const base = {
+    estimatedHours: 6,
+    realMinutes: 420,
+    samples: 4,
+    mastery: 80,
+    measured: true,
+    status: 'visto',
+  };
+
+  const sinDatos = E.calibrateUnitEstimate({ ...base, realMinutes: 0, samples: 0 });
+  check('sin sesiones reales la duración es «estimado»', sinDatos.source === 'estimado' && sinDatos.estimatedHours === 6, sinDatos.source);
+
+  const dos = E.calibrateUnitEstimate({ ...base, samples: 2 });
+  check('con dos muestras todavía no se ajusta', dos.source === 'estimado' && dos.calibration === 1, `${dos.samples} muestras`);
+
+  const pocosMinutos = E.calibrateUnitEstimate({ ...base, realMinutes: 30, samples: 4 });
+  check('con menos de 45 minutos reales no se ajusta', pocosMinutos.source === 'estimado', `${pocosMinutos.realMinutes} min`);
+
+  const aMedias = E.calibrateUnitEstimate({ ...base, mastery: 30, status: 'en_curso' });
+  check('una unidad a medias no se calibra como terminada', aMedias.source === 'estimado', aMedias.source);
+
+  const ajustado = E.calibrateUnitEstimate(base);
+  check('con datos suficientes y unidad avanzada pasa a «ajustado»', ajustado.source === 'ajustado', ajustado.source);
+  check('y sube las horas si la realidad tarda más (420 min vs 360)', ajustado.estimatedHours > 6, `${ajustado.estimatedHours} h`);
+
+  const rapidisimo = E.calibrateUnitEstimate({ ...base, realMinutes: 60, samples: 4 });
+  check('y las baja si la realidad tarda menos', rapidisimo.estimatedHours < 6, `${rapidisimo.estimatedHours} h`);
+  check('el ajuste nunca baja de 0,6x', rapidisimo.calibration === 0.6, String(rapidisimo.calibration));
+
+  const eterno = E.calibrateUnitEstimate({ ...base, realMinutes: 4000, samples: 9 });
+  check('ni sube de 1,8x', eterno.calibration === 1.8, String(eterno.calibration));
+  check('las horas quedan acotadas a 40', eterno.estimatedHours <= 40, `${eterno.estimatedHours} h`);
+}
+
 console.log('\n4 · Encaje exacto en el tiempo disponible');
 {
   check('45 minutos disponibles con un tema enorme dan un bloque de 40-50', [40, 50].includes(E.chooseDuration(45, 200)), String(E.chooseDuration(45, 200)));

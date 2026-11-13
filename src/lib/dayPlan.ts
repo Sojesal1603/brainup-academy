@@ -3,8 +3,10 @@ import { effectiveMastery } from './knowledge';
 import { estimateRetention, isDue, overdueDays, startOfDay } from './srs';
 import { dueReviewCardsByTopic } from './reviewCards';
 import {
+  calibrateUnitEstimate,
   calibrationByTechnique,
   calibrationFor,
+  clampCalibration,
   energyForMoment,
   estimateTopicWork,
   microTasks,
@@ -19,6 +21,7 @@ import {
   type EnergyLevel,
   type MicroTask,
   type PlanCandidate,
+  type UnitEstimate,
   type RecoveryPlan,
   type SessionStage,
 } from './sessionEngine';
@@ -204,6 +207,8 @@ interface PlanningContext {
   mode: StudyMode;
   calibration: Record<string, number>;
   candidates: PlanCandidate[];
+  /** Horas por unidad, ajustadas con FocusSession y SrsReview. */
+  unitEstimates: Map<string, UnitEstimate>;
   periodByDay: Map<number, AvailabilityPeriod[]>;
   studiedMinutesToday: number;
   daysSinceStudy: number | null;
@@ -216,7 +221,17 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
   const prisma = db(userId);
   const todayStart = startOfDay(now);
 
-  const [user, subjects, periods, tasks, todaySessions, recentBlocks, lastSession] = await Promise.all([
+  const [
+    user,
+    subjects,
+    periods,
+    tasks,
+    todaySessions,
+    recentBlocks,
+    lastSession,
+    focusByTopic,
+    srsByTopic,
+  ] = await Promise.all([
     prisma.userProfile.findUnique({ where: { id: userId } }),
     prisma.subject.findMany({
       where: { isTracked: true },
@@ -246,7 +261,37 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
       select: { technique: true, durationMinutes: true, spentMinutes: true },
     }),
     prisma.studySession.findFirst({ orderBy: { startedAt: 'desc' }, select: { startedAt: true } }),
+    // Tiempo real por unidad: el cronómetro del Modo Enfoque y los repasos SRS.
+    // Es lo que permite dejar de estimar a ciegas las horas de una unidad.
+    prisma.focusSession.groupBy({
+      by: ['topicId'],
+      where: { topicId: { not: null }, status: 'completed', focusedSeconds: { gt: 0 } },
+      _sum: { focusedSeconds: true },
+      _count: { _all: true },
+    }),
+    prisma.srsReview.groupBy({
+      by: ['topicId'],
+      where: { minutesSpent: { gt: 0 } },
+      _sum: { minutesSpent: true },
+      _count: { _all: true },
+    }),
   ]);
+
+  const focusMinutesByTopic = new Map<string, { minutes: number; samples: number }>();
+  for (const row of focusByTopic) {
+    if (!row.topicId) continue;
+    focusMinutesByTopic.set(row.topicId, {
+      minutes: Math.round((row._sum.focusedSeconds ?? 0) / 60),
+      samples: row._count._all,
+    });
+  }
+  const srsMinutesByTopic = new Map<string, { minutes: number; samples: number }>();
+  for (const row of srsByTopic) {
+    srsMinutesByTopic.set(row.topicId, {
+      minutes: row._sum.minutesSpent ?? 0,
+      samples: row._count._all,
+    });
+  }
 
   const periodByDay = new Map<number, AvailabilityPeriod[]>();
   // Horas de clase por semana y materia: es lo que ya se ha explicado en el aula.
@@ -282,6 +327,7 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
   const calibration = calibrationByTechnique(samples);
 
   const candidates: PlanCandidate[] = [];
+  const unitEstimates = new Map<string, UnitEstimate>();
   let dueReviews = 0;
   let errorsOpenTotal = 0;
 
@@ -335,6 +381,28 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
       // materia (una unidad se explica en unas tres semanas).
       const classMinutesPerUnit = weeklyMinutes > 0 ? Math.round((weeklyMinutes * 3) / 2) : 0;
 
+      const focus = focusMinutesByTopic.get(topic.id);
+      const srs = srsMinutesByTopic.get(topic.id);
+      const realMinutes = (focus?.minutes ?? 0) + (srs?.minutes ?? 0);
+      const realSamples = (focus?.samples ?? 0) + (srs?.samples ?? 0);
+      const unitEstimate = calibrateUnitEstimate({
+        estimatedHours: topic.estimatedHours,
+        realMinutes,
+        samples: realSamples,
+        mastery,
+        measured,
+        status: topic.status,
+      });
+      unitEstimates.set(topic.id, unitEstimate);
+
+      // El tiempo real ya registrado no se vuelve a cobrar, aunque las horas
+      // manuales de la unidad se hayan quedado cortas.
+      const minutesAlready = Math.max(Math.round(topic.completedHours * 60), realMinutes);
+      const techniqueCalibration = calibrationFor(
+        calibration,
+        topic.status === 'pendiente' ? 'active_recall' : 'problemas'
+      );
+
       const work = estimateTopicWork({
         difficulty: topic.difficulty,
         mastery,
@@ -343,8 +411,8 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
         daysToExam,
         examWeight: subject.pauWeight,
         targetGrade: subject.targetGrade,
-        minutesAlready: Math.round(topic.completedHours * 60),
-        calibration: calibrationFor(calibration, topic.status === 'pendiente' ? 'active_recall' : 'problemas'),
+        minutesAlready,
+        calibration: clampCalibration(techniqueCalibration * unitEstimate.calibration),
         signals: { classMinutes: classMinutesPerUnit },
       });
 
@@ -375,6 +443,7 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
         subjectColor: subject.color,
         priority,
         work,
+        estimate: unitEstimate,
         difficulty: topic.difficulty,
         mastery,
         measured,
@@ -408,6 +477,7 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
     mode: ((user?.studyMode as StudyMode) ?? 'athlete') as StudyMode,
     calibration,
     candidates,
+    unitEstimates,
     periodByDay,
     studiedMinutesToday,
     daysSinceStudy,
@@ -793,7 +863,19 @@ export async function computeDayPlan(userId: string, now: Date = new Date()): Pr
     orderBy: [{ orderIndex: 'asc' }, { createdAt: 'asc' }],
   });
 
-  const sessions: DayPlanSessionView[] = rows.map((row) => ({
+  const sessions: DayPlanSessionView[] = rows.map((row) => {
+    const estimate =
+      ctx.unitEstimates.get(row.topicId) ??
+      calibrateUnitEstimate({
+        estimatedHours: row.topic.estimatedHours,
+        realMinutes: 0,
+        samples: 0,
+        mastery: row.topic.masteryLevel,
+        measured: row.topic.masterySource !== 'sin_medir',
+        status: row.topic.status,
+      });
+
+    return {
     id: row.id,
     topicId: row.topicId,
     topicTitle: row.topic.title,
@@ -815,7 +897,11 @@ export async function computeDayPlan(userId: string, now: Date = new Date()): Pr
     orderIndex: row.orderIndex,
     mastery: row.topic.masteryLevel,
     masterySource: row.topic.masterySource,
-  }));
+    unitEstimatedHours: estimate.estimatedHours,
+    unitEstimateSource: estimate.source,
+    unitEstimateSamples: estimate.samples,
+    };
+  });
 
   const active = sessions.filter((session) => !session.isCompleted && session.status !== 'abandonada');
   const paused = active.filter((session) => session.status === 'parcial');

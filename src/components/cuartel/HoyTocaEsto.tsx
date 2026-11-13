@@ -118,6 +118,23 @@ export default function HoyTocaEsto({ plan }: { plan: DayPlan }) {
                       {session.durationMinutes} min
                       {session.breakMinutes > 0 ? ` + ${session.breakMinutes} descanso` : ''}
                     </span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+                        session.unitEstimateSource === 'ajustado'
+                          ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-300/90'
+                          : 'border-slate-700 bg-slate-800/40 text-slate-400'
+                      }`}
+                      title={
+                        session.unitEstimateSource === 'ajustado'
+                          ? `Horas de la unidad ajustadas con ${session.unitEstimateSamples} sesiones reales (FocusSession/SrsReview)`
+                          : 'Horas de la unidad estimadas por el temario: todavía no hay suficientes sesiones reales para ajustarlas'
+                      }
+                    >
+                      {session.unitEstimatedHours} h ·{' '}
+                      {session.unitEstimateSource === 'ajustado'
+                        ? `ajustado (${session.unitEstimateSamples})`
+                        : 'estimado'}
+                    </span>
                     {session.status === 'parcial' && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 font-mono">
                         pausada · quedan {remaining} min

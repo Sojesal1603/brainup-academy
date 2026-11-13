@@ -201,6 +201,70 @@ function round5(value: number): number {
   return Math.max(0, Math.round(value / 5) * 5);
 }
 
+/** De dónde sale la duración que se enseña: sin datos reales, es una estimación. */
+export type EstimateSource = 'estimado' | 'ajustado';
+
+export interface UnitEstimate {
+  /** Horas totales de la unidad, ya ajustadas con el historial si lo hay. */
+  estimatedHours: number;
+  /** Horas de partida del temario (`Topic.estimatedHours`). */
+  baseHours: number;
+  source: EstimateSource;
+  /** Sesiones reales de FocusSession + SrsReview usadas para ajustar. */
+  samples: number;
+  /** Minutos reales registrados en esas sesiones. */
+  realMinutes: number;
+  /** Multiplicador aplicado (1 = no hay datos suficientes). */
+  calibration: number;
+}
+
+export interface UnitEstimateInput {
+  estimatedHours: number;
+  realMinutes: number;
+  samples: number;
+  mastery: number;
+  measured: boolean;
+  status: string;
+}
+
+/**
+ * Calibra las horas de una unidad con FocusSession y SrsReview reales.
+ *
+ * No se fía de una sola sesión ni de una unidad a medias: exige al menos tres
+ * sesiones, 45 minutos registrados y que la unidad esté cerca de terminada
+ * (repasada o con dominio medido ≥70). Hasta entonces devuelve la estimación
+ * del temario y `source: 'estimado'`, que es lo que la UI debe decir.
+ */
+export function calibrateUnitEstimate(input: UnitEstimateInput): UnitEstimate {
+  const base = clampNumber(input.estimatedHours, 0.5, 40, 6);
+  const samples = Math.max(0, Math.floor(Number(input.samples) || 0));
+  const realMinutes = Math.max(0, Math.round(Number(input.realMinutes) || 0));
+  const nearDone =
+    input.status === 'repasado' || (input.measured && Number(input.mastery) >= 70);
+
+  if (samples < CALIBRATION_MIN_SAMPLES || realMinutes < 45 || !nearDone) {
+    return {
+      estimatedHours: Math.round(base * 10) / 10,
+      baseHours: Math.round(base * 10) / 10,
+      source: 'estimado',
+      samples,
+      realMinutes,
+      calibration: 1,
+    };
+  }
+
+  const ratio = realMinutes / Math.max(30, base * 60);
+  const calibration = clampCalibration(ratio);
+  return {
+    estimatedHours: Math.min(40, Math.max(0.5, Math.round(base * calibration * 10) / 10)),
+    baseHours: Math.round(base * 10) / 10,
+    source: 'ajustado',
+    samples,
+    realMinutes,
+    calibration,
+  };
+}
+
 /**
  * Estima el trabajo que queda en una unidad, **separado por fases**.
  *
@@ -408,6 +472,8 @@ export interface PlanCandidate {
   priority: number;
   /** Trabajo que queda, por fase (minutos). */
   work: WorkEstimate;
+  /** Horas de la unidad y si están ajustadas con sesiones reales. */
+  estimate: UnitEstimate;
   difficulty: number;
   mastery: number;
   measured: boolean;
@@ -532,6 +598,10 @@ export interface DayPlanSessionView {
   orderIndex: number;
   mastery: number;
   masterySource: string;
+  /** Horas totales de la unidad y su procedencia (dato real o estimación). */
+  unitEstimatedHours: number;
+  unitEstimateSource: EstimateSource;
+  unitEstimateSamples: number;
 }
 
 export interface PlannedSession {
