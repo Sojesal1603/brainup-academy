@@ -1,5 +1,4 @@
 const fs = require('fs');
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const env = fs.readFileSync('.env', 'utf8');
 const match = env.match(/GEMINI_API_KEY=\"?([^\r\n\"]+)\"?/);
