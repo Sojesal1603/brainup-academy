@@ -126,6 +126,9 @@ model UserProfile {
   agentMemories    AgentMemory[]
   reviewCards      ReviewCard[]
   focusSessions    FocusSession[]
+  plans            PlanState[]
+  planConstraints  PlanConstraint[]
+  tutorOutcomes    TutorSessionOutcome[]
 }
 
 // 2. Asignaturas y Ponderaciones PAU
@@ -702,4 +705,73 @@ model FocusSession {
 
   @@index([userId, startedAt])
   @@index([userId, status])
+}
+
+// --- Planificador determinista (Parte A) -----------------------------------
+// Estado del plan de un día. Una fila por usuario y día: el plan se decide una
+// vez, se marca `invalidated` cuando algo lo invalida y se reconstruye sin
+// duplicar. `day` se guarda como fecha a medianoche en la zona del alumno.
+model PlanState {
+  id            String   @id @default(cuid())
+  userId        String
+  day           DateTime
+  status        String   @default("draft") // draft | active | invalidated
+  energy        Float?
+  capacityMin   Int?
+  decidedAt     DateTime?
+  invalidatedAt DateTime?
+  version       Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user        UserProfile          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  constraints PlanConstraint[]
+  outcomes    TutorSessionOutcome[]
+
+  @@unique([userId, day])
+  @@index([userId, status])
+}
+
+// Restricciones que el alumno pone para un plan concreto (no estudiar tal día,
+// máximo de minutos, materia prohibida…). El payload lo valida Zod antes de
+// guardarse; aquí se conserva tal cual para que el motor lo reciba.
+model PlanConstraint {
+  id        String   @id @default(cuid())
+  userId    String
+  planId    String
+  kind      String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  plan PlanState   @relation(fields: [planId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId, planId])
+}
+
+// Resultado de una sesión con el catedrático: qué se trabajó, qué quedó
+// pendiente y qué debe entrar en el siguiente plan. Es la entrada idempotente
+// del cierre de sesión: repetir la misma sesión actualiza esta fila, no duplica.
+model TutorSessionOutcome {
+  id                   String    @id @default(cuid())
+  userId               String
+  planId               String?
+  subjectId            String?
+  topicId              String?
+  workedOn             Json
+  pending              Json
+  nextPlan             Json?
+  errorsCreated        Int       @default(0)
+  reviewCardsCreated   Int       @default(0)
+  directSolutionCount  Int       @default(0)
+  startedAt            DateTime  @default(now())
+  endedAt              DateTime?
+  createdAt            DateTime  @default(now())
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  plan PlanState?  @relation(fields: [planId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, topicId])
+  @@index([planId])
 }
