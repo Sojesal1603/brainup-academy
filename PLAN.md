@@ -41,7 +41,9 @@ columnas actuales de `StudyBlock`): `PlanState` y `PlanConstraint` con el
 contrato de `docs/ENCARGO.md`, más `TutorSessionOutcome` para el resultado de
 cada sesión (qué se trabajó, qué quedó pendiente y qué debe entrar en el plan).
 Relaciones en `UserProfile` con `onDelete/onUpdate: Cascade`; `@@unique` y
-`@@index` según el contrato; sin quitar todavía los defaults históricos.
+`@@index` según el contrato; sin quitar todavía los defaults históricos. Añadir
+`UserProfile.timezone String @default("Europe/Madrid")` (hoy no existe) y usarla
+en el paso 5 para calcular «hoy».
 
 Antes de aplicar: confirmar la base, backup verificado y que la migración es solo
 expand. Si el entorno apunta a producción, dejarlo escrito en `PROGRESS.md`.
@@ -72,8 +74,9 @@ delante de una unidad nueva.
 `ensureTodayPlan(userId, day)` con `pg_advisory_xact_lock` por usuario/día,
 doble comprobación e idempotencia; conserva el `DayPlan` actual y solo sustituye
 los bloques pendientes con `origin = 'plan'` (nunca empezados, hechos o
-abandonados). Dentro de `$transaction`, solo `tx`; fechas en
-`UserProfile.timezone`.
+abandonados). Dentro de `$transaction`, solo `tx`; «hoy» se calcula con
+`UserProfile.timezone` (por defecto `Europe/Madrid`), nunca con la zona del
+servidor.
 
 **Cierre:** dos aperturas concurrentes producen un solo plan; no se tocan bloques
 empezados/hechos/abandonados; repetir la apertura no duplica nada.
@@ -92,18 +95,23 @@ respeta lo ya empezado/hecho/abandonado.
 `loadInputs`, `buildCandidates` y `toRow` contra el código real (`FSRS`,
 `ReviewCard`, `ErrorLog`, `MoodleTask`, `Exam`, `ClassPeriod`), reutilizando
 `sessionEngine` para objetivo, técnica y descanso. Toda consulta con `userId`.
+`estimatedHours` por unidad se calibra con `FocusSession` y `SrsReview` reales;
+mientras no haya datos suficientes, la UI dice «estimado», nunca «exacto».
 
 **Cierre:** el plan se construye con datos reales; la apertura del Cuartel no
-llama a ningún modelo.
+llama a ningún modelo; toda duración sin calibrar se muestra como «estimado».
 
 ## [ ] 8. UX del Cuartel: un solo «Ahora»
 
 Un único bloque «Ahora» con botón **Empezar** (cronómetro + material), el resto
 plegado, selector de energía, microacción de 2 minutos y arrastre limitado.
-Reutiliza `HoyTocaEsto` y `SessionActions`.
+Reutiliza `HoyTocaEsto` y `SessionActions`. Aviso push a la hora que elija el
+alumno, con el nombre del bloque concreto, reutilizando el PWA/service worker
+actual.
 
 **Cierre:** la apertura no llama a ningún modelo; móvil sin scroll horizontal;
-el plan se ve y se puede empezar en un toque.
+el plan se ve y se puede empezar en un toque; el aviso llega a la hora elegida y
+nombra el bloque.
 
 ## [ ] 9. Restricciones y contexto real del catedrático
 
@@ -130,13 +138,15 @@ por materia/bloque y error absoluto medio, sin ocultarlo cuando es alto.
 esperados; repetirla no duplica nada; dos pasadas producen mediana; el MAE se
 calcula y se muestra.
 
-## [ ] 11. B3 — Salidas persistentes de la sesión
+## [ ] 11. B3 — Pedagogía activa
 
 Pedir intento antes de explicar; la «solución directa» está disponible pero se
-registra (`directSolutionCount`) y añade repaso corto.
+registra (`directSolutionCount`) y añade repaso corto. El alumno explica con sus
+palabras antes de recibir la corrección.
 
-**Cierre:** una sesión con fallos deja las 3–4 `ReviewCard` y el bloque de
-repaso; repetirla no duplica; la solución directa queda registrada.
+**Cierre:** la sesión pide intento y explicación antes de la solución; la
+solución directa queda registrada y añade repaso corto; la pedagogía cambia de
+verdad, sin repetir las salidas persistentes que ya cierra el paso 10.
 
 ## [ ] 12. Verificación determinista
 
@@ -164,9 +174,25 @@ Preparar examen) con un módulo de flujo por materia.
 **Cierre:** cada modo cambia la pedagogía; la proactividad y el repaso pasan
 solo por `invalidatePlan`.
 
+## [ ] 15. Fase 0 de seguridad (PENDIENTE, fuera del modo autónomo)
+
+No ejecutar en este encargo. Deja el diseño cerrado para una fase posterior:
+
+- RLS en todas las tablas de usuario y `REVOKE` de `anon`/`authenticated`; solo
+  el rol de servidor escribe.
+- Rol `prisma_app` con `statement_timeout` y permisos mínimos.
+- Secretos de Moodle en tabla aparte, cifrados con AES-GCM y clave fuera de la
+  base.
+- `retry` de `prisma.ts` solo para lecturas; nunca reintentar escrituras.
+
+**Cierre (cuando se aborde):** un cliente con la clave pública no puede leer ni
+escribir datos ajenos; las escrituras no se reintentan.
+
 ## Fuera de alcance del modo autónomo
 
 - **Despliegue, publicación y `git push`**: requieren autorización explícita del
   autor y no son un paso del plan.
 - **Registro público**: no se activa hasta pasar el test de aislamiento.
 - **Quitar los `@default("user_default")`**: es un contrato posterior (1f).
+- **Paso 15, Fase 0 de seguridad**: queda pendiente y fuera de este modo
+  autónomo; no se ejecuta ni se marca.
