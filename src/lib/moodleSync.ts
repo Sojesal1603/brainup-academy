@@ -23,6 +23,7 @@ import {
 import { getMoodleAuthMode, getMoodleSessionAuth, saveMoodleSessionAuth, type MoodleAuthMode } from './moodleAuth';
 import { loginToMoodle } from './moodleSession';
 import { MoodleSessionNotConnectedError, checkMoodleSession, syncMoodleViaSession } from './moodleSessionSync';
+import { invalidatePlan } from './planner/state';
 
 export interface MoodleSyncOutcome {
   via: MoodleAuthMode;
@@ -35,10 +36,16 @@ export async function syncMoodleAnyWay(
   options: { log?: (line: string) => void } = {}
 ): Promise<MoodleSyncOutcome> {
   const mode = await getMoodleAuthMode(userId);
-  if (mode === 'sesion') {
-    return { via: 'sesion', stats: await syncMoodleViaSession(userId, options) };
+  const outcome: MoodleSyncOutcome =
+    mode === 'sesion'
+      ? { via: 'sesion', stats: await syncMoodleViaSession(userId, options) }
+      : { via: 'token', stats: await syncMoodleWebServices(userId) };
+
+  if (outcome.stats.tasks > 0 || outcome.stats.adoptedFromCalendar > 0) {
+    await invalidatePlan(userId, 'sincronización de Moodle');
   }
-  return { via: 'token', stats: await syncMoodleWebServices(userId) };
+
+  return outcome;
 }
 
 export interface MoodleCheckOutcome {

@@ -436,23 +436,23 @@ model PauExamSession {
 
 // 11. Cuaderno de Apuntes y Base de Datos tipo Notion
 model Note {
-  id                   String      @id @default(uuid())
-  userId               String      @default("user_default")
-  user                 UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String       @id @default(uuid())
+  userId               String       @default("user_default")
+  user                 UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
   topicId              String
-  topic                Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic                Topic        @relation(fields: [topicId], references: [id], onDelete: Cascade)
   title                String
   content              String // Markdown estructurado con bloques, toggles de active recall y fórmulas
-  tags                 String?     @default("apuntes,resumen")
-  isPinned             Boolean     @default(false)
+  tags                 String?      @default("apuntes,resumen")
+  isPinned             Boolean      @default(false)
   // Quién ha escrito el apunte: tú, o un catedrático IA con su agente y la
   // consulta en la que nació (así siempre se sabe de dónde sale).
-  author               String      @default("alumno") // "alumno" | "catedratico"
+  author               String       @default("alumno") // "alumno" | "catedratico"
   agentId              String?
-  agent                AiAgent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agent                AiAgent?     @relation(fields: [agentId], references: [id], onDelete: SetNull)
   sourceConversationId String?
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
   reviewCards          ReviewCard[]
 
   @@index([userId, topicId])
@@ -651,27 +651,27 @@ model AgentMemory {
 // permite decir «estas 6 tarjetas vencen hoy» y meterlas como Active Recall
 // obligatorio en el plan, en vez de repasar la unidad entera otra vez.
 model ReviewCard {
-  id             String    @id @default(uuid())
-  userId         String    @default("user_default")
+  id             String      @id @default(uuid())
+  userId         String      @default("user_default")
   user           UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
   topicId        String
-  topic          Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic          Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
   noteId         String?
-  note           Note?     @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  note           Note?       @relation(fields: [noteId], references: [id], onDelete: SetNull)
   // "flashcard" | "test" | "concepto" | "mapa"
-  kind           String    @default("flashcard")
+  kind           String      @default("flashcard")
   front          String
   back           String
   source         String?
   // SM-2: repeticiones seguidas con acierto, intervalo actual y facilidad.
-  repetition     Int       @default(0)
-  intervalDays   Int       @default(0)
-  efactor        Float     @default(2.5)
-  dueAt          DateTime  @default(now())
+  repetition     Int         @default(0)
+  intervalDays   Int         @default(0)
+  efactor        Float       @default(2.5)
+  dueAt          DateTime    @default(now())
   lastReviewedAt DateTime?
-  lapses         Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  lapses         Int         @default(0)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   // La misma pregunta no se duplica dentro de una unidad: al regenerar las
   // flashcards se conserva el historial SM-2 de las que ya existían.
@@ -684,24 +684,24 @@ model ReviewCard {
 // tiempo que el alumno ha pasado consultando al catedrático. Sin estos dos
 // números no se puede distinguir «estudiar» de «tener la app abierta».
 model FocusSession {
-  id              String    @id @default(uuid())
-  userId          String    @default("user_default")
-  user            UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
-  topicId         String?
-  topic           Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
-  blockId         String?
-  plannedMinutes  Int       @default(25)
-  focusedSeconds  Int       @default(0)
-  pausedSeconds   Int       @default(0)
-  tutorSeconds    Int       @default(0)
-  interruptions   Int       @default(0)
+  id             String      @id @default(uuid())
+  userId         String      @default("user_default")
+  user           UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topicId        String?
+  topic          Topic?      @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  blockId        String?
+  plannedMinutes Int         @default(25)
+  focusedSeconds Int         @default(0)
+  pausedSeconds  Int         @default(0)
+  tutorSeconds   Int         @default(0)
+  interruptions  Int         @default(0)
   // "running" | "paused" | "completed" | "abandoned"
-  status          String    @default("running")
-  startedAt       DateTime  @default(now())
-  endedAt         DateTime?
-  abandonReason   String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  status         String      @default("running")
+  startedAt      DateTime    @default(now())
+  endedAt        DateTime?
+  abandonReason  String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   @@index([userId, startedAt])
   @@index([userId, status])
@@ -712,19 +712,20 @@ model FocusSession {
 // vez, se marca `invalidated` cuando algo lo invalida y se reconstruye sin
 // duplicar. `day` se guarda como fecha a medianoche en la zona del alumno.
 model PlanState {
-  id            String   @id @default(cuid())
-  userId        String
-  day           DateTime
-  status        String   @default("draft") // draft | active | invalidated
-  energy        Float?
-  capacityMin   Int?
-  decidedAt     DateTime?
-  invalidatedAt DateTime?
-  version       Int      @default(1)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                 String    @id @default(cuid())
+  userId             String
+  day                DateTime
+  status             String    @default("draft") // draft | active | invalidated
+  energy             Float?
+  capacityMin        Int?
+  decidedAt          DateTime?
+  invalidatedAt      DateTime?
+  invalidationReason String?
+  version            Int       @default(1)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  user        UserProfile          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user        UserProfile           @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   constraints PlanConstraint[]
   outcomes    TutorSessionOutcome[]
 
@@ -753,20 +754,20 @@ model PlanConstraint {
 // pendiente y qué debe entrar en el siguiente plan. Es la entrada idempotente
 // del cierre de sesión: repetir la misma sesión actualiza esta fila, no duplica.
 model TutorSessionOutcome {
-  id                   String    @id @default(cuid())
-  userId               String
-  planId               String?
-  subjectId            String?
-  topicId              String?
-  workedOn             Json
-  pending              Json
-  nextPlan             Json?
-  errorsCreated        Int       @default(0)
-  reviewCardsCreated   Int       @default(0)
-  directSolutionCount  Int       @default(0)
-  startedAt            DateTime  @default(now())
-  endedAt              DateTime?
-  createdAt            DateTime  @default(now())
+  id                  String    @id @default(cuid())
+  userId              String
+  planId              String?
+  subjectId           String?
+  topicId             String?
+  workedOn            Json
+  pending             Json
+  nextPlan            Json?
+  errorsCreated       Int       @default(0)
+  reviewCardsCreated  Int       @default(0)
+  directSolutionCount Int       @default(0)
+  startedAt           DateTime  @default(now())
+  endedAt             DateTime?
+  createdAt           DateTime  @default(now())
 
   user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   plan PlanState?  @relation(fields: [planId], references: [id], onDelete: SetNull, onUpdate: Cascade)

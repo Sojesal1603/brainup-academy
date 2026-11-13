@@ -47,6 +47,7 @@ require.extensions['.ts'] = (module_, filename) => {
 
 const { PrismaClient } = require('@prisma/client');
 const { ensureTodayPlan } = require(path.join(__dirname, '..', 'src', 'lib', 'dayPlan.ts'));
+const { invalidatePlan } = require(path.join(__dirname, '..', 'src', 'lib', 'planner', 'state.ts'));
 
 const USER_ID = String(process.env.BRAINUP_USER_ID ?? '').trim();
 if (!USER_ID) {
@@ -151,7 +152,26 @@ async function main() {
   assert.equal(afterDone?.status, 'completada');
   assert.equal(afterDone?.isCompleted, true);
 
-  console.log('\n  ✅ ensureTodayPlan: un plan, sin duplicados y sin tocar lo empezado\n');
+  // Invalidación: se guarda el motivo, no se recalcula en cascada y la
+  // siguiente apertura reconstruye una sola vez conservando lo empezado.
+  await invalidatePlan(USER_ID, 'sesión completada');
+  const invalidated = await prisma.planState.findFirst({
+    where: { userId: USER_ID, day: { gte: dayStart, lt: dayEnd } },
+  });
+  assert.equal(invalidated?.status, 'invalidated');
+  assert.equal(invalidated?.invalidationReason, 'sesión completada');
+  const versionAfterInvalidate = invalidated.version;
+
+  await ensureTodayPlan(USER_ID, now);
+  const rebuilt = await prisma.planState.findFirst({
+    where: { userId: USER_ID, day: { gte: dayStart, lt: dayEnd } },
+  });
+  assert.equal(rebuilt?.status, 'active');
+  assert.equal(rebuilt?.invalidationReason, 'sesión completada');
+  assert.equal(rebuilt?.version, versionAfterInvalidate + 1);
+  assert.equal(await prisma.planState.count({ where: { userId: USER_ID } }), 1);
+
+  console.log('\n  ✅ ensureTodayPlan: un plan, sin duplicados, invalidación con motivo y lo empezado intacto\n');
 }
 
 main()

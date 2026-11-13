@@ -6,6 +6,7 @@ import { currentTenant } from './tenantContext';
 import { writeTemarioBackup } from './temarioBackup';
 import { regenerateWeeklyPlan } from './planner';
 import { regenerateTodayPlan } from './dayPlan';
+import { invalidatePlan } from './planner/state';
 import { isTopicStatus, StudyMode, TopicStatus } from './types';
 import { nextUnit, sortUnits } from './temario';
 import {
@@ -33,7 +34,7 @@ function revalidateTemario() {
  * Alterna el estado de completado de un bloque de estudio.
  */
 export async function toggleStudyBlock(blockId: string) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   const block = await prisma.studyBlock.findUnique({
     where: { id: blockId },
     include: { topic: { include: { subject: true } } },
@@ -67,6 +68,11 @@ export async function toggleStudyBlock(blockId: string) {
       },
     });
   }
+
+  await invalidatePlan(
+    userId,
+    updated.isCompleted ? 'bloque completado' : 'bloque reabierto'
+  );
 
   revalidatePath('/');
   updateTag('cuartel');
@@ -130,7 +136,7 @@ export async function pauseSession(blockId: string, spentMinutes: number) {
  * plan y las estadísticas. El nivel lo mueven el Modo Enfoque y los simulacros.
  */
 export async function completeSession(blockId: string) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   const block = await prisma.studyBlock.findUnique({
     where: { id: blockId },
     include: { topic: true },
@@ -154,6 +160,8 @@ export async function completeSession(blockId: string) {
     data: { completedHours: { increment: hours }, lastReviewedAt: new Date() },
   });
 
+  await invalidatePlan(userId, 'sesión completada');
+
   revalidatePath('/');
   updateTag('cuartel');
   revalidatePath('/planificador');
@@ -163,7 +171,7 @@ export async function completeSession(blockId: string) {
 
 /** Una sesión que no se va a hacer: deja de contar como pendiente. */
 export async function abandonSession(blockId: string) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   const block = await prisma.studyBlock.findUnique({ where: { id: blockId } });
   if (!block) return { success: false, error: 'Sesión no encontrada' };
 
@@ -171,6 +179,8 @@ export async function abandonSession(blockId: string) {
     where: { id: blockId },
     data: { status: 'abandonada', isCompleted: false },
   });
+
+  await invalidatePlan(userId, 'sesión abandonada');
 
   revalidatePath('/');
   updateTag('cuartel');
@@ -181,6 +191,7 @@ export async function abandonSession(blockId: string) {
 /** Recalcula el plan de hoy con el tiempo que queda ahora mismo. */
 export async function recalculateToday() {
   const { tenant: prisma, userId } = await currentTenant();
+  await invalidatePlan(userId, 'recalcular manual');
   const plan = await regenerateTodayPlan(userId);
 
   revalidatePath('/');
@@ -451,7 +462,7 @@ export async function createExam(data: {
   targetGrade: number;
   notes?: string;
 }) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   await prisma.exam.create({
     data: {
       subjectId: data.subjectId,
@@ -464,6 +475,8 @@ export async function createExam(data: {
       notes: data.notes || '',
     },
   });
+
+  await invalidatePlan(userId, 'examen creado');
 
   revalidatePath('/');
   updateTag('cuartel');
@@ -489,7 +502,7 @@ export async function updateExam(
     notes?: string;
   }
 ) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   const existing = await prisma.exam.findUnique({ where: { id: examId } });
   if (!existing) return { success: false, error: 'Ese examen ya no existe.' };
 
@@ -511,6 +524,7 @@ export async function updateExam(
   if (Object.keys(next).length === 0) return { success: false, error: 'No has cambiado nada.' };
 
   await prisma.exam.update({ where: { id: examId }, data: next });
+  await invalidatePlan(userId, 'examen actualizado');
 
   revalidatePath('/');
   updateTag('cuartel');
@@ -528,11 +542,12 @@ export async function updateExam(
  * examen asociado, con su nota y sus preguntas.
  */
 export async function deleteExam(examId: string) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   const existing = await prisma.exam.findUnique({ where: { id: examId } });
   if (!existing) return { success: false, error: 'Ese examen ya no existe.' };
 
   await prisma.exam.delete({ where: { id: examId } });
+  await invalidatePlan(userId, 'examen eliminado');
 
   revalidatePath('/');
   updateTag('cuartel');
@@ -548,7 +563,7 @@ export async function deleteExam(examId: string) {
  * el planificador, que le da urgencia a algo que ya ocurrió.
  */
 export async function toggleExamCompleted(examId: string) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   const existing = await prisma.exam.findUnique({ where: { id: examId } });
   if (!existing) return { success: false, error: 'Ese examen ya no existe.' };
 
@@ -556,6 +571,11 @@ export async function toggleExamCompleted(examId: string) {
     where: { id: examId },
     data: { isCompleted: !existing.isCompleted },
   });
+
+  await invalidatePlan(
+    userId,
+    updated.isCompleted ? 'examen completado' : 'examen reabierto'
+  );
 
   revalidatePath('/');
   updateTag('cuartel');
@@ -783,7 +803,7 @@ export async function saveClassMethod(topicId: string, method: string) {
 }
 
 export async function markTopicSeenInClass(topicId: string) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
   const topic = await prisma.topic.findUnique({
     where: { id: topicId },
     include: { subject: true },
@@ -807,6 +827,8 @@ export async function markTopicSeenInClass(topicId: string) {
     where: { id: topicId },
     data: { status: 'visto', seenInClassAt: now },
   });
+
+  await invalidatePlan(userId, 'avance de clase');
 
   const remaining = await prisma.topic.findMany({ where: { subjectId: topic.subjectId } });
   const following = nextUnit(

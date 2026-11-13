@@ -948,7 +948,9 @@ export async function ensureTodayPlan(userId: string, now: Date = new Date()): P
           },
         });
 
-        if (live === 0) {
+        // Un plan invalidado se reconstruye aunque queden bloques: `persistDayPlan`
+        // solo sustituye los pendientes y respeta lo empezado/hecho/abandonado.
+        if (live === 0 || state?.status === 'invalidated') {
           await persistDayPlan(userId, { day: todayStart, now });
         }
 
