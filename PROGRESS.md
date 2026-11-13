@@ -20,7 +20,7 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 | 12. Verificación SymPy/unidades/química | pendiente | — | — | — |
 | 13. Proactividad diaria | pendiente | — | — | — |
 | 14. B7 modos por materia | pendiente | — | — | — |
-| 15. Fase 0 de seguridad | pendiente (fuera del modo autónomo) | — | No ejecutar: RLS, `REVOKE`, rol `prisma_app`, secretos Moodle con AES-GCM y retry solo de lecturas. | Diseño en `PLAN.md`; se aborda en otra fase. |
+| 15. Fase 0 de seguridad | en curso (parte segura) | este commit | RLS activo en 29/29 tablas de `public`; `anon` y `authenticated` sin privilegios (0 filas en `information_schema.role_table_grants`); anon recibe HTTP 401/42501 en las 6 tablas probadas. TLS con CA de Supabase y `sslaccept=strict`. | Defaults de `supabase_admin` siguen abiertos (requiere SQL como ese rol); faltan `prisma_app`, secretos Moodle y retry de lecturas. |
 
 Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
 
@@ -30,6 +30,27 @@ Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
 - Runtime: puerto `6543` (pooler, `DATABASE_URL`); migraciones: puerto `5432` (`DIRECT_URL`), base `postgres`.
 - Rol: `postgres.jwxatcbbauvlhufcfosa`. Es la base de producción; cualquier migración de esquema debe ser solo expand.
 - Cuentas: `16bb4958-5288-493b-8c65-379dd31782f5` (autor, confirmada) y `3af632ee-22dc-4e75-85a8-139aa70600bf` (prueba, confirmada).
+
+## Fase 0 parcial: RLS y API anónima (2026-11-13)
+
+- Backup previo fuera del repo: `C:/Users/ojeda/brainup-backups/brainup-pre-rls-20261113.dump`,
+  **524.438 B**, SHA-256 `5141a7f8e65df91ef3413f24ca58d469008037ab3ff046d46e08381abc5f1f36`,
+  605 entradas TOC. Snapshot de permisos en `grants-before.json` (misma carpeta).
+- `prisma migrate diff` (producción → `schema.prisma`): solo dos sentencias,
+  `ALTER TABLE "FocusSession" ALTER COLUMN "updatedAt" DROP DEFAULT;` y lo mismo
+  en `ReviewCard`. No hay tablas/columnas ausentes de `ebau_focus`. **No aplicado.**
+- Antes: anon leía por REST `UserProfile` (1 fila/30 columnas), `Subject` (1/14),
+  `Note` (1/12), `AiMessage` (1/9) y `_prisma_migrations` (1/8); `ErrorLog` 0 filas.
+- Rol de Prisma: `postgres`, `rolbypassrls = true`, propietario de las 29 tablas;
+  0 políticas RLS; 58 grants (29 tablas × anon/authenticated, todos los privilegios).
+- Después: las 6 tablas devuelven **HTTP 401 / 42501 permission denied**; 29/29 con
+  RLS; 0 grants; `UserProfile` 2, `Subject` 9 y `StudyBlock` 25 siguen visibles para
+  Prisma; `/api/salud` 200 y `/login` 200. Sin revertir.
+- Límite: los default privileges de `supabase_admin` en `public` siguen incluyendo
+  a anon/authenticated; `postgres` no es miembro y recibe «permission denied to
+  change default privileges». Las tablas creadas por Prisma sí nacen cerradas.
+- Rollback preparado: `DISABLE RLS` + `GRANT ALL` usando `grants-before.json` y el
+  dump. No fue necesario.
 
 ## Corte actual (2026-11-13)
 
@@ -62,5 +83,5 @@ Pendientes: pasos **7 a 14**. No se han empezado. Bloqueos concretos conocidos:
 - Recuentos post-1e: `UserProfile` 1, `_prisma_migrations` 2, 473 filas en el UUID del autor (471 migradas + 2 `SystemIssue` del vigilante creadas a las 19:05:36Z), 0 en la cuenta de prueba, 0 restos de `user_default`.
 - Ensayo local: restauración con `--exit-on-error` y 26/26 tablas iguales; `migrate-user-id.js --apply` contra `127.0.0.1:55432/brainup_test`.
 - Dump previo a 1e ignorado por git (`.gitignore:18`).
-- `NODE_TLS_REJECT_UNAUTHORIZED=0` sigue en `.env` (riesgo conocido; no se toca sin confirmar).
+- TLS: sin `NODE_TLS_REJECT_UNAUTHORIZED` en `.env`, `next.config.js` ni scripts. Prisma conecta con `sslmode=verify-full&sslaccept=strict` y la CA pública de Supabase (`prisma/certs/supabase-prod-ca-2021.crt`, huella SHA-256 `807025AD…`); Gemini responde 200 con verificación normal. `pg_dump` usa `sslrootcert`.
 - Supabase informa `disable_signup: false` en `/auth/v1/settings`; la app no expone registro, pero el toggle del proyecto no está desactivado.
