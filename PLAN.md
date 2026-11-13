@@ -5,16 +5,27 @@ continuar por el primer paso sin marcar. No rehacer pasos marcados: si hay duda,
 ejecutar sus tests.
 
 Cada paso se cierra en **un commit propio** y actualiza `PROGRESS.md` en ese mismo
-commit. Una casilla solo se marca cuando su criterio de cierre se ha verificado.
+commit. Una casilla solo se marca cuando su criterio de cierre está verificado:
+typecheck, lint, build y los tests del paso, en verde, con la salida real.
+
+**Parada obligatoria** antes de la migración de datos 1e, antes de cualquier
+acción destructiva o difícil de deshacer, y siempre antes de desplegar o hacer
+push. El despliegue no es un paso del modo autónomo (ver «Fuera de alcance»).
+
+**Base del entorno:** `DATABASE_URL` y `DIRECT_URL` apuntan al pooler de Supabase
+en `aws-0-eu-north-1` (base `postgres`), la misma que producción. Las migraciones
+de esquema son solo expand; si hace falta algo destructivo, parar y avisar.
 
 ## [ ] 1. Identidad única Supabase y migración de datos (1a–1f)
 
-- 1a. Commits separados de Fase 0 y árbol limpio.
-- 1b. `pg_dump` y recuentos por tabla.
-- 1c. Login email+contraseña, `/login`, `proxy.ts`, rutas públicas explícitas,
-  `/api/*` 401 sin sesión y registro público deshabilitado.
-- 1d. Cero `user_default` en `src`, scripts, seeds, SQL, service worker y
-  cookies; todo por `requireUser()`/`db(userId)`.
+- 1a. Commits separados del trabajo previo de Fase 0 y árbol limpio.
+- 1b. `pg_dump` (o Docker `postgres:17-alpine`) y recuentos por tabla en
+  `data/backups/`.
+- 1c. Login email+contraseña, `/login`, `proxy.ts` (equivalente a
+  `middleware.ts` en Next 16), rutas públicas explícitas, `/api/*` 401 sin sesión
+  y registro público **deshabilitado**.
+- 1d. Cero `user_default` en `src`, scripts, seeds, tests, SQL, service worker y
+  cookies; todo por `requireUser()`/`db(userId)`; `db()` sigue rechazándolo.
 - 1e. Migración `UserProfile.id` con `DIRECT_URL`, una transacción, FKs
   `ON UPDATE CASCADE`, recuentos antes/después y `ROLLBACK` si descuadra.
 - 1f. Mantener los `@default("user_default")` transitorios.
@@ -23,10 +34,17 @@ commit. Una casilla solo se marca cuando su criterio de cierre se ha verificado.
 vacía; `user_default` solo aparece en migraciones históricas, comentarios y los
 `@default` transitorios; recuentos coinciden.
 
-## [ ] 2. Modelos `PlanState` y `PlanConstraint`
+## [ ] 2. Esquema expand: PlanState, PlanConstraint y TutorSessionOutcome
 
-Migración expand, relaciones y FKs con `onDelete/onUpdate: Cascade`, sin quitar
-los defaults históricos.
+Migración **no destructiva** (solo tablas, columnas e índices nuevos; sin tocar
+columnas actuales de `StudyBlock`): `PlanState` y `PlanConstraint` con el
+contrato de `docs/ENCARGO.md`, más `TutorSessionOutcome` para el resultado de
+cada sesión (qué se trabajó, qué quedó pendiente y qué debe entrar en el plan).
+Relaciones en `UserProfile` con `onDelete/onUpdate: Cascade`; `@@unique` y
+`@@index` según el contrato; sin quitar todavía los defaults históricos.
+
+Antes de aplicar: confirmar la base, backup verificado y que la migración es solo
+expand. Si el entorno apunta a producción, dejarlo escrito en `PROGRESS.md`.
 
 **Cierre:** `prisma validate`, migración aplicada y reversible; ninguna escritura
 de plan todavía desde la UI.
@@ -34,92 +52,121 @@ de plan todavía desde la UI.
 ## [ ] 3. Motor puro del planificador
 
 `src/lib/planner/engine.ts` con `score`, `pickBlocks` e `interleave`; sin base de
-datos, IA ni reloj global.
+datos, sin IA y sin reloj global (recibe `now` y `timezone`). Capacidad al 70 %
+del tiempo disponible, energía 0.5/1/1.2, bloques de 10–15 min como mínimo,
+3–5 bloques, máximo 2 por materia, `weeklyHoursCap`, horario y restricciones.
 
-**Cierre:** `scripts/verify-planificador.js` prueba capacidad 70 %, energía
-0.5/1/1.2, mínimo 10–15 min, 3–5 bloques, intercalado y determinismo.
+**Cierre:** el módulo no importa Prisma ni IA; los tests del paso 4 pasan.
 
-## [ ] 4. Orquestador y persistencia del plan
+## [ ] 4. Tests del motor
 
-`buildTodayPlan`, `persistTodayPlan`, advisory lock por usuario/día,
-`invalidatePlan`, timezone del perfil y transacciones con `tx`.
+`scripts/verify-planificador.js` con el patrón `scripts/verify-*.js`:
+determinismo, capacidad al 70 %, intercalado de materias, energía 0.5/1/1.2,
+mínimo 10–15 min, 3–5 bloques, máximo 2 por materia y un examen a 2 días por
+delante de una unidad nueva.
+
+**Cierre:** el script sale en verde y cubre cada regla del paso 3.
+
+## [ ] 5. Orquestador y persistencia del plan
+
+`ensureTodayPlan(userId, day)` con `pg_advisory_xact_lock` por usuario/día,
+doble comprobación e idempotencia; conserva el `DayPlan` actual y solo sustituye
+los bloques pendientes con `origin = 'plan'` (nunca empezados, hechos o
+abandonados). Dentro de `$transaction`, solo `tx`; fechas en
+`UserProfile.timezone`.
 
 **Cierre:** dos aperturas concurrentes producen un solo plan; no se tocan bloques
-empezados/hechos/abandonados; una invalidación reconstruye sin duplicar.
+empezados/hechos/abandonados; repetir la apertura no duplica nada.
 
-## [ ] 5. Cuartel: un solo “Ahora” y microacción
+## [ ] 6. `invalidatePlan` y sus disparadores
 
-3–5 bloques, energía opcional, microacción y push PWA; sin IA al abrir.
+`invalidatePlan(reason)` desde completar/abandonar una sesión, exámenes, Moodle,
+chequeo de clase, cambio de horario, restricciones y el botón Recalcular. No
+recalcular en cascada; el motivo se conserva y se muestra al reconstruir.
+
+**Cierre:** cada disparador invalida una vez; la reconstrucción no duplica y
+respeta lo ya empezado/hecho/abandonado.
+
+## [ ] 7. Entradas reales del planificador
+
+`loadInputs`, `buildCandidates` y `toRow` contra el código real (`FSRS`,
+`ReviewCard`, `ErrorLog`, `MoodleTask`, `Exam`, `ClassPeriod`), reutilizando
+`sessionEngine` para objetivo, técnica y descanso. Toda consulta con `userId`.
+
+**Cierre:** el plan se construye con datos reales; la apertura del Cuartel no
+llama a ningún modelo.
+
+## [ ] 8. UX del Cuartel: un solo «Ahora»
+
+Un único bloque «Ahora» con botón **Empezar** (cronómetro + material), el resto
+plegado, selector de energía, microacción de 2 minutos y arrastre limitado.
+Reutiliza `HoyTocaEsto` y `SessionActions`.
 
 **Cierre:** la apertura no llama a ningún modelo; móvil sin scroll horizontal;
 el plan se ve y se puede empezar en un toque.
 
-## [ ] 6. Contexto real de los catedráticos (B1–B2)
+## [ ] 9. Restricciones y contexto real del catedrático
 
-Primer mensaje por reglas con expediente real; citas `?doc=note:ID`; apertura
-`[[abrir:clave]]` + `NoteSplitPanel`, ejecutada en servidor con el `userId` de la
-sesión; al modelo solo `{ok, title}`.
+Restricciones con `responseSchema` de Gemini + Zod y confirmación visible antes
+de guardar. El primer mensaje del catedrático se genera por reglas con el
+expediente real (errores, exámenes, método del profesor), sin gastar IA.
+`open_document(kind, query)` se ejecuta en servidor con el `userId` de la sesión;
+citas `?doc=note:ID`, apertura `[[abrir:clave]]` + `NoteSplitPanel`, sin SSE; al
+modelo solo se le devuelve `{ ok, title }`.
 
 **Cierre:** el modelo nunca recibe ni decide `userId`; abrir un apunte no usa
-SSE; el primer mensaje no gasta IA.
+SSE; el primer mensaje no gasta IA; una restricción inválida se rechaza.
 
-## [ ] 7. Corrector tipo tribunal (B4)
+## [ ] 10. Cierre de sesión, corrector, foto y banco
 
-Rúbrica JSON con Zod, doble corrección y mediana, bloques y notas sin inventar.
+Cierre confirmado por el alumno → `ErrorLog`, `ReviewCard` (con `frontHash`),
+`TutorSessionOutcome` e `invalidatePlan`, de forma idempotente. Corrector tipo
+tribunal con rúbrica JSON validada con Zod, doble corrección y mediana, sin
+inventar notas ni apartados. Foto manuscrita transcrita y corregida sobre la
+transcripción, con confianza; si no se puede leer, se dice. Banco de evaluación
+por materia/bloque y error absoluto medio, sin ocultarlo cuando es alto.
 
-**Cierre:** dos pasadas producen mediana; entradas/salidas inválidas se rechazan;
-no se recalifica en silencio.
+**Cierre:** una sesión con fallos deja exactamente las tarjetas y el bloque
+esperados; repetirla no duplica nada; dos pasadas producen mediana; el MAE se
+calcula y se muestra.
 
-## [ ] 8. Verificación matemática, unidades y química
+## [ ] 11. B3 — Salidas persistentes de la sesión
 
-SymPy para matemáticas, unidades para física/química y ajuste/estequiometría para
-química; los fallos se marcan, no se convierten en cero automáticamente.
+Pedir intento antes de explicar; la «solución directa» está disponible pero se
+registra (`directSolutionCount`) y añade repaso corto.
+
+**Cierre:** una sesión con fallos deja las 3–4 `ReviewCard` y el bloque de
+repaso; repetirla no duplica; la solución directa queda registrada.
+
+## [ ] 12. Verificación determinista
+
+SymPy para matemáticas, unidades para física/química y ajuste/estequiometría
+para química. Un fallo de verificación se marca, no se convierte en cero
+automáticamente; «verificado» solo se muestra si pasó.
 
 **Cierre:** casos de prueba con error detectado y sin falsos positivos en casos
 correctos.
 
-## [ ] 9. Cierre de la Parte A y B base
+## [ ] 13. Proactividad diaria
 
-Integración, migraciones, limpieza, documentación y verificación completa.
+Propuesta proactiva diaria basada en el plan y en riesgo real (examen próximo,
+error repetido, repaso vencido), sin LLM en la apertura y respetando horas de
+silencio y push nocturno.
 
-**Cierre:** `tsc`, `prisma validate`, tests del motor y flujo manual de Cuartel y
-tutor sin regresiones; sin `user_default` en código.
+**Cierre:** no hay push nocturno; la propuesta sale del plan y no escribe
+`StudyBlock` directamente.
 
-## [ ] 10. Despliegue controlado y comprobación de aislamiento
+## [ ] 14. B7 — Modos por materia
 
-Solo con autorización explícita. Aplicar migraciones, desplegar y repetir el test
-de dos usuarios.
+Modos visibles por materia (Diagnosticar, Entrenar, Simulacro, Corregir,
+Preparar examen) con un módulo de flujo por materia.
 
-**Cierre:** cuenta real con datos; segundo usuario vacío; logs sin errores de
-identidad; rollback documentado.
+**Cierre:** cada modo cambia la pedagogía; la proactividad y el repaso pasan
+solo por `invalidatePlan`.
 
-## [ ] 11. B3 — Salidas persistentes de la sesión
+## Fuera de alcance del modo autónomo
 
-`TutorSessionOutcome`, `ErrorLog`, 3–4 `ReviewCard`, bloque de repaso vía
-`invalidatePlan`; idempotencia.
-
-**Cierre:** una sesión con fallos deja exactamente las tarjetas y el bloque
-esperados; repetirla no duplica nada.
-
-## [ ] 12. B5 — Foto manuscrita
-
-Subida, transcripción y corrección sobre la transcripción; imagen local cuando
-no haga falta enviarla; aviso si no se puede leer.
-
-**Cierre:** una foto legible corrige; una ilegible se rechaza con motivo; no se
-inventa contenido.
-
-## [ ] 13. B6 — Banco de evaluación y error absoluto medio
-
-Banco por materia/bloque, calibración del corrector y reporte de MAE.
-
-**Cierre:** el MAE se calcula contra el banco y se muestra; un MAE alto no se
-oculta.
-
-## [ ] 14. B7 — Proactividad y modos por materia
-
-Avisos con riesgo real, horas de silencio, modos de exposición/problemas/
-laboratorio/comentario/idioma y bloque de repaso solo vía `invalidatePlan`.
-
-**Cierre:** no hay push nocturno; cada modo cambia la pedagogía; la proactividad
-no escribe `StudyBlock` directamente.
+- **Despliegue, publicación y `git push`**: requieren autorización explícita del
+  autor y no son un paso del plan.
+- **Registro público**: no se activa hasta pasar el test de aislamiento.
+- **Quitar los `@default("user_default")`**: es un contrato posterior (1f).
