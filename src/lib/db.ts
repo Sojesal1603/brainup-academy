@@ -66,6 +66,9 @@ const TENANT_MODELS: ReadonlySet<string> = new Set([
   'AgentMemory',
   'ReviewCard',
   'FocusSession',
+  'PlanState',
+  'PlanConstraint',
+  'TutorSessionOutcome',
 ]);
 
 /** Operaciones de lectura: se les añade el dueño al `where`. */
@@ -316,17 +319,19 @@ export function db(userId: string) {
         return (input: unknown, options?: unknown) =>
           withTransactionFlag(() => {
             if (typeof input === 'function') {
-              const start = target.$transaction as unknown as (
+              // Hay que conservar el `this`: el cliente extendido guarda ahí su
+              // motor y, sin él, Prisma falla con «_engineConfig undefined».
+              const start = (target.$transaction as unknown as (
                 run: (tx: unknown) => unknown,
                 opts?: unknown
-              ) => Promise<unknown>;
+              ) => Promise<unknown>).bind(target);
               return start(input as (tx: unknown) => unknown, options);
             }
 
-            const start = target.$transaction as unknown as (
+            const start = (target.$transaction as unknown as (
               queries: unknown,
               opts?: unknown
-            ) => Promise<unknown>;
+            ) => Promise<unknown>).bind(target);
             return start(input, options);
           });
       }

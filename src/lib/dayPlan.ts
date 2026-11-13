@@ -577,13 +577,15 @@ export async function persistDayPlan(
 
   const origin = recovery.active ? 'recuperacion' : carried > 0 ? 'reprogramada' : 'plan';
 
-  // Se borran SOLO los bloques pendientes de ese día: lo completado y lo que
-  // está en marcha no se toca (nadie pierde una sesión empezada).
+  // Se borran SOLO los bloques pendientes que generó el plan: lo completado, lo
+  // que está en marcha, lo abandonado y los bloques «micro» no se tocan (nadie
+  // pierde una sesión empezada ni una acción de dos minutos).
   await prisma.studyBlock.deleteMany({
     where: {
       date: { gte: start, lt: end },
       isCompleted: false,
       status: 'pendiente',
+      origin: { in: ['plan', 'reprogramada', 'recuperacion'] },
     },
   });
 
@@ -879,75 +881,102 @@ export async function computeDayPlan(userId: string, now: Date = new Date()): Pr
   };
 }
 
-/**
- * Una sola comprobación/generación a la vez por proceso.
- *
- * Sin esto, dos pestañas abiertas (o la precarga de Next) pueden pedir el plan
- * a la vez y lanzar dos regeneraciones completas de la semana. En SQLite la
- * segunda espera a la primera, y mientras tanto todas las navegaciones se
- * quedan en «cargando». Compartir la misma promesa lo evita de raíz.
- */
-const ensureInFlight = new Map<string, Promise<DayPlan>>();
-/** Días locales ya comprobados, por cuenta: no se repiten en cada clic. */
-const ensuredDayKeys = new Set<string>();
+/** Clave de día (YYYY-MM-DD) en la zona del alumno, no en la del servidor. */
+function dayKeyInZone(date: Date, timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  } catch {
+    return isoDay(date);
+  }
+}
+
+/** Fecha a medianoche UTC de una clave YYYY-MM-DD (la que guarda `PlanState`). */
+function planDayFromKey(dayKey: string): Date {
+  const [year, month, day] = dayKey.split('-').map((part) => Number(part));
+  return new Date(Date.UTC(year, month - 1, day));
+}
 
 /**
  * Se llama al abrir el Cuartel: si hoy no hay plan (o solo quedan sesiones
  * cerradas), lo genera. Es idempotente y barato: si ya hay sesiones vivas, no
- * escribe nada. Así la app funciona sin que haya que organizar nada.
+ * escribe nada.
+ *
+ * La exclusión mutua es de PostgreSQL, no de este proceso: dos pestañas, dos
+ * instancias de Next o dos peticiones simultáneas compiten por el mismo
+ * advisory lock por usuario y día. La segunda espera, vuelve a mirar el
+ * `PlanState` y, si la primera ya decidió el plan, no reconstruye nada.
  */
 export async function ensureTodayPlan(userId: string, now: Date = new Date()): Promise<DayPlan> {
-  const dayKey = isoDay(now);
-  const key = `${userId}:${dayKey}`;
+  const prisma = db(userId);
+  const todayStart = startOfDay(now);
 
-  // Ya se miró hoy: leer el plan es barato y no puede bloquear a nadie.
-  if (ensuredDayKeys.has(key)) return computeDayPlan(userId, now);
-
-  // Hay una comprobación en marcha para esta cuenta: se espera a ESA.
-  const inFlight = ensureInFlight.get(key);
-  if (inFlight) return inFlight;
-
-  const run = (async () => {
-    const prisma = db(userId);
-    try {
-      const todayStart = startOfDay(now);
-      // Un plan «vivo» es el que ha hecho este motor: trae objetivo y motivo. Los
-      // bloques viejos (45 min fijos, sin objetivo) no cuentan: si existen, se
-      // rehace la semana entera una sola vez en vez de arrastrarlos para siempre.
-      //
-      // Cuenta también lo ya completado: si has terminado el día, NO se regenera
-      // el plan en cada visita (te volvería a llenar la tarde con trabajo nuevo).
-      const live = await prisma.studyBlock.count({
-        where: {
-          date: { gte: todayStart, lt: new Date(todayStart.getTime() + DAY_MS) },
-          objective: { not: null },
-          status: { not: 'abandonada' },
-        },
-      });
-
-      if (live === 0) {
-        await regenerateWeekPlan(userId);
-      }
-
-      // Se marca aunque el motor no haya podido crear sesiones (por ejemplo,
-      // sin ventana de tiempo). Si no, cada visita volvería a regenerar la
-      // semana entera: exactamente el bucle de escrituras que congelaba la app.
-      ensuredDayKeys.add(key);
-    } catch (error) {
-      // Que la generación falle no puede tumbar el Cuartel: se enseña lo que
-      // haya, pero se deja rastro para que el vigilante pueda verlo.
-      console.error('[plan] no se pudo generar el plan del día:', error);
-    }
-
-    return computeDayPlan(userId, now);
-  })();
-
-  ensureInFlight.set(key, run);
   try {
-    return await run;
-  } finally {
-    ensureInFlight.delete(key);
+    const profile = await prisma.userProfile.findUnique({
+      where: { id: userId },
+      select: { timezone: true },
+    });
+    const timezone = profile?.timezone || 'Europe/Madrid';
+    const dayKey = dayKeyInZone(now, timezone);
+    const planDay = planDayFromKey(dayKey);
+    const lockKey = `${userId}:${dayKey}`;
+
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          lockKey
+        );
+
+        const state = await tx.planState.findUnique({
+          where: { userId_day: { userId, day: planDay } },
+        });
+        if (state?.status === 'active' && state.decidedAt) return;
+
+        // Doble comprobación dentro del lock: si otra petición ya dejó sesiones
+        // vivas (incluidas las completadas), no se vuelve a planificar.
+        const live = await tx.studyBlock.count({
+          where: {
+            userId,
+            date: { gte: todayStart, lt: new Date(todayStart.getTime() + DAY_MS) },
+            objective: { not: null },
+            status: { not: 'abandonada' },
+          },
+        });
+
+        if (live === 0) {
+          await persistDayPlan(userId, { day: todayStart, now });
+        }
+
+        await tx.planState.upsert({
+          where: { userId_day: { userId, day: planDay } },
+          create: {
+            userId,
+            day: planDay,
+            status: 'active',
+            decidedAt: new Date(),
+          },
+          update: {
+            status: 'active',
+            decidedAt: new Date(),
+            invalidatedAt: null,
+            version: { increment: 1 },
+          },
+        });
+      },
+      { timeout: 60_000, maxWait: 10_000 }
+    );
+  } catch (error) {
+    // Que la generación falle no puede tumbar el Cuartel: se enseña lo que
+    // haya, pero se deja rastro para que el vigilante pueda verlo.
+    console.error('[plan] no se pudo generar el plan del día:', error);
   }
+
+  return computeDayPlan(userId, now);
 }
 
 /** Fuerza la regeneración de hoy (botón «Recalcular»). */
