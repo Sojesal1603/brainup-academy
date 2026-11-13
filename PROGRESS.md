@@ -31,12 +31,33 @@ Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
 - Rol: `postgres.jwxatcbbauvlhufcfosa`. Es la base de producción; cualquier migración de esquema debe ser solo expand.
 - Cuentas: `16bb4958-5288-493b-8c65-379dd31782f5` (autor, confirmada) y `3af632ee-22dc-4e75-85a8-139aa70600bf` (prueba, confirmada).
 
+## Corte actual (2026-11-13)
+
+Hechos y verificados: pasos **1 a 6**. El plan diario ya se decide con reglas
+(determinista, una sola vez, con lock), se invalida con motivo y conserva lo
+empezado.
+
+Pendientes: pasos **7 a 14**. No se han empezado. Bloqueos concretos conocidos:
+
+- 7: falta calibrar `estimatedHours` con `FocusSession`/`SrsReview` y mostrar
+  «estimado» en la UI; el resto de entradas reales ya existe en `dayPlan.ts`.
+- 8: falta el selector de energía que escriba el plan y el push a la hora
+  elegida; «Ahora» y las microtareas ya existen.
+- 9: no existen `responseSchema`, `open_document` ni la confirmación Zod de
+  restricciones.
+- 10: no existen `frontHash`, `TutorSessionOutcome` en el cierre ni doble
+  corrección con mediana; el examinador actual no los cubre.
+- 11: la pedagogía activa no está separada del cierre del paso 10.
+- 12: no hay SymPy ni verificación de unidades/química.
+- 13: la proactividad diaria con horas de silencio no está implementada.
+- 14: no hay modos por materia.
+
 ## Última verificación (2026-11-13)
 
 - `npm run build`: exit 0 con el código actual.
 - `/api/salud`: HTTP 200, `database.ok = true`; `/` → 307 a `/login`; `/login` 200; `/api/moodle/status` y `/api/planner` 401.
-- `npx tsc --noEmit`: limpio antes de 1e; se repetirá al cerrar el paso 2.
-- `npm run lint`: limpio antes de 1e.
+- `npx tsc --noEmit`: limpio tras el paso 6.
+- `npm run lint`: limpio tras el paso 6.
 - `npx prisma validate`: esquema válido.
 - Recuentos post-1e: `UserProfile` 1, `_prisma_migrations` 2, 473 filas en el UUID del autor (471 migradas + 2 `SystemIssue` del vigilante creadas a las 19:05:36Z), 0 en la cuenta de prueba, 0 restos de `user_default`.
 - Ensayo local: restauración con `--exit-on-error` y 26/26 tablas iguales; `migrate-user-id.js --apply` contra `127.0.0.1:55432/brainup_test`.
