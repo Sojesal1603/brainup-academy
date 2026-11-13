@@ -5,8 +5,8 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 
 | Paso | Estado | Commit | Evidencia | Pendiente |
 | --- | --- | --- | --- | --- |
-| Docs (ENCARGO/PLAN/PROGRESS) | hecho | `e170cf3` | Los tres archivos existen y se commitean solos antes de seguir. | Sustituir `docs/ENCARGO.md` si el autor pega el texto literal. |
-| 1. Identidad única Supabase | en curso | — | 1a: `d424a11`, `26518c3`, `2a2df35`; árbol limpio. 1b: `data/backups/brainup-pre-identity-20261112.dump` (510.970 B, dump custom PostgreSQL v1.16) y `data/backups/counts-pre-identity-20261112.json`. 1c: `src/proxy.ts` (401 en API, redirección a `/login`), `/login`, login solo con `signInWithPassword` (sin registro). 1d: `user_default` solo en migraciones históricas, comentarios y `@default` transitorios. Re-verificado 2026-11-13: `tsc --noEmit`, `npm run lint` y `prisma validate` limpios; preflight 24 tablas / 471 filas / 24 FKs con `ON UPDATE CASCADE`, 0 escrituras. | 1e y cierre, en parada obligatoria: falta la URL y la anon key de Supabase en `.env` (0 de 2), la cuenta real en `auth.users` (0 filas) y el "adelante" explícito. La base es el pooler de Supabase `aws-0-eu-north-1` (6543 runtime / 5432 directa): es la misma que producción, así que el paso 2 exige backup verificado y autorización aparte. |
+| Docs (ENCARGO/PLAN/PROGRESS) | hecho | `e170cf3`, `0d0640b` | Los tres archivos existen y se commitean solos antes de seguir. | Sustituir `docs/ENCARGO.md` si el autor pega el texto literal. |
+| 1. Identidad única Supabase | hecho | `d424a11`, `26518c3`, `2a2df35`, este commit | 1a–1d ya verificados. 1e aplicada el 2026-11-13T19:05:00Z sobre `aws-0-eu-north-1.pooler.supabase.com:5432` (no local): `UserProfile` = `16bb4958-…`, 471 filas movidas con `ON UPDATE CASCADE`, 0 restos de `user_default`, 24/24 tablas cuadradas. Ensayo previo en Postgres 17 local: 26/26 recuentos idénticos y migración de 471 filas con 0 restos. Dump nuevo `data/backups/brainup-pre-1e-20261113.dump` (513.383 B, SHA-256 `60ed96ef…`), legible con `pg_restore -l` (591 entradas). Build 0, salud 200, `/` → `/login`, `/login` 200, APIs 401. Cuenta de prueba con 0 filas. | Nada de 1e. Quedan los `@default("user_default")` transitorios (1f). |
 | 2. Esquema expand (PlanState, PlanConstraint, TutorSessionOutcome) | pendiente | — | — | — |
 | 3. Motor puro | pendiente | — | — | — |
 | 4. Tests del motor | pendiente | — | — | — |
@@ -16,36 +16,30 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 | 8. UX del Cuartel | pendiente | — | — | — |
 | 9. Restricciones y contexto del tutor | pendiente | — | — | — |
 | 10. Cierre de sesión, corrector, foto y banco | pendiente | — | — | — |
-| 11. B3 salidas persistentes | pendiente | — | — | — |
+| 11. B3 pedagogía activa | pendiente | — | — | — |
 | 12. Verificación SymPy/unidades/química | pendiente | — | — | — |
 | 13. Proactividad diaria | pendiente | — | — | — |
 | 14. B7 modos por materia | pendiente | — | — | — |
+| 15. Fase 0 de seguridad | pendiente (fuera del modo autónomo) | — | No ejecutar: RLS, `REVOKE`, rol `prisma_app`, secretos Moodle con AES-GCM y retry solo de lecturas. | Diseño en `PLAN.md`; se aborda en otra fase. |
 
 Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
 
-## Bloqueo actual
+## Base de datos
 
-Parada obligatoria antes de 1e. Re-comprobado el 2026-11-13 tras el aviso del
-autor: `.env` sigue **sin** `NEXT_PUBLIC_SUPABASE_URL` ni
-`NEXT_PUBLIC_SUPABASE_ANON_KEY` (las dos ausentes) y `auth.users` sigue con **0
-filas**; `UserProfile` solo tiene `user_default`. No se ha tocado la base.
-
-Aviso: `.env` apunta al pooler de Supabase en `aws-0-eu-north-1` (6543 para
-runtime, 5432 para `DIRECT_URL`), sobre la base `postgres` que contiene los datos
-reales (471 filas). No es una base de desarrollo aparte: la migración 1e y
-cualquier migración de esquema del paso 2 se ejecutarían sobre producción y
-requieren autorización explícita.
+- Host: `aws-0-eu-north-1.pooler.supabase.com`
+- Runtime: puerto `6543` (pooler, `DATABASE_URL`); migraciones: puerto `5432` (`DIRECT_URL`), base `postgres`.
+- Rol: `postgres.jwxatcbbauvlhufcfosa`. Es la base de producción; cualquier migración de esquema debe ser solo expand.
+- Cuentas: `16bb4958-5288-493b-8c65-379dd31782f5` (autor, confirmada) y `3af632ee-22dc-4e75-85a8-139aa70600bf` (prueba, confirmada).
 
 ## Última verificación (2026-11-13)
 
-- `npx tsc --noEmit`: limpio.
-- `npm run lint`: limpio.
-- `.env`: 0 de 2 variables de Supabase; `auth.users`: 0 filas.
-- Herramientas: `pg_dump`/`pg_restore`/`psql` no están en el PATH; Docker sí.
+- `npm run build`: exit 0 con el código actual.
+- `/api/salud`: HTTP 200, `database.ok = true`; `/` → 307 a `/login`; `/login` 200; `/api/moodle/status` y `/api/planner` 401.
+- `npx tsc --noEmit`: limpio antes de 1e; se repetirá al cerrar el paso 2.
+- `npm run lint`: limpio antes de 1e.
 - `npx prisma validate`: esquema válido.
-- `pg_restore` no está instalado: el dump se validó por cabecera (`PostgreSQL
-  custom database dump - v1.16-0`) y tamaño (510.970 B), no restaurándolo.
-- `grep -RIn "user_default"`: solo migraciones históricas, comentarios y los
-  `@default` transitorios del esquema.
-- Preflight de `scripts/migrate-user-id.js` con UUID ficticio: 24 tablas, 471
-  filas en `user_default`, 24 FKs con `ON UPDATE CASCADE`, 0 filas en destino.
+- Recuentos post-1e: `UserProfile` 1, `_prisma_migrations` 2, 473 filas en el UUID del autor (471 migradas + 2 `SystemIssue` del vigilante creadas a las 19:05:36Z), 0 en la cuenta de prueba, 0 restos de `user_default`.
+- Ensayo local: restauración con `--exit-on-error` y 26/26 tablas iguales; `migrate-user-id.js --apply` contra `127.0.0.1:55432/brainup_test`.
+- Dump previo a 1e ignorado por git (`.gitignore:18`).
+- `NODE_TLS_REJECT_UNAUTHORIZED=0` sigue en `.env` (riesgo conocido; no se toca sin confirmar).
+- Supabase informa `disable_signup: false` en `/auth/v1/settings`; la app no expone registro, pero el toggle del proyecto no está desactivado.
