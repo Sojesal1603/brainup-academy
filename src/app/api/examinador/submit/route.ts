@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 import {
   gradeWithRubric,
   type BlockResult,
@@ -35,7 +36,12 @@ function round4(value: number): number {
  * baja (hay que volver a machacarlo) y lo clavado sube ligeramente.
  * Nunca bloquea la respuesta si falla.
  */
-async function adjustMastery(blocks: ExamBlock[], results: BlockResult[]): Promise<string[]> {
+async function adjustMastery(
+  userId: string,
+  blocks: ExamBlock[],
+  results: BlockResult[]
+): Promise<string[]> {
+  const prisma = db(userId);
   const notes: string[] = [];
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
@@ -46,7 +52,7 @@ async function adjustMastery(blocks: ExamBlock[], results: BlockResult[]): Promi
 
     try {
       if (ratio < 0.5) {
-        const topic = await prisma.topic.findUnique({ where: { id: block.topicId } });
+        const topic = await prisma.topic.findFirst({ where: { id: block.topicId } });
         if (topic) {
           await prisma.topic.update({
             where: { id: block.topicId },
@@ -58,7 +64,7 @@ async function adjustMastery(blocks: ExamBlock[], results: BlockResult[]): Promi
           notes.push(`«${block.topicTitle}»: dominio bajado 5% (fallado en simulacro)`);
         }
       } else if (ratio >= 0.85) {
-        const topic = await prisma.topic.findUnique({ where: { id: block.topicId } });
+        const topic = await prisma.topic.findFirst({ where: { id: block.topicId } });
         if (topic) {
           await prisma.topic.update({
             where: { id: block.topicId },
@@ -90,13 +96,15 @@ async function adjustMastery(blocks: ExamBlock[], results: BlockResult[]): Promi
  * bloques flojos se auditan contra el Banco de Errores y el planificador.
  */
 export async function POST(request: NextRequest) {
+  const user = await requireUser();
+  const prisma = db(user.id);
   const body = (await request.json().catch(() => null)) as SubmitBody | null;
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
   if (!sessionId) {
     return NextResponse.json({ error: 'Falta el identificador de la sesión.' }, { status: 400 });
   }
 
-  const session = await prisma.pauExamSession.findUnique({ where: { id: sessionId } });
+  const session = await prisma.pauExamSession.findFirst({ where: { id: sessionId } });
   if (!session) {
     return NextResponse.json({ error: 'Sesión de simulacro no encontrada.' }, { status: 404 });
   }
@@ -205,7 +213,7 @@ export async function POST(request: NextRequest) {
   let auditNote = '';
   if (subjectId) {
     try {
-      const audit = await auditEbauErrors({
+      const audit = await auditEbauErrors(user.id, {
         sessionId: session.id,
         subjectId,
         subjectName: session.subjectName,
@@ -222,7 +230,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const masteryNotes = await adjustMastery(blocks, grade.blocks);
+  const masteryNotes = await adjustMastery(user.id, blocks, grade.blocks);
   const feedback = [grade.globalFeedback, masteryNotes.join('\n'), auditNote]
     .filter((part) => part.trim().length > 0)
     .join('\n\n');

@@ -1,7 +1,8 @@
 'use server';
 
 import { revalidatePath, updateTag } from 'next/cache';
-import { prisma, withTransaction } from './prisma';
+import { withTransaction } from './prisma';
+import { currentTenant } from './tenantContext';
 import { writeTemarioBackup } from './temarioBackup';
 import { regenerateWeeklyPlan } from './planner';
 import { regenerateTodayPlan } from './dayPlan';
@@ -32,6 +33,7 @@ function revalidateTemario() {
  * Alterna el estado de completado de un bloque de estudio.
  */
 export async function toggleStudyBlock(blockId: string) {
+  const { tenant: prisma } = await currentTenant();
   const block = await prisma.studyBlock.findUnique({
     where: { id: blockId },
     include: { topic: { include: { subject: true } } },
@@ -78,6 +80,7 @@ export async function toggleStudyBlock(blockId: string) {
 
 /** Una sesión empezada: el plan sabe que está en marcha y no la reprograma. */
 export async function startSession(blockId: string) {
+  const { tenant: prisma } = await currentTenant();
   if (typeof blockId !== 'string' || blockId.length === 0) {
     return { success: false, error: 'Falta la sesión.' };
   }
@@ -98,6 +101,7 @@ export async function startSession(blockId: string) {
  * faltan.
  */
 export async function pauseSession(blockId: string, spentMinutes: number) {
+  const { tenant: prisma } = await currentTenant();
   const block = await prisma.studyBlock.findUnique({ where: { id: blockId } });
   if (!block) return { success: false, error: 'Sesión no encontrada' };
   if (block.isCompleted) return { success: true, alreadyDone: true };
@@ -126,6 +130,7 @@ export async function pauseSession(blockId: string, spentMinutes: number) {
  * plan y las estadísticas. El nivel lo mueven el Modo Enfoque y los simulacros.
  */
 export async function completeSession(blockId: string) {
+  const { tenant: prisma } = await currentTenant();
   const block = await prisma.studyBlock.findUnique({
     where: { id: blockId },
     include: { topic: true },
@@ -158,6 +163,7 @@ export async function completeSession(blockId: string) {
 
 /** Una sesión que no se va a hacer: deja de contar como pendiente. */
 export async function abandonSession(blockId: string) {
+  const { tenant: prisma } = await currentTenant();
   const block = await prisma.studyBlock.findUnique({ where: { id: blockId } });
   if (!block) return { success: false, error: 'Sesión no encontrada' };
 
@@ -174,7 +180,8 @@ export async function abandonSession(blockId: string) {
 
 /** Recalcula el plan de hoy con el tiempo que queda ahora mismo. */
 export async function recalculateToday() {
-  const plan = await regenerateTodayPlan();
+  const { tenant: prisma, userId } = await currentTenant();
+  const plan = await regenerateTodayPlan(userId);
 
   revalidatePath('/');
   updateTag('cuartel');
@@ -192,6 +199,7 @@ export async function recalculateToday() {
  * Alterna el cumplimiento de un hábito diario.
  */
 export async function toggleHabit(habitId: string) {
+  const { tenant: prisma } = await currentTenant();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -237,6 +245,7 @@ export async function toggleHabit(habitId: string) {
  * Actualiza el dominio del tema y las horas del sistema.
  */
 export async function recordStudySession(data: {
+  // El dueño se resuelve al principio del cuerpo; esta firma solo describe el payload.
   topicId: string;
   minutesSpent: number;
   techniqueUsed: string;
@@ -245,6 +254,7 @@ export async function recordStudySession(data: {
   /** Sesión del plan que se estaba haciendo (para cerrarla sin duplicar horas). */
   blockId?: string;
 }) {
+  const { tenant: prisma, userId } = await currentTenant();
   const topic = await prisma.topic.findUnique({
     where: { id: data.topicId },
     include: { subject: true },
@@ -319,7 +329,7 @@ export async function recordStudySession(data: {
   });
 
   // 3. Actualizar racha del usuario
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+  const user = await prisma.userProfile.findUnique({ where: { id: userId } });
   if (user) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -340,7 +350,7 @@ export async function recordStudySession(data: {
     }
 
     await prisma.userProfile.update({
-      where: { id: 'user_default' },
+      where: { id: userId },
       data: {
         streakCurrent: newStreak,
         streakBest: Math.max(newStreak, user.streakBest),
@@ -373,6 +383,7 @@ export async function createErrorLog(data: {
   keyLesson: string;
   correctiveAction: string;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const error = await prisma.errorLog.create({
     data: {
       subjectId: data.subjectId,
@@ -409,6 +420,7 @@ export async function createErrorLog(data: {
  * Marca un error como superado/dominado o pendiente.
  */
 export async function toggleMasterError(errorId: string) {
+  const { tenant: prisma } = await currentTenant();
   const err = await prisma.errorLog.findUnique({ where: { id: errorId } });
   if (!err) return { success: false };
 
@@ -439,6 +451,7 @@ export async function createExam(data: {
   targetGrade: number;
   notes?: string;
 }) {
+  const { tenant: prisma } = await currentTenant();
   await prisma.exam.create({
     data: {
       subjectId: data.subjectId,
@@ -476,6 +489,7 @@ export async function updateExam(
     notes?: string;
   }
 ) {
+  const { tenant: prisma } = await currentTenant();
   const existing = await prisma.exam.findUnique({ where: { id: examId } });
   if (!existing) return { success: false, error: 'Ese examen ya no existe.' };
 
@@ -514,6 +528,7 @@ export async function updateExam(
  * examen asociado, con su nota y sus preguntas.
  */
 export async function deleteExam(examId: string) {
+  const { tenant: prisma } = await currentTenant();
   const existing = await prisma.exam.findUnique({ where: { id: examId } });
   if (!existing) return { success: false, error: 'Ese examen ya no existe.' };
 
@@ -533,6 +548,7 @@ export async function deleteExam(examId: string) {
  * el planificador, que le da urgencia a algo que ya ocurrió.
  */
 export async function toggleExamCompleted(examId: string) {
+  const { tenant: prisma } = await currentTenant();
   const existing = await prisma.exam.findUnique({ where: { id: examId } });
   if (!existing) return { success: false, error: 'Ese examen ya no existe.' };
 
@@ -552,7 +568,8 @@ export async function toggleExamCompleted(examId: string) {
  * Cambia el modo de estudio (Zona de Confort vs Modo Atleta) y recalcula el plan.
  */
 export async function switchStudyMode(mode: StudyMode) {
-  await regenerateWeeklyPlan(mode);
+  const { tenant: prisma, userId } = await currentTenant();
+  await regenerateWeeklyPlan(userId, mode);
   updateTag('perfil');
   revalidatePath('/');
   updateTag('cuartel');
@@ -564,9 +581,10 @@ export async function switchStudyMode(mode: StudyMode) {
  * Fuerza el recálculo dinámico del plan de estudio.
  */
 export async function triggerRecalculatePlan() {
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+  const { tenant: prisma, userId } = await currentTenant();
+  const user = await prisma.userProfile.findUnique({ where: { id: userId } });
   const mode = (user?.studyMode as StudyMode) || 'athlete';
-  await regenerateWeeklyPlan(mode);
+  await regenerateWeeklyPlan(userId, mode);
   revalidatePath('/');
   updateTag('cuartel');
   revalidatePath('/planificador');
@@ -582,6 +600,7 @@ export async function createNote(data: {
   content: string;
   tags?: string;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const note = await prisma.note.create({
     data: {
       topicId: data.topicId,
@@ -606,6 +625,7 @@ export async function updateNote(data: {
   content: string;
   tags?: string;
 }) {
+  const { tenant: prisma } = await currentTenant();
   await prisma.note.update({
     where: { id: data.id },
     data: {
@@ -624,6 +644,7 @@ export async function updateNote(data: {
  * Elimina un apunte.
  */
 export async function deleteNote(id: string) {
+  const { tenant: prisma } = await currentTenant();
   await prisma.note.delete({ where: { id } });
   revalidatePath('/apuntes');
   return { success: true };
@@ -638,6 +659,7 @@ export async function createCustomSubject(data: {
   isPhaseGeneral: boolean;
   pauWeight: number;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const subject = await prisma.subject.create({
     data: {
       name: data.name,
@@ -674,6 +696,7 @@ export async function createCustomTopic(data: {
   title: string;
   difficulty: number;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const topic = await prisma.topic.create({
     data: {
       subjectId: data.subjectId,
@@ -700,6 +723,7 @@ export async function createCustomTopic(data: {
  * que la fecha en que se explicó.
  */
 export async function setTopicStatus(topicId: string, status: TopicStatus) {
+  const { tenant: prisma } = await currentTenant();
   if (!isTopicStatus(status)) return { success: false, error: 'Estado no válido' };
 
   const topic = await prisma.topic.findUnique({ where: { id: topicId } });
@@ -740,6 +764,7 @@ export async function setTopicStatus(topicId: string, status: TopicStatus) {
  * impecable que no coincide con lo que le van a preguntar el jueves.
  */
 export async function saveClassMethod(topicId: string, method: string) {
+  const { tenant: prisma } = await currentTenant();
   const topic = await prisma.topic.findUnique({ where: { id: topicId }, select: { id: true } });
   if (!topic) return { success: false, error: 'Esa unidad no existe.' };
 
@@ -758,6 +783,7 @@ export async function saveClassMethod(topicId: string, method: string) {
 }
 
 export async function markTopicSeenInClass(topicId: string) {
+  const { tenant: prisma } = await currentTenant();
   const topic = await prisma.topic.findUnique({
     where: { id: topicId },
     include: { subject: true },
@@ -824,6 +850,7 @@ export async function markTopicSeenInClass(topicId: string) {
  * empezada por contar lo que ha hecho en clase.
  */
 export async function registrarAvanceDeClase(subjectId: string, answer: string) {
+  const { tenant: prisma, userId } = await currentTenant();
   const subject = await prisma.subject.findUnique({
     where: { id: subjectId },
     include: { topics: { orderBy: { unitNumber: 'asc' } } },
@@ -951,7 +978,7 @@ export async function registrarAvanceDeClase(subjectId: string, answer: string) 
   // pendiente: lo completado y lo que está en marcha se queda como está.
   let planSummary: { headline: string; primera: string | null } | null = null;
   try {
-    const plan = await regenerateTodayPlan(now);
+    const plan = await regenerateTodayPlan(userId, now);
     const first = plan.sessions.find((session) => !session.isCompleted) ?? null;
     planSummary = {
       headline: plan.headline,
@@ -982,6 +1009,7 @@ export async function updateTopicDetails(data: {
   term?: number | null;
   difficulty?: number;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const topic = await prisma.topic.findUnique({ where: { id: data.topicId } });
   if (!topic) return { success: false, error: 'Unidad no encontrada' };
 
@@ -1015,6 +1043,7 @@ export async function addTemarioUnit(data: {
   term?: number | null;
   difficulty?: number;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const title = data.title?.trim();
   if (!title) return { success: false, error: 'Escribe un título para la unidad' };
 
@@ -1043,6 +1072,7 @@ export async function addTemarioUnit(data: {
  * Borra una unidad del temario (y, en cascada, sus bloques y errores).
  */
 export async function deleteTemarioUnit(topicId: string) {
+  const { tenant: prisma } = await currentTenant();
   const topic = await prisma.topic.findUnique({ where: { id: topicId } });
   if (!topic) return { success: false, error: 'Unidad no encontrada' };
 
@@ -1060,6 +1090,7 @@ export async function deleteTemarioUnit(topicId: string) {
  * cuándo se dieron), así la proyección de fin de temario no se falsea.
  */
 export async function setCourseProgressFrom(subjectId: string, topicId: string) {
+  const { tenant: prisma } = await currentTenant();
   const topic = await prisma.topic.findUnique({ where: { id: topicId } });
   if (!topic || topic.subjectId !== subjectId) {
     return { success: false, error: 'Unidad no encontrada en esa asignatura' };
@@ -1093,6 +1124,7 @@ export async function setCourseProgressFrom(subjectId: string, topicId: string) 
  * app no lo presenta como una medición objetiva.
  */
 export async function setTopicSelfAssessment(topicId: string, level: number | null) {
+  const { tenant: prisma } = await currentTenant();
   const topic = await prisma.topic.findUnique({ where: { id: topicId } });
   if (!topic) return { success: false, error: 'Unidad no encontrada' };
 
@@ -1125,6 +1157,7 @@ export async function declareSubjectGrades(data: {
   currentGrade: number;
   targetGrade: number;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const subject = await prisma.subject.findUnique({ where: { id: data.subjectId } });
   if (!subject) return { success: false, error: 'Asignatura no encontrada' };
 
@@ -1160,6 +1193,7 @@ export async function importTemario(data: {
   source?: string;
   mode?: 'replace' | 'merge';
 }) {
+  const { tenant: prisma, userId } = await currentTenant();
   const subject = await prisma.subject.findUnique({ where: { id: data.subjectId } });
   if (!subject) return { success: false as const, error: 'Asignatura no encontrada' };
 
@@ -1179,6 +1213,7 @@ export async function importTemario(data: {
   if (mode === 'replace') {
     try {
       backup = await writeTemarioBackup(
+        userId,
         subject.id,
         subject.name,
         'Copia previa a sustituir tu temario desde /temario'
@@ -1246,8 +1281,8 @@ export async function importTemario(data: {
   }
 
   // El plan de la semana se rehace con el temario que acabas de cargar.
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
-  const plan = await regenerateWeeklyPlan((user?.studyMode as StudyMode) || 'athlete');
+  const user = await prisma.userProfile.findUnique({ where: { id: userId } });
+  const plan = await regenerateWeeklyPlan(userId, (user?.studyMode as StudyMode) || 'athlete');
   const total = await prisma.topic.count({ where: { subjectId: subject.id } });
 
   revalidateTemario();
@@ -1277,6 +1312,7 @@ export async function importTemario(data: {
  * Sube o baja una unidad en el orden del temario, renumerando la asignatura.
  */
 export async function moveTemarioUnit(topicId: string, direction: 'up' | 'down') {
+  const { tenant: prisma, userId } = await currentTenant();
   const topic = await prisma.topic.findUnique({ where: { id: topicId } });
   if (!topic) return { success: false, error: 'Unidad no encontrada' };
 
@@ -1294,7 +1330,7 @@ export async function moveTemarioUnit(topicId: string, direction: 'up' | 'down')
   await withTransaction(async (tx) => {
     for (const [position, unit] of reordered.entries()) {
       await tx.topic.update({
-        where: { id: unit.id },
+        where: { id: unit.id, userId },
         data: { unitNumber: position + 1 },
       });
     }

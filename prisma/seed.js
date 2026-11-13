@@ -22,6 +22,11 @@ const { PrismaClient } = require('@prisma/client');
 const { snapshotDatabase } = require('../scripts/db-backup.js');
 
 const prisma = new PrismaClient();
+const userId = process.env.BRAINUP_USER_ID?.trim();
+if (!userId) {
+  console.error('Falta BRAINUP_USER_ID: el seed necesita el UUID de la cuenta de Supabase Auth.');
+  process.exit(1);
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -44,7 +49,7 @@ async function main() {
       prisma.srsReview.count(),
       prisma.errorLog.count(),
       prisma.studySession.count(),
-      prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+      prisma.userProfile.findUnique({ where: { id: userId } }),
     ]);
 
   const realData =
@@ -85,28 +90,28 @@ async function main() {
   );
 
   // 2. Limpieza de tablas
-  await prisma.classPeriod.deleteMany();
-  await prisma.moodleTask.deleteMany();
-  await prisma.note.deleteMany();
-  await prisma.pauExamSession.deleteMany();
-  await prisma.aiMessage.deleteMany();
-  await prisma.aiConversation.deleteMany();
-  await prisma.aiAgent.deleteMany();
-  await prisma.habitLog.deleteMany();
-  await prisma.habit.deleteMany();
-  await prisma.errorLog.deleteMany();
-  await prisma.studySession.deleteMany();
-  await prisma.studyBlock.deleteMany();
-  await prisma.exam.deleteMany();
-  await prisma.topic.deleteMany();
-  await prisma.subject.deleteMany();
-  await prisma.userProfile.deleteMany();
+  await prisma.classPeriod.deleteMany({ where: { userId } });
+  await prisma.moodleTask.deleteMany({ where: { userId } });
+  await prisma.note.deleteMany({ where: { userId } });
+  await prisma.pauExamSession.deleteMany({ where: { userId } });
+  await prisma.aiMessage.deleteMany({ where: { userId } });
+  await prisma.aiConversation.deleteMany({ where: { userId } });
+  await prisma.aiAgent.deleteMany({ where: { userId } });
+  await prisma.habitLog.deleteMany({ where: { userId } });
+  await prisma.habit.deleteMany({ where: { userId } });
+  await prisma.errorLog.deleteMany({ where: { userId } });
+  await prisma.studySession.deleteMany({ where: { userId } });
+  await prisma.studyBlock.deleteMany({ where: { userId } });
+  await prisma.exam.deleteMany({ where: { userId } });
+  await prisma.topic.deleteMany({ where: { userId } });
+  await prisma.subject.deleteMany({ where: { userId } });
+  await prisma.userProfile.deleteMany({ where: { id: userId } });
 
   // 3. Perfil. En modo limpio no se inventa ni la racha ni un calendario de
   // Moodle: la puesta a punto pregunta las horas reales y la app mide el resto.
   const user = await prisma.userProfile.create({
     data: {
-      id: 'user_default',
+      id: userId,
       name: 'Santiago',
       modality: '1º de Bachillerato (Ciencias y Tecnología)',
       targetGradePau: 13.5,
@@ -217,6 +222,7 @@ async function main() {
   for (const s of subjectsData) {
     const subject = await prisma.subject.create({
       data: {
+        userId,
         name: s.name,
         color: s.color,
         pauWeight: s.pauWeight,
@@ -231,6 +237,7 @@ async function main() {
     // Catedrático
     await prisma.aiAgent.create({
       data: {
+        userId,
         subjectId: subject.id,
         name: `Catedrático de ${s.name}`,
         specialty: `Dominio curricular y preparación estratégica de 1º de Bachillerato para ${s.name}`,
@@ -310,6 +317,7 @@ async function main() {
       const periodInfo = periodsTemplate[item.p - 1];
       await prisma.classPeriod.create({
         data: {
+          userId,
           dayOfWeek: item.day,
           period: item.p,
           startTime: periodInfo.startTime,
@@ -324,6 +332,7 @@ async function main() {
     const now = new Date();
     await prisma.moodleTask.create({
       data: {
+        userId,
         title: 'Boletín 3: Asociación de Resistencias y Leyes de Kirchhoff',
         description:
           'Resolver los ejercicios 1 al 8 de la ficha subida a Moodle. Justificar los cálculos de potencia.',
@@ -336,6 +345,7 @@ async function main() {
 
     await prisma.moodleTask.create({
       data: {
+        userId,
         title: 'Problemas de Dinámica: Plano Inclinado con Rozamiento',
         description:
           'Entregar en PDF el diagrama de cuerpo libre y las ecuaciones escalares de los ejercicios 12 y 14.',
@@ -348,6 +358,7 @@ async function main() {
 
     await prisma.moodleTask.create({
       data: {
+        userId,
         title: 'Disertación Filosófica: ¿Es la Ciencia un Saber Infalible?',
         description:
           'Extensión máxima de 2 caras. Utilizar la crítica inductivista de Popper o el empirismo de Hume.',
@@ -363,6 +374,7 @@ async function main() {
     //    punto, con la fecha que él diga).
     await prisma.exam.create({
       data: {
+        userId,
         subjectId: mathSub.id,
         title: 'Examen 2ª Evaluación: Trigonometría y Vectores',
         examDate: new Date(now.getTime() + 8 * 86400000),
@@ -375,6 +387,7 @@ async function main() {
 
     await prisma.exam.create({
       data: {
+        userId,
         subjectId: tecSub.id,
         title: 'Examen Trimestral: Ensayos de Tracción y Circuitos',
         examDate: new Date(now.getTime() + 12 * 86400000),
@@ -387,6 +400,7 @@ async function main() {
 
     await prisma.exam.create({
       data: {
+        userId,
         subjectId: fqSub.id,
         title: 'Parcial Trimestral: Dinámica de Newton y Trabajo/Energía',
         examDate: new Date(now.getTime() + 16 * 86400000),
@@ -422,7 +436,7 @@ async function main() {
     ];
 
     for (const h of habits) {
-      await prisma.habit.create({ data: h });
+      await prisma.habit.create({ data: { ...h, userId } });
     }
   }
 

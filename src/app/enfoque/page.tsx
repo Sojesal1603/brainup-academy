@@ -1,6 +1,6 @@
 import nextDynamic from 'next/dynamic';
 import { Suspense } from 'react';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
 
 // La sala (temporizador, ondas, registro de sesión) es lo más pesado de la
@@ -17,6 +17,7 @@ export default async function FocusPage({
 }: {
   searchParams: Promise<{ block?: string }>;
 }) {
+  const { tenant: prisma } = await currentTenant();
   // Si se llega desde una sesión del plan, el bloque manda: tema, técnica,
   // duración y los minutos que ya se hicieron antes de pausarla.
   const { block: blockId } = await searchParams;

@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import { runAiText, hasAiProvider, TutorError } from './aiEngine';
 import { loadMaintenanceInput } from './maintenanceData';
 import { applyFixPlan } from './maintenanceApply';
@@ -258,8 +258,10 @@ function buildTriageMessage(input: {
  * que alguien esté delante.
  */
 export async function triageReportedIssues(
+  userId: string,
   options: { limit?: number; log?: (line: string) => void } = {}
 ): Promise<IssueTriageResult> {
+  const prisma = db(userId);
   const log = options.log ?? (() => {});
   const limit = Math.max(1, Math.min(options.limit ?? TRIAGE_BATCH, 20));
 
@@ -290,7 +292,7 @@ export async function triageReportedIssues(
 
   if (issues.length === 0) return empty;
 
-  const input = await loadMaintenanceInput();
+  const input = await loadMaintenanceInput(userId);
   const findings = scanAll(input);
   const fixes = allFixes(input);
 
@@ -333,7 +335,7 @@ export async function triageReportedIssues(
   let decisions: TriageDecision[] = [];
 
   try {
-    const memory = await loadMemoryBlock(MEMORY_SCOPE_MAINTENANCE);
+    const memory = await loadMemoryBlock(userId, MEMORY_SCOPE_MAINTENANCE);
     const reply = await runAiText({
       systemInstruction: buildTriageSystemInstruction(),
       message: buildTriageMessage({
@@ -420,7 +422,7 @@ export async function triageReportedIssues(
       continue;
     }
 
-    const result = await applyFixPlan([fix]);
+    const result = await applyFixPlan(userId, [fix]);
     problems.push(...result.problems);
     const applied = result.applied.reduce((sum, item) => sum + item.count, 0);
     appliedTotal += applied;
@@ -463,9 +465,9 @@ export async function triageReportedIssues(
 }
 
 /** Cuántos reportes tuyos están esperando a que alguien los mire. */
-export async function countPendingReports(): Promise<number> {
+export async function countPendingReports(userId: string): Promise<number> {
   try {
-    return await prisma.systemIssue.count({ where: { source: 'alumno', status: 'abierto' } });
+    return await db(userId).systemIssue.count({ where: { source: 'alumno', status: 'abierto' } });
   } catch {
     return 0;
   }

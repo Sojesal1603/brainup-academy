@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 import { syncMoodleFeed } from '@/lib/moodle';
 
 interface MoodleSyncBody {
@@ -7,6 +8,8 @@ interface MoodleSyncBody {
 }
 
 export async function POST(request: Request) {
+  const user = await requireUser();
+  const prisma = db(user.id);
   let body: MoodleSyncBody;
   try {
     body = (await request.json()) as MoodleSyncBody;
@@ -16,8 +19,8 @@ export async function POST(request: Request) {
 
   const providedUrl = typeof body.url === 'string' ? body.url.trim() : '';
 
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
-  const feedUrl = providedUrl || (user?.moodleFeedUrl || '').trim();
+  const profile = await prisma.userProfile.findUnique({ where: { id: user.id } });
+  const feedUrl = providedUrl || (profile?.moodleFeedUrl || '').trim();
 
   if (!feedUrl) {
     return NextResponse.json(
@@ -30,12 +33,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const stats = await syncMoodleFeed(feedUrl);
+    const stats = await syncMoodleFeed(user.id, feedUrl);
     const lastSync = new Date();
 
     // Solo guardamos el enlace cuando la sincronización ha funcionado.
     await prisma.userProfile.update({
-      where: { id: 'user_default' },
+      where: { id: user.id },
       data: {
         ...(providedUrl ? { moodleFeedUrl: providedUrl } : {}),
         lastMoodleSync: lastSync,

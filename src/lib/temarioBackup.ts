@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { prisma } from './prisma';
+import { db } from './db';
 
 /**
  * Copia de seguridad del temario de una asignatura antes de sustituirlo.
@@ -9,11 +9,12 @@ import { prisma } from './prisma';
  * temario de nadie sin dejar una red antes.
  */
 export async function writeTemarioBackup(
+  userId: string,
   subjectId: string,
   subjectName: string,
   motivo: string
 ): Promise<string | null> {
-  const topics = await prisma.topic.findMany({
+  const topics = await db(userId).topic.findMany({
     where: { subjectId },
     orderBy: [{ unitNumber: 'asc' }],
   });

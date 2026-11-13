@@ -15,6 +15,7 @@
  * guardan en un temporal antes de tocar nada.
  */
 const fs = require('fs');
+const { getTestUserId } = require('./testUser.js');
 const os = require('os');
 const path = require('path');
 const { PrismaClient } = require('@prisma/client');
@@ -36,7 +37,7 @@ async function post(url) {
 }
 
 async function run() {
-  const profile = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+  const profile = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
   fs.writeFileSync(
     TMP_FILE,
     JSON.stringify({ moodleFeedUrl: profile.moodleFeedUrl, lastMoodleSync: profile.lastMoodleSync }),
@@ -67,7 +68,7 @@ async function run() {
   const bad = await post('https://moodle.invalido.example/calendario.ics');
   console.log('\nEnlace inválido →', bad.status, '|', bad.data?.error);
 
-  const profileAfter = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+  const profileAfter = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
   console.log('\nÚltima sincronización registrada:', profileAfter.lastMoodleSync?.toISOString());
   console.log('\nLas tareas demo siguen en la base para que las veas en el Cuartel.');
   console.log('Para dejarla como estaba: npm run verify:moodle -- cleanup');
@@ -77,7 +78,7 @@ async function cleanup() {
   const del = await p.moodleTask.deleteMany({ where: { externalId: { startsWith: 'demo-' } } });
   const saved = JSON.parse(fs.readFileSync(TMP_FILE, 'utf8'));
   await p.userProfile.update({
-    where: { id: 'user_default' },
+    where: { id: await getTestUserId() },
     data: { moodleFeedUrl: saved.moodleFeedUrl, lastMoodleSync: saved.lastMoodleSync },
   });
   const total = await p.moodleTask.count();

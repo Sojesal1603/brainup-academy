@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { ensureUserProfile } from '@/lib/userProfile';
 import {
   challengeProgress,
@@ -28,13 +28,14 @@ export const dynamic = 'force-dynamic';
  * podría verse al 90% y cerrarse como conseguido en el mismo segundo.
  */
 export default async function ChallengesPage() {
+  const { user: authUser, tenant: prisma } = await currentTenant();
   const now = new Date();
   const weekKey = weekKeyOf(now);
   const weekStart = weekStartOf(now);
   const weekLabel = weekRangeLabel(weekStart);
 
   const [profile, subjects, weekRows, pastRows, workData] = await Promise.all([
-    ensureUserProfile(),
+    ensureUserProfile(authUser.id),
     prisma.subject.findMany({ select: { id: true, name: true } }),
     prisma.weeklyChallenge.findMany({ where: { weekKey }, orderBy: { createdAt: 'asc' } }),
     prisma.weeklyChallenge.findMany({
@@ -42,7 +43,7 @@ export default async function ChallengesPage() {
       orderBy: [{ weekStart: 'desc' }, { createdAt: 'asc' }],
       take: 60,
     }),
-    loadWeekWorkData(currentWeekWindow(now)),
+    loadWeekWorkData(authUser.id, currentWeekWindow(now)),
   ]);
 
   const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));

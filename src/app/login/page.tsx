@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import { ArrowRight, Lock, ShieldAlert } from 'lucide-react';
-import { readAuthConfig, safeNextPath } from '@/lib/authGate';
+import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
+import { safeNextPath } from '@/lib/requestUrl';
 
 /**
  * La puerta de entrada.
@@ -10,9 +11,8 @@ import { readAuthConfig, safeNextPath } from '@/lib/authGate';
  * lateral, la cabecera o el menú del móvil detrás de un formulario que todavía
  * no ha dejado entrar a nadie.
  *
- * No es una página de «usuario registrado»: hay un solo usuario, el del `.env`.
- * Sin base de datos, sin recuperación de contraseña y sin nada que perder si el
- * móvil no tiene cobertura: es un formulario HTML normal.
+ * No hay registro público: las cuentas se crean desde Supabase y el alta
+ * anónima está deshabilitada en el proyecto. Esta pantalla solo inicia sesión.
  */
 
 export const dynamic = 'force-dynamic';
@@ -23,10 +23,11 @@ export const metadata = {
 };
 
 const MENSAJES: Record<string, string> = {
-  '1': 'Usuario o contraseña incorrectos.',
+  '1': 'Email o contraseña incorrectos.',
   limite: 'Demasiados intentos seguidos. Espera unos minutos y vuelve a probar.',
   config:
-    'Las credenciales no están configuradas en el servidor. Define AUTH_USER y AUTH_PASSWORD en el entorno.',
+    'Falta la configuración de Supabase Auth en el servidor. Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.',
+  sesion: 'Tu sesión ha caducado. Vuelve a entrar.',
 };
 
 export default async function LoginPage({
@@ -35,9 +36,9 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string; next?: string }>;
 }) {
   const { error, next } = await searchParams;
-  const config = readAuthConfig();
+  const configurado = hasSupabaseAuthConfig();
   const destino = safeNextPath(next);
-  const aviso = error ? MENSAJES[error] : null;
+  const aviso = error ? MENSAJES[error] ?? MENSAJES['1'] : null;
 
   return (
     <div className="fixed inset-0 z-[120] overflow-y-auto bg-[#0a0a0c]">
@@ -50,12 +51,15 @@ export default async function LoginPage({
       <div className="relative flex min-h-full items-center justify-center p-5">
         <div className="w-full max-w-sm space-y-5 rounded-3xl glass-card p-6 shadow-2xl">
           <div className="flex items-center gap-3">
+            {/* Sin optimizador: así un logo nuevo no queda oculto por la
+                miniatura cacheada de `/_next/image`. */}
             <Image
               src="/logo-brainup.png"
               alt="Logo de BrainUp Academy"
               width={40}
               height={40}
               priority
+              unoptimized
               className="h-10 w-10 rounded-xl"
             />
             <div className="min-w-0">
@@ -72,23 +76,21 @@ export default async function LoginPage({
               <span>Acceso privado</span>
             </h1>
             <p className="text-xs leading-relaxed text-slate-400">
-              Esta instalación es de una sola persona. Escribe tu usuario y tu contraseña para
-              entrar; la sesión queda abierta en este dispositivo durante 30 días.
+              Entra con la cuenta que te ha creado el centro. No hay registro público: cada alumno
+              ve solo sus datos.
             </p>
           </div>
 
-          {!config ? (
+          {!configurado ? (
             <div
               role="alert"
               className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-200"
             >
               <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
-                Faltan <code className="font-mono">AUTH_USER</code> y{' '}
-                <code className="font-mono">AUTH_PASSWORD</code> en el entorno del servidor. En
-                Netlify se ponen en <em>Site configuration → Environment variables</em>; en local,
-                en el archivo <code className="font-mono">.env</code>. Sin ellas la app está
-                abierta.
+                Faltan <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> y{' '}
+                <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> en el entorno del
+                servidor. Sin ellas no se puede iniciar sesión.
               </span>
             </div>
           ) : (
@@ -98,35 +100,35 @@ export default async function LoginPage({
 
               <div className="space-y-1">
                 <label
-                  htmlFor="usuario"
+                  htmlFor="email"
                   className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
                 >
-                  Usuario
+                  Email
                 </label>
                 <input
-                  id="usuario"
-                  name="usuario"
-                  type="text"
+                  id="email"
+                  name="email"
+                  type="email"
                   required
                   autoFocus
                   autoComplete="username"
                   spellCheck={false}
                   autoCapitalize="none"
                   className="w-full rounded-xl border border-white/10 bg-[#080d18] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-emerald-400/60 focus:outline-none focus:ring-1 focus:ring-emerald-400/40"
-                  placeholder="Tu usuario"
+                  placeholder="tu@email.com"
                 />
               </div>
 
               <div className="space-y-1">
                 <label
-                  htmlFor="contrasena"
+                  htmlFor="password"
                   className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
                 >
                   Contraseña
                 </label>
                 <input
-                  id="contrasena"
-                  name="contrasena"
+                  id="password"
+                  name="password"
                   type="password"
                   required
                   autoComplete="current-password"
@@ -155,8 +157,8 @@ export default async function LoginPage({
           )}
 
           <p className="text-[10px] leading-relaxed text-slate-500">
-            La contraseña viaja solo a este servidor y se compara con la del entorno: no se guarda
-            en la base, ni en el navegador, ni en ningún registro.
+            La contraseña se envía directamente a Supabase Auth. BrainUp no la guarda ni la
+            registra.
           </p>
         </div>
       </div>

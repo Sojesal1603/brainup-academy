@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Download, FileText, GraduationCap, User } from 'lucide-react';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import NoteRenderer from '@/components/apuntes/NoteRenderer';
 import PrintButton from './PrintButton';
 
@@ -178,6 +178,7 @@ export default async function PrintNotesPage({
 }: {
   searchParams: Promise<{ note?: string; subject?: string }>;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const { note: noteId, subject: subjectId } = await searchParams;
 
   if (!noteId && !subjectId) {

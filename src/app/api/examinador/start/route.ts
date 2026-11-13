@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 import { buildEbauPackage } from '@/lib/ebauSimulator';
 import {
   getEbauCommunity,
@@ -14,6 +15,8 @@ export const dynamic = 'force-dynamic';
  * que el siguiente simulacro la use por defecto.
  */
 export async function POST(request: NextRequest) {
+  const user = await requireUser();
+  const prisma = db(user.id);
   const body = (await request.json().catch(() => null)) as
     | { subjectId?: unknown; community?: unknown }
     | null;
@@ -37,13 +40,13 @@ export async function POST(request: NextRequest) {
 
   if (requested && requested !== subject.user?.community) {
     await prisma.userProfile.updateMany({
-      where: { id: 'user_default' },
+      where: { id: user.id },
       data: { community: community.code },
     });
   }
 
   try {
-    const pkg = await buildEbauPackage({
+    const pkg = await buildEbauPackage(user.id, {
       subjectId,
       communityCode: community.code,
     });

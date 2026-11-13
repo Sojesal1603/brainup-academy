@@ -1,5 +1,6 @@
 import { NextResponse, after } from 'next/server';
-import { prisma, withTransaction } from '@/lib/prisma';
+import { withTransaction } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import {
   MEMORY_SCOPE_COORDINATOR,
   loadMemoryBlock,
@@ -69,6 +70,7 @@ function trimHistory<T>(rows: T[]): T[] {
 }
 
 export async function POST(request: Request) {
+  const { user: authUser, tenant } = await currentTenant();
   let body: SetupRequestBody;
   try {
     body = (await request.json()) as SetupRequestBody;
@@ -99,17 +101,17 @@ export async function POST(request: Request) {
 
   try {
     const conversation = conversationId
-      ? await prisma.aiConversation.findFirst({
+      ? await tenant.aiConversation.findFirst({
           where: { id: conversationId, agentId: null, title: SETUP_CONVERSATION_TITLE },
         })
-      : await prisma.aiConversation.findFirst({
+      : await tenant.aiConversation.findFirst({
           where: { agentId: null, title: SETUP_CONVERSATION_TITLE },
           orderBy: { createdAt: 'desc' },
         });
 
     const activeConversation =
       conversation ??
-      (await prisma.aiConversation.create({
+      (await tenant.aiConversation.create({
         data: { title: SETUP_CONVERSATION_TITLE },
       }));
 
@@ -119,7 +121,7 @@ export async function POST(request: Request) {
      * una etiqueta, y menos cuando pide que se repare lo que ha quedado mal.
      */
     if (wantsUndo(message)) {
-      undoResult = await undoLastSetupChange();
+      undoResult = await undoLastSetupChange(authUser.id);
       undoChanged = undoResult.restored.length > 0;
       if (undoChanged) {
         console.log('[puesta-a-punto] deshecho el último cambio:', undoResult.restored.join(' | '));
@@ -127,15 +129,15 @@ export async function POST(request: Request) {
     }
 
     const [historyRows, state, memoryBlock] = await Promise.all([
-      prisma.aiMessage.findMany({
+      tenant.aiMessage.findMany({
         where: { conversationId: activeConversation.id },
         orderBy: { createdAt: 'asc' },
         select: { role: true, content: true },
       }),
-      getSetupState(),
+      getSetupState(authUser.id),
       // La memoria entre días del coordinador: la entrevista dura varios días y
       // no puede empezar cada mañana preguntando lo que ya se dijo ayer.
-      loadMemoryBlock(MEMORY_SCOPE_COORDINATOR),
+      loadMemoryBlock(authUser.id, MEMORY_SCOPE_COORDINATOR),
     ]);
 
     /**
@@ -143,7 +145,7 @@ export async function POST(request: Request) {
      * así contesta con los problemas que existen en la base y no de memoria.
      */
     const auditArea = reviewArea(message);
-    const audit = auditArea ? await auditSetup(auditArea).catch(() => null) : null;
+    const audit = auditArea ? await auditSetup(authUser.id, auditArea).catch(() => null) : null;
 
     const undoNote =
       undoResult && (undoResult.restored.length > 0 || undoResult.problems.length > 0)
@@ -270,7 +272,7 @@ export async function POST(request: Request) {
     try {
       applied =
         setupActions.length > 0
-          ? await applySetupActions(setupActions, {
+          ? await applySetupActions(authUser.id, setupActions, {
               allowReplace: replaceIntent,
               allowReplaceSubject: intentSubject,
             })
@@ -317,10 +319,16 @@ export async function POST(request: Request) {
       // turno es un fallo visible; duplicarlo ensucia el historial para siempre.
       const [, assistantMessage] = await withTransaction(async (tx) => {
         const userMessage = await tx.aiMessage.create({
-          data: { conversationId: activeConversation.id, role: 'user', content: message },
+          data: {
+            userId: authUser.id,
+            conversationId: activeConversation.id,
+            role: 'user',
+            content: message,
+          },
         });
         const assistant = await tx.aiMessage.create({
           data: {
+            userId: authUser.id,
             conversationId: activeConversation.id,
             role: 'assistant',
             content: assistantText,
@@ -349,11 +357,11 @@ export async function POST(request: Request) {
       // Un turno que cambia datos deja copia del temario: si algo se monta mal,
       // hay de dónde volver aunque el proceso se reinicie.
       if (applied.changed) {
-        const file = await snapshotTemarioIfStale(0).catch(() => null);
+        const file = await snapshotTemarioIfStale(authUser.id, 0).catch(() => null);
         if (file) console.log(`[puesta-a-punto] copia de seguridad del temario: ${file}`);
       }
       try {
-        const remembered = await rememberConversation({
+        const remembered = await rememberConversation(authUser.id, {
           scope: MEMORY_SCOPE_COORDINATOR,
           conversationId: activeConversation.id,
           polish: (raw) => polishMemoryWithAi(raw, 'el coordinador de la puesta a punto'),

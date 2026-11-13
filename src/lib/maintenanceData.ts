@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import { weekKeyOf } from './challenges';
 import { getCandidateChain, getConfiguredProviders, getCooldownSeconds } from './aiEngine';
 import { loadOperationalTrace } from './operationalData';
@@ -51,7 +51,11 @@ function subjectKey(name: string): string {
  */
 const MAX_NOTES_REVIEWED = 200;
 
-export async function loadMaintenanceInput(now: Date = new Date()): Promise<MaintenanceInput> {
+export async function loadMaintenanceInput(
+  userId: string,
+  now: Date = new Date()
+): Promise<MaintenanceInput> {
+  const prisma = db(userId);
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today.getTime() + 86400000);

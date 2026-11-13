@@ -22,6 +22,7 @@
  * todo está en orden. Así sirve también dentro de un script.
  */
 const path = require('path');
+const { getTestUserId } = require('./testUser.js');
 const fs = require('fs');
 const { compilaTs, projectRoot } = require('./lib/compilaTs');
 
@@ -153,7 +154,7 @@ function lastWrite(file) {
 
   // Los arreglos incluyen los de funcionamiento (reiniciar la app si está en
   // bucle de caídas): el doctor tiene que ver lo mismo que el taller y el vigilante.
-  const fixes = maintenanceScan.allFixes(await maintenanceData.loadMaintenanceInput());
+  const fixes = maintenanceScan.allFixes(await maintenanceData.loadMaintenanceInput(await getTestUserId()));
   if (fixes.length > 0) {
     line('Arreglos disponibles', String(fixes.length));
     for (const fix of fixes) {

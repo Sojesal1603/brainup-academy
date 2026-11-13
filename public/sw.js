@@ -28,7 +28,9 @@
  */
 // v5: se dejan de cachear los chunks de Next. Al cambiar el nombre se borran
 // las cachés viejas en `activate`, que son las que podían servir código rancio.
-const CACHE_NAME = 'brainup-v5';
+// v6: cambia el logo, así que hay que soltar los iconos cacheados con la marca
+// anterior.
+const CACHE_NAME = 'brainup-v6';
 
 /** Lo que sí se guarda: recursos propios que no cambian de contenido. */
 function isStaticAsset(url) {

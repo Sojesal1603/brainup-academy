@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { MoodleError } from '@/lib/moodleWs';
 import { connectMoodleAnyWay } from '@/lib/moodleSync';
 import { disconnectMoodle, getMoodleStatus } from '@/lib/moodleWsSync';
+import { requireUser } from '@/lib/auth';
 
 /**
  * Conectar y desconectar Moodle.
@@ -30,6 +31,7 @@ interface ConnectBody {
 }
 
 export async function POST(request: Request) {
+  const user = await requireUser();
   let body: ConnectBody;
   try {
     body = (await request.json()) as ConnectBody;
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const outcome = await connectMoodleAnyWay({
+    const outcome = await connectMoodleAnyWay(user.id, {
       baseUrl,
       token,
       username,
@@ -67,7 +69,7 @@ export async function POST(request: Request) {
       sealPassword: savePassword,
     });
 
-    const status = await getMoodleStatus();
+    const status = await getMoodleStatus(user.id);
     return NextResponse.json({
       ok: true,
       via: outcome.via,
@@ -90,12 +92,14 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE() {
-  await disconnectMoodle();
-  const status = await getMoodleStatus();
+  const user = await requireUser();
+  await disconnectMoodle(user.id);
+  const status = await getMoodleStatus(user.id);
   return NextResponse.json({ ok: true, status });
 }
 
 export async function GET() {
-  const status = await getMoodleStatus();
+  const user = await requireUser();
+  const status = await getMoodleStatus(user.id);
   return NextResponse.json({ ok: true, status });
 }

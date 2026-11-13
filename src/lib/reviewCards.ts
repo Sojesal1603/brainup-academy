@@ -7,7 +7,7 @@
  * lo que ya sabías de ellas, solo actualiza el reverso y la fuente.
  */
 
-import { prisma } from './prisma';
+import { db } from './db';
 import type {
   Flashcard,
   FlashcardsTool,
@@ -15,8 +15,6 @@ import type {
   StudyToolPayload,
   TestTool,
 } from './studyTools';
-
-const DEFAULT_USER_ID = 'user_default';
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -37,23 +35,24 @@ interface CardSeed {
 }
 
 async function upsertCard(
+  userId: string,
   topicId: string,
   kind: string,
   seed: CardSeed
 ): Promise<{ id: string; front: string }> {
+  const prisma = db(userId);
   const front = normalizeFront(seed.front);
   const back = normalizeBack(seed.back);
 
   const row = await prisma.reviewCard.upsert({
     where: {
       userId_topicId_front: {
-        userId: DEFAULT_USER_ID,
+        userId,
         topicId,
         front,
       },
     },
     create: {
-      userId: DEFAULT_USER_ID,
       topicId,
       kind,
       front,
@@ -78,15 +77,16 @@ async function upsertCard(
  * la base: nada de ids inventados desde el navegador.
  */
 export async function registerStudyToolCards(input: {
+  userId: string;
   topicId: string;
   tool: StudyToolPayload;
 }): Promise<StudyToolPayload> {
-  const { topicId, tool } = input;
+  const { userId, topicId, tool } = input;
 
   if (tool.kind === 'flashcards') {
     const cards: Flashcard[] = [];
     for (const card of tool.cards) {
-      const row = await upsertCard(topicId, 'flashcard', card);
+      const row = await upsertCard(userId, topicId, 'flashcard', card);
       cards.push({ ...card, cardId: row.id });
     }
     const next: FlashcardsTool = { ...tool, cards };
@@ -97,7 +97,7 @@ export async function registerStudyToolCards(input: {
     const questions: QuizQuestion[] = [];
     for (const question of tool.questions) {
       const correct = asText(question.options[question.correctIndex]);
-      const row = await upsertCard(topicId, 'test', {
+      const row = await upsertCard(userId, topicId, 'test', {
         front: question.question,
         back: `${correct} — ${question.explanation}`,
         source: question.source,
@@ -113,8 +113,10 @@ export async function registerStudyToolCards(input: {
 
 /** Tarjetas vencidas agrupadas por unidad, para inyectarlas en el plan. */
 export async function dueReviewCardsByTopic(
+  userId: string,
   now: Date = new Date()
 ): Promise<Array<{ topicId: string; count: number }>> {
+  const prisma = db(userId);
   const endOfDay = new Date(now);
   endOfDay.setHours(23, 59, 59, 999);
 
@@ -131,9 +133,11 @@ export async function dueReviewCardsByTopic(
 
 /** Suma segundos de consulta al catedrático a una sesión de Focus activa. */
 export async function incrementTutorSeconds(
+  userId: string,
   sessionId: string,
   seconds: number
 ): Promise<void> {
+  const prisma = db(userId);
   const safe = Math.min(120, Math.max(1, Math.round(seconds)));
   await prisma.focusSession.updateMany({
     where: {

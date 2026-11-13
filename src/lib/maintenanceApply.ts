@@ -1,4 +1,5 @@
-import { prisma, withTransaction } from './prisma';
+import { withTransaction } from './prisma';
+import { db } from './db';
 import { sanitizeNoteContent } from './apuntesIa';
 import { loadMaintenanceInput } from './maintenanceData';
 import { restartAppServer, startWatchedServer } from './serverControl';
@@ -52,10 +53,10 @@ function isMissingRecord(error: unknown): boolean {
  * borrado: si hay una sola, no se borra y se avisa. Así «nunca se borra una unidad
  * con datos» deja de depender de que la foto siga siendo cierta.
  */
-async function deleteTopicIfStillEmpty(topicId: string): Promise<boolean> {
+async function deleteTopicIfStillEmpty(userId: string, topicId: string): Promise<boolean> {
   return withTransaction(async (tx) => {
-    const row = await tx.topic.findUnique({
-      where: { id: topicId },
+    const row = await tx.topic.findFirst({
+      where: { id: topicId, userId },
       select: {
         _count: {
           select: { notes: true, errors: true, studyBlocks: true, sessions: true, srsReviews: true },
@@ -80,13 +81,14 @@ async function deleteTopicIfStillEmpty(topicId: string): Promise<boolean> {
       return false;
     }
 
-    await tx.topic.delete({ where: { id: topicId } });
+    await tx.topic.deleteMany({ where: { id: topicId, userId } });
     return true;
   });
 }
 
 /** Ejecuta una operación concreta. Devuelve `true` si ha tocado algo. */
-async function runOperation(operation: MaintenanceOperation): Promise<boolean> {
+async function runOperation(userId: string, operation: MaintenanceOperation): Promise<boolean> {
+  const prisma = db(userId);
   switch (operation.kind) {
     case 'rename_topic':
       await prisma.topic.update({
@@ -101,7 +103,7 @@ async function runOperation(operation: MaintenanceOperation): Promise<boolean> {
       });
       return true;
     case 'delete_topic':
-      return deleteTopicIfStillEmpty(operation.topicId);
+      return deleteTopicIfStillEmpty(userId, operation.topicId);
     case 'clamp_srs':
       await prisma.topic.update({
         where: { id: operation.topicId },
@@ -186,7 +188,7 @@ async function runOperation(operation: MaintenanceOperation): Promise<boolean> {
      * que no ha hecho.
      */
     case 'restore_temario': {
-      const result = await restoreEmptyTemarios('arreglo del taller de mantenimiento');
+      const result = await restoreEmptyTemarios(userId, 'arreglo del taller de mantenimiento');
       for (const problem of result.problems) {
         console.warn(`[mantenimiento] reponer temario: ${problem}`);
       }
@@ -225,6 +227,7 @@ async function runOperation(operation: MaintenanceOperation): Promise<boolean> {
  * que otro acaba de borrar.
  */
 export async function applyFixPlan(
+  userId: string,
   fixes: MaintenanceFix[],
   options: { onlySafe?: boolean } = {}
 ): Promise<{ applied: Array<{ id: string; label: string; count: number }>; problems: string[] }> {
@@ -237,7 +240,7 @@ export async function applyFixPlan(
     let done = 0;
     for (const operation of fix.operations) {
       try {
-        if (await runOperation(operation)) done += 1;
+        if (await runOperation(userId, operation)) done += 1;
       } catch (error) {
         // Que la fila ya no esté no es un fallo del arreglo: otro plan la ha
         // borrado o alguien la ha quitado mientras se reparaba. El objetivo
@@ -264,9 +267,12 @@ export async function applyFixPlan(
  * pide ninguno en concreto) y los aplica. Al terminar vuelve a contar los
  * hallazgos: eso es lo que permite decir «quedan 3» en lugar de «hecho».
  */
-export async function applyMaintenanceFixes(fixIds?: string[]): Promise<ApplyFixesResult> {
+export async function applyMaintenanceFixes(
+  userId: string,
+  fixIds?: string[]
+): Promise<ApplyFixesResult> {
   try {
-    const pending = allFixes(await loadMaintenanceInput());
+    const pending = allFixes(await loadMaintenanceInput(userId));
     const selectedIds = new Set(
       (fixIds ? pending.filter((fix) => fixIds.includes(fix.id)) : pending.filter((fix) => fix.safe)).map(
         (fix) => fix.id
@@ -289,18 +295,18 @@ export async function applyMaintenanceFixes(fixIds?: string[]): Promise<ApplyFix
     // El tope de vueltas es una red de seguridad: nunca se dan más pasos que
     // planes había.
     for (let guard = 0; selectedIds.size > 0 && guard < 20; guard += 1) {
-      const fresh = allFixes(await loadMaintenanceInput());
+      const fresh = allFixes(await loadMaintenanceInput(userId));
       const next = fresh.find((fix) => selectedIds.has(fix.id));
       if (!next) break;
 
-      const result = await applyFixPlan([next]);
+      const result = await applyFixPlan(userId, [next]);
       applied.push(...result.applied);
       problems.push(...result.problems);
       selectedIds.delete(next.id);
     }
 
     // Qué queda después de arreglar: sirve para saber si el sistema ha quedado limpio.
-    const remaining = scanAll(await loadMaintenanceInput()).length;
+    const remaining = scanAll(await loadMaintenanceInput(userId)).length;
 
     if (applied.length > 0) {
       console.log(`[mantenimiento] aplicado: ${applied.map((item) => item.label).join(' | ')}`);

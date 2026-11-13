@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { ensureUserProfile } from '@/lib/userProfile';
 import {
   BarChart3,
@@ -14,7 +14,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function StatsPage() {
   // Memoizado por petición: el Header del layout ya ha pedido este perfil.
-  const user = await ensureUserProfile();
+  const { user: authUser, tenant: prisma } = await currentTenant();
+  const user = await ensureUserProfile(authUser.id);
 
   const subjects = await prisma.subject.findMany({
     include: {

@@ -1,31 +1,24 @@
 /**
- * La puerta: ninguna página ni API de BrainUp responde sin sesión abierta.
+ * La puerta: ninguna página ni API de BrainUp responde sin sesión de Supabase.
  *
- * En Next 16 este archivo se llama `proxy.ts` (antes `middleware.ts`) y corre en
- * el runtime de Node. Aquí no se toca la base ni el disco: solo se mira la cookie
- * firmada que deja el formulario de `/login` (`src/lib/authGate.ts`).
+ * En Next 16 este archivo se llama `proxy.ts` (antes `middleware.ts`). Hace dos
+ * cosas y ninguna más:
  *
- * Lo que se queda abierto, y por qué:
- *   - `/login` y `/api/auth/*`: sin esto no habría forma de entrar.
- *   - `/api/salud`: es el parte de salud que consultan el lanzador del icono, el
- *     vigilante y el taller (`scripts/abre.js`, `scripts/vigilante.js`). Sin él,
- *     el arranque local se quedaría esperando a que la app conteste.
- *   - Los archivos que el navegador necesita para pintar la propia puerta y para
- *     poder instalarla en el móvil (manifest, iconos, service worker).
+ *   1. Refresca la sesión de Supabase en cada petición. `getUser()` valida el
+ *      JWT contra el servidor de Auth; no se acepta un `userId` de la URL, del
+ *      cuerpo ni de una cabecera.
+ *   2. Corta lo que no tiene sesión: las páginas van a `/login` y las rutas de
+ *      API responden 401 en JSON.
  *
- * Si faltan `AUTH_USER`/`AUTH_PASSWORD` la puerta no se pone (y se avisa una vez
- * en la consola): así una instalación recién clonada sigue funcionando, mientras
- * que en Netlify basta con definir las dos variables para que quede cerrada.
+ * Lo que se queda abierto: `/login`, las rutas de Auth, el parte de salud y los
+ * archivos que el navegador necesita para pintar la puerta o instalar la PWA.
+ * Son públicos por necesidad, no porque tengan datos de nadie.
  */
 
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import {
-  AUTH_COOKIE,
-  appUrl,
-  isAuthDisabled,
-  readAuthConfig,
-  verifySessionToken,
-} from '@/lib/authGate';
+import { hasSupabaseAuthConfig, readSupabaseAuthConfig } from '@/lib/supabaseConfig';
+import { appUrl, safeNextPath } from '@/lib/requestUrl';
 
 /** Rutas exactas que nunca se protegen. */
 const PUBLIC_PATHS = new Set([
@@ -50,72 +43,105 @@ function isPublic(pathname: string): boolean {
   return pathname.startsWith('/_next/') || pathname.startsWith('/__nextjs');
 }
 
-let warnedMissingConfig = false;
+/** Una redirección conserva las cookies que Supabase acaba de refrescar. */
+function redirectWithCookies(url: URL, response: NextResponse): NextResponse {
+  const redirect = NextResponse.redirect(url);
+  for (const cookie of response.cookies.getAll()) {
+    redirect.cookies.set(cookie);
+  }
+  return redirect;
+}
+
+function jsonWithCookies(
+  body: Record<string, unknown>,
+  status: number,
+  response: NextResponse
+): NextResponse {
+  const json = NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
+  for (const cookie of response.cookies.getAll()) {
+    json.cookies.set(cookie);
+  }
+  return json;
+}
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  if (isPublic(pathname)) return NextResponse.next();
-  if (isAuthDisabled()) return NextResponse.next();
 
-  const config = readAuthConfig();
-  if (!config) {
-    if (!warnedMissingConfig) {
-      warnedMissingConfig = true;
-      console.warn(
-        '[auth] Sin AUTH_USER/AUTH_PASSWORD: la app está abierta a quien llegue. ' +
-          'Define las dos variables en el entorno (en Netlify: Site configuration → Environment variables).'
+  // Los estáticos no necesitan pasar por Auth ni por la base.
+  if (pathname.startsWith('/_next/') || pathname.startsWith('/__nextjs')) {
+    return NextResponse.next();
+  }
+
+  if (!hasSupabaseAuthConfig()) {
+    const message =
+      'La app está cerrada porque falta la configuración de Supabase Auth. ' +
+      'Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.';
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { ok: false, error: message },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } }
       );
     }
+    if (pathname === '/login') return NextResponse.next();
+    const loginUrl = appUrl(request, '/login');
+    loginUrl.searchParams.set('error', 'config');
+    return NextResponse.redirect(loginUrl);
+  }
 
-    // En producción no hay puerta abierta por accidente: si faltan las
-    // credenciales, no se puede distinguir a nadie, así que se cierra y se dice
-    // qué falta en vez de enseñar el panel a quien llegue. En desarrollo sigue
-    // abierta para que una instalación recién clonada arranque sin fricción.
-    if (process.env.NODE_ENV === 'production') {
-      const message =
-        'La app está cerrada porque faltan AUTH_USER y AUTH_PASSWORD en el entorno. ' +
-        'Defínelas y vuelve a desplegar (en Netlify: Site configuration → Environment variables).';
-      if (pathname.startsWith('/api/')) {
-        return NextResponse.json(
-          { ok: false, error: message },
-          { status: 503, headers: { 'Cache-Control': 'no-store' } }
-        );
-      }
-      return new NextResponse(
-        `<!doctype html><html lang="es"><meta charset="utf-8"><title>Acceso no configurado</title>` +
-          `<body style="font-family:system-ui;background:#0a0a0c;color:#e2e8f0;padding:2rem">` +
-          `<h1 style="font-size:1rem">Acceso no configurado</h1><p style="font-size:.875rem">${message}</p></body></html>`,
-        {
-          status: 503,
-          headers: { 'content-type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  // El cliente se crea por petición: las cookies son parte de la sesión.
+  let response = NextResponse.next({ request });
+  const { url, anonKey } = readSupabaseAuthConfig();
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        for (const { name, value } of cookiesToSet) {
+          request.cookies.set(name, value);
         }
+        response = NextResponse.next({ request });
+        for (const { name, value, options } of cookiesToSet) {
+          response.cookies.set(name, value, options);
+        }
+      },
+    },
+  });
+
+  // No metas código entre crear el cliente y getUser(): el refresco de tokens
+  // depende de que esta sea la primera llamada.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (pathname === '/login') {
+    if (!user) return response;
+    const destino = safeNextPath(request.nextUrl.searchParams.get('next'));
+    return redirectWithCookies(appUrl(request, destino), response);
+  }
+
+  if (PUBLIC_PATHS.has(pathname)) return response;
+
+  if (!user) {
+    if (pathname.startsWith('/api/')) {
+      return jsonWithCookies(
+        { ok: false, error: 'Sesión no iniciada. Entra en /login.' },
+        401,
+        response
       );
     }
 
-    return NextResponse.next();
+    const loginUrl = appUrl(request, '/login');
+    if (pathname !== '/') {
+      loginUrl.searchParams.set('next', `${pathname}${search}`);
+    }
+    return redirectWithCookies(loginUrl, response);
   }
 
-  const token = request.cookies.get(AUTH_COOKIE)?.value;
-  if (await verifySessionToken(token, config)) {
-    return NextResponse.next();
-  }
-
-  // Una llamada a la API recibe un 401 en JSON; una página, el formulario.
-  if (pathname.startsWith('/api/')) {
-    return NextResponse.json(
-      { ok: false, error: 'Sesión no iniciada. Entra en /login.' },
-      { status: 401, headers: { 'Cache-Control': 'no-store' } }
-    );
-  }
-
-  // El destino se construye con el host por el que ha entrado el navegador
-  // (localhost, la IP de la Wi-Fi o el dominio), no con la dirección interna del
-  // servidor (`0.0.0.0`), que el navegador no puede abrir.
-  const loginUrl = appUrl(request, '/login');
-  if (pathname !== '/') {
-    loginUrl.searchParams.set('next', `${pathname}${search}`);
-  }
-  return NextResponse.redirect(loginUrl);
+  return response;
 }
 
 export const config = {

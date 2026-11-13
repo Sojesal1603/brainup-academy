@@ -3,6 +3,7 @@ import { MoodleError } from '@/lib/moodleWs';
 import { syncMoodleAnyWay } from '@/lib/moodleSync';
 import { MoodleSessionNotConnectedError } from '@/lib/moodleSessionSync';
 import { MoodleNotConnectedError } from '@/lib/moodleWsSync';
+import { requireUser } from '@/lib/auth';
 
 /**
  * Sincroniza apuntes y tareas desde Moodle.
@@ -14,7 +15,8 @@ import { MoodleNotConnectedError } from '@/lib/moodleWsSync';
  */
 export async function POST() {
   try {
-    const { via, stats } = await syncMoodleAnyWay();
+    const user = await requireUser();
+    const { via, stats } = await syncMoodleAnyWay(user.id);
     return NextResponse.json({ ok: true, via, stats });
   } catch (error) {
     if (error instanceof MoodleNotConnectedError || error instanceof MoodleSessionNotConnectedError) {

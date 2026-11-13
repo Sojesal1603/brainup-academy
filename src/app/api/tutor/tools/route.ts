@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { ensureUserProfile } from '@/lib/userProfile';
+import { currentTenant } from '@/lib/tenantContext';
 import { hasAiProviderAsync, hasAnyFreeKey, runAiText, TutorError } from '@/lib/aiEngine';
 import {
   buildStudyToolPrompt,
@@ -64,7 +63,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const agent = await prisma.aiAgent.findUnique({
+  const { user, tenant } = await currentTenant();
+
+  const agent = await tenant.aiAgent.findUnique({
     where: { id: agentId },
     include: {
       subject: {
@@ -94,8 +95,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const user = await ensureUserProfile();
   const focus = typeof body.focus === 'string' ? body.focus.trim().slice(0, 800) : '';
+  const profile = await tenant.userProfile.findUnique({
+    where: { id: user.id },
+    select: { name: true },
+  });
 
   const measured = topics
     .filter((row) => row.masterySource !== 'sin_medir')
@@ -106,7 +110,7 @@ export async function POST(request: Request) {
     agentName: agent.name,
     specialty: agent.specialty,
     subjectName: agent.subject.name,
-    studentName: user.name,
+    studentName: profile?.name ?? 'Estudiante',
     topic: {
       title: topic.title,
       unitNumber: topic.unitNumber,
@@ -154,7 +158,7 @@ export async function POST(request: Request) {
     let persisted = tool;
     if (tool.kind === 'flashcards' || tool.kind === 'test') {
       try {
-        persisted = await registerStudyToolCards({ topicId: topic.id, tool });
+        persisted = await registerStudyToolCards({ userId: user.id, topicId: topic.id, tool });
       } catch (error) {
         console.error('[tutor/herramientas] no se pudieron guardar las tarjetas SM-2:', error);
       }

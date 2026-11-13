@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import { MoodleError } from './moodleWs';
 import { checkMoodleAnyWay, syncMoodleAnyWay } from './moodleSync';
 import { MoodleSessionNotConnectedError } from './moodleSessionSync';
@@ -102,10 +102,11 @@ export function isNotConnectedError(error: unknown): boolean {
  * Cómo está la conexión, **sin llamar a Moodle**: lo que dice la base.
  * Sirve para pintarlo en Ajustes y para decidir si toca comprobar.
  */
-export async function readMoodleHealth(now: Date = new Date()): Promise<MoodleHealth> {
+export async function readMoodleHealth(userId: string, now: Date = new Date()): Promise<MoodleHealth> {
+  const prisma = db(userId);
   const [user, lastCourse] = await Promise.all([
     prisma.userProfile.findUnique({
-      where: { id: 'user_default' },
+      where: { id: userId },
       select: {
         moodleBaseUrl: true,
         moodleToken: true,
@@ -181,7 +182,12 @@ export async function readMoodleHealth(now: Date = new Date()): Promise<MoodleHe
   };
 }
 
-async function openTokenIssue(detail: string, mode: MoodleAuthMode = 'token'): Promise<boolean> {
+async function openTokenIssue(
+  userId: string,
+  detail: string,
+  mode: MoodleAuthMode = 'token'
+): Promise<boolean> {
+  const prisma = db(userId);
   const title = moodleIssueTitle(mode);
   try {
     const existing = await prisma.systemIssue.findFirst({
@@ -210,7 +216,8 @@ async function openTokenIssue(detail: string, mode: MoodleAuthMode = 'token'): P
 }
 
 /** Cierra el aviso de Moodle: cualquiera de los dos, porque solo hay uno vivo. */
-async function closeTokenIssue(resolution: string): Promise<boolean> {
+async function closeTokenIssue(userId: string, resolution: string): Promise<boolean> {
+  const prisma = db(userId);
   try {
     const result = await prisma.systemIssue.updateMany({
       where: {
@@ -234,11 +241,13 @@ async function closeTokenIssue(resolution: string): Promise<boolean> {
  * enfriamiento, así que la ronda siguiente lo vuelve a intentar.
  */
 export async function healMoodleConnection(
+  userId: string,
   options: { force?: boolean; log?: (line: string) => void; now?: Date } = {}
 ): Promise<MoodleHealResult> {
+  const prisma = db(userId);
   const log = options.log ?? (() => {});
   const now = options.now ?? new Date();
-  const before = await readMoodleHealth(now);
+  const before = await readMoodleHealth(userId, now);
 
   if (!before.connected) {
     return { ...before, checked: false, synced: false, note: before.detail };
@@ -258,11 +267,11 @@ export async function healMoodleConnection(
   //    Moodle por la vía que esté puesta (clave o sesión web).
   if (dueForCheck) {
     try {
-      const check = await checkMoodleAnyWay();
+      const check = await checkMoodleAnyWay(userId);
       checked = true;
 
       await prisma.userProfile.update({
-        where: { id: 'user_default' },
+        where: { id: userId },
         data: {
           moodleTokenState: 'ok',
           moodleCheckedAt: now,
@@ -272,7 +281,7 @@ export async function healMoodleConnection(
       });
 
       // Si había un aviso de conexión caída, ya no aplica.
-      const closed = await closeTokenIssue('Resuelto solo: la conexión con Moodle vuelve a funcionar.');
+      const closed = await closeTokenIssue(userId, 'Resuelto solo: la conexión con Moodle vuelve a funcionar.');
       if (closed) log('la conexión con Moodle vuelve a funcionar: aviso cerrado');
     } catch (error) {
       // Sin credenciales guardadas no hay nada que comprobar (y no es un fallo).
@@ -282,7 +291,7 @@ export async function healMoodleConnection(
 
       if (isDeadToken(error)) {
         await prisma.userProfile.update({
-          where: { id: 'user_default' },
+          where: { id: userId },
           data: { moodleTokenState: 'caducado', moodleCheckedAt: now },
         });
 
@@ -294,13 +303,13 @@ export async function healMoodleConnection(
           : 'Moodle ha rechazado la clave guardada (invalidtoken): ha caducado o el centro la ha revocado. ' +
             'La app no puede pedir otra sin ti, porque necesita tu usuario y tu contraseña. ' +
             'Entra en Ajustes → Moodle y vuelve a conectarlo; tus apuntes y tareas ya descargados no se tocan.';
-        const opened = await openTokenIssue(detail, before.mode);
+        const opened = await openTokenIssue(userId, detail, before.mode);
         log(
           `${bySession ? 'Moodle ha dejado de aceptar las credenciales' : 'la clave de Moodle ha caducado'}${opened ? ' (aviso abierto en el taller)' : ''}`
         );
 
         return {
-          ...(await readMoodleHealth(now)),
+          ...(await readMoodleHealth(userId, now)),
           checked: true,
           synced: false,
           note: bySession
@@ -327,14 +336,14 @@ export async function healMoodleConnection(
 
   // 2. ¿Los datos son viejos? Entonces se sincroniza sola.
   if (!before.stale && options.force !== true) {
-    const after = await readMoodleHealth(now);
+    const after = await readMoodleHealth(userId, now);
     return { ...after, checked, synced: false, note: after.detail };
   }
 
   try {
-    const { stats } = await syncMoodleAnyWay({ log });
+    const { stats } = await syncMoodleAnyWay(userId, { log });
     await prisma.userProfile.update({
-      where: { id: 'user_default' },
+      where: { id: userId },
       data: { lastMoodleSync: now, moodleTokenState: 'ok', moodleCheckedAt: now },
     });
 
@@ -343,7 +352,7 @@ export async function healMoodleConnection(
     );
 
     return {
-      ...(await readMoodleHealth(now)),
+      ...(await readMoodleHealth(userId, now)),
       checked,
       synced: true,
       note: `Sincronizado: ${stats.courses} curso(s), ${stats.tasks} tarea(s) y ${stats.materials} apunte(s).`,
@@ -351,10 +360,11 @@ export async function healMoodleConnection(
   } catch (error) {
     if (isDeadToken(error)) {
       await prisma.userProfile.update({
-        where: { id: 'user_default' },
+        where: { id: userId },
         data: { moodleTokenState: 'caducado', moodleCheckedAt: now },
       });
       await openTokenIssue(
+        userId,
         before.mode === 'sesion'
           ? 'Moodle ha dejado de aceptar las credenciales guardadas al sincronizar. ' +
               'Vuelve a conectarlo desde Ajustes → Moodle con tu usuario y contraseña de siempre.'
@@ -364,7 +374,7 @@ export async function healMoodleConnection(
       );
       log('la conexión con Moodle ha dejado de valer al intentar sincronizar');
       return {
-        ...(await readMoodleHealth(now)),
+        ...(await readMoodleHealth(userId, now)),
         checked,
         synced: false,
         note: 'La conexión con Moodle ha dejado de valer: hay que volver a conectarlo desde Ajustes.',

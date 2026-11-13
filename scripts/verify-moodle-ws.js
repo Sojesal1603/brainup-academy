@@ -31,6 +31,7 @@
  * tocar nada y se restaura al terminar, pase lo que pase.
  */
 const fs = require('fs');
+const { getTestUserId } = require('./testUser.js');
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -552,7 +553,7 @@ async function main() {
     return;
   }
 
-  const profile = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+  const profile = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
   fs.writeFileSync(
     PROFILE_BACKUP,
     JSON.stringify({
@@ -667,7 +668,7 @@ async function main() {
       typeof badConnect.data?.error === 'string' && /token/i.test(badConnect.data.error),
       badConnect.data?.error
     );
-    const profileAfterBad = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+    const profileAfterBad = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
     check(
       'No se ha guardado nada al fallar',
       profileAfterBad.moodleToken === profile.moodleToken && profileAfterBad.moodleBaseUrl === profile.moodleBaseUrl
@@ -689,7 +690,7 @@ async function main() {
       badPassword.data?.error
     );
     check('La contraseña mala no se cuela en la respuesta', !badPassword.raw.includes('esta-no-es-mi-contraseña'));
-    const profileAfterBadPassword = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+    const profileAfterBadPassword = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
     check(
       'Una contraseña mala no pisa el perfil guardado',
       profileAfterBadPassword.moodleToken === profile.moodleToken &&
@@ -728,7 +729,7 @@ async function main() {
       JSON.stringify(loginHits.slice(-2))
     );
 
-    const profileByPassword = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+    const profileByPassword = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
     check('La clave conseguida sí se guarda (para usarla desde el servidor)', profileByPassword.moodleToken === TOKEN);
     check(
       'La contraseña no se guarda en ningún campo del perfil',
@@ -747,7 +748,7 @@ async function main() {
       connect.data?.status?.baseUrl
     );
 
-    const profileConnected = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+    const profileConnected = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
     check('El token se queda en la base local (para usarlo desde el servidor)', profileConnected.moodleToken === TOKEN);
     check('Guarda tu id de usuario de Moodle', profileConnected.moodleUserId === USER_ID);
 
@@ -866,7 +867,7 @@ async function main() {
     console.log('\n7. Desconectar borra el token');
     const disconnected = await del('/api/moodle/connect');
     check('La desconexión responde', disconnected.status === 200 && disconnected.data?.ok === true);
-    const profileOut = await p.userProfile.findUnique({ where: { id: 'user_default' } });
+    const profileOut = await p.userProfile.findUnique({ where: { id: await getTestUserId() } });
     check('El token desaparece de la base', !profileOut.moodleToken && !profileOut.moodleBaseUrl);
     const noToken = await p.moodleMaterial.create({
       data: {
@@ -911,7 +912,7 @@ async function main() {
       });
     }
     await p.userProfile.update({
-      where: { id: 'user_default' },
+      where: { id: await getTestUserId() },
       data: JSON.parse(fs.readFileSync(PROFILE_BACKUP, 'utf8')),
     });
     const left = await Promise.all([p.moodleMaterial.count(), p.moodleCourse.count(), p.moodleTask.count()]);

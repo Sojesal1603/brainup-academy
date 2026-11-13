@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma } from './prisma';
+import { currentTenant } from './tenantContext';
 import {
   isRecallRating,
   nextReviewLabel,
@@ -31,6 +31,7 @@ export async function rateStudyCard(
   cardId: string,
   rating: string
 ): Promise<RateCardResult> {
+  const { tenant: prisma } = await currentTenant();
   if (typeof cardId !== 'string' || cardId.length === 0) {
     return { success: false, error: 'Falta la tarjeta que has repasado.' };
   }

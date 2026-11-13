@@ -7,8 +7,7 @@
  * guarda como MoodleTask en la base local, sin duplicados (upsert por UID).
  */
 
-import { prisma } from './prisma';
-import { currentUserId } from './tenant';
+import { db } from './db';
 
 export interface MoodleEvent {
   uid: string;
@@ -144,7 +143,8 @@ function normalize(text: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-export async function syncMoodleFeed(feedUrl: string): Promise<MoodleSyncStats> {
+export async function syncMoodleFeed(userId: string, feedUrl: string): Promise<MoodleSyncStats> {
+  const prisma = db(userId);
   let parsed: URL;
   try {
     parsed = new URL(feedUrl);
@@ -192,7 +192,6 @@ export async function syncMoodleFeed(feedUrl: string): Promise<MoodleSyncStats> 
 
   const relevant = events.filter((event) => event.start >= from && event.start <= horizon);
 
-  const userId = currentUserId();
   const subjects = await prisma.subject.findMany({
     where: { userId },
     select: { id: true, name: true },

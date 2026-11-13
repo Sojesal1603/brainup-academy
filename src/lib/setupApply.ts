@@ -1,6 +1,7 @@
 import { unstable_cache } from 'next/cache';
-import { prisma, withTransaction } from './prisma';
-import { updateDefaultProfile } from './userProfile';
+import { withTransaction } from './prisma';
+import { db } from './db';
+import type { ClassPeriod, Exam, Subject, Topic } from '@prisma/client';
 import { regenerateWeeklyPlan } from './planner';
 import { normalizeTopicTitle } from './temarioImport';
 import { writeTemarioBackup } from './temarioBackup';
@@ -43,7 +44,7 @@ const DAY_INITIALS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 const DAY_NAMES: Record<number, string> = { 1: 'lunes', 2: 'martes', 3: 'miércoles', 4: 'jueves', 5: 'viernes' };
 
 /** Fila de asignatura tal y como la devuelve Prisma (sin temas ni exámenes). */
-type SubjectRow = Awaited<ReturnType<typeof prisma.subject.findMany>>[number];
+type SubjectRow = Subject;
 
 export interface SetupApplyResult {
   applied: string[];
@@ -65,10 +66,11 @@ function isoDay(date: Date): string {
 }
 
 /** Estado real del sistema: lo único que el entrevistador puede dar por sabido. */
-export async function getSetupSnapshot(): Promise<SetupSnapshot> {
+export async function getSetupSnapshot(userId: string): Promise<SetupSnapshot> {
+  const prisma = db(userId);
   const now = new Date();
   const [user, subjects, periods] = await Promise.all([
-    prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+    prisma.userProfile.findUnique({ where: { id: userId } }),
     prisma.subject.findMany({
       orderBy: [{ order: 'asc' }, { name: 'asc' }],
       include: {
@@ -163,11 +165,11 @@ export async function getSetupSnapshot(): Promise<SetupSnapshot> {
   };
 }
 
-async function computeSetupState(): Promise<{
+async function computeSetupState(userId: string): Promise<{
   snapshot: SetupSnapshot;
   checklist: SetupChecklist;
 }> {
-  const snapshot = await getSetupSnapshot();
+  const snapshot = await getSetupSnapshot(userId);
   return { snapshot, checklist: buildSetupChecklist(snapshot) };
 }
 
@@ -177,10 +179,14 @@ async function computeSetupState(): Promise<{
  * se reutiliza 30 s. Las acciones que montan el curso invalidan la etiqueta
  * `setup` para que el porcentaje no se quede viejo.
  */
-export const getSetupState = unstable_cache(computeSetupState, ['setup-state-v1'], {
+const loadSetupState = unstable_cache(computeSetupState, ['setup-state-v2'], {
   revalidate: 30,
   tags: ['setup', 'perfil', 'temario'],
 });
+
+export function getSetupState(userId: string) {
+  return loadSetupState(userId);
+}
 
 function guessExamType(title: string): string {
   const text = normalizeTopicTitle(title);
@@ -194,9 +200,11 @@ function guessExamType(title: string): string {
  * chat pueda enseñar el progreso y el siguiente paso sin recargar nada.
  */
 export async function applySetupActions(
+  userId: string,
   actions: SetupAction[],
   options: SetupApplyOptions = {}
 ): Promise<SetupApplyResult> {
+  const prisma = db(userId);
   const applied: string[] = [];
   const problems: string[] = [];
   let changed = false;
@@ -213,7 +221,7 @@ export async function applySetupActions(
   const willChange = actions.some(
     (action) => action.kind !== 'focus' && action.kind !== 'source' && action.kind !== 'audit'
   );
-  if (willChange && !willUndo) await captureUndoSnapshot();
+  if (willChange && !willUndo) await captureUndoSnapshot(userId);
 
   let subjects: SubjectRow[] = await prisma.subject.findMany({ orderBy: [{ order: 'asc' }] });
 
@@ -389,6 +397,7 @@ export async function applySetupActions(
 
         if (replaceArmed.has(focus.id)) {
           const backup = await writeTemarioBackup(
+            userId,
             focus.id,
             focus.name,
             'Copia previa a sustituir tu temario durante la puesta a punto'
@@ -704,7 +713,7 @@ export async function applySetupActions(
         // Cualquier cambio en el horario reabre su confirmación: si se añade
         // una clase después de haberlo dado por cerrado, el «completo» deja de
         // ser cierto y el coordinador tiene que volver a repasarlo.
-        await updateDefaultProfile({ timetableComplete: false });
+        await prisma.userProfile.update({ where: { id: userId }, data: { timetableComplete: false } });
         changed = true;
         playlistDirty = true;
         break;
@@ -738,7 +747,7 @@ export async function applySetupActions(
           where: { id: { in: doomed.map((period) => period.id) } },
         });
         // El horario ha cambiado: la confirmación de «está completo» ya no vale.
-        await updateDefaultProfile({ timetableComplete: false });
+        await prisma.userProfile.update({ where: { id: userId }, data: { timetableComplete: false } });
         applied.push(
           action.day === null
             ? `Fuera del horario: ${subject.name} (${doomed.length} ${doomed.length === 1 ? 'clase' : 'clases'})`
@@ -817,17 +826,17 @@ export async function applySetupActions(
 
       /** El alumno confirma que el horario de los cinco días está repasado. */
       case 'timetable-complete': {
-        await updateDefaultProfile({ timetableComplete: true });
+        await prisma.userProfile.update({ where: { id: userId }, data: { timetableComplete: true } });
         applied.push('Horario de clases repasado: completo');
         changed = true;
         break;
       }
 
       case 'hours': {
-        await updateDefaultProfile({
+        await prisma.userProfile.update({ where: { id: userId }, data: {
           weeklyHoursCap: action.weekly,
           weeklyHoursDeclared: true,
-        });
+        } });
         applied.push(`Horas disponibles: ${action.weekly} h/semana`);
         changed = true;
         playlistDirty = true;
@@ -835,7 +844,7 @@ export async function applySetupActions(
       }
 
       case 'mode': {
-        await updateDefaultProfile({ studyMode: action.mode });
+        await prisma.userProfile.update({ where: { id: userId }, data: { studyMode: action.mode } });
         applied.push(action.mode === 'athlete' ? 'Ritmo: Modo Atleta' : 'Ritmo: Zona de Consuelo');
         changed = true;
         playlistDirty = true;
@@ -851,7 +860,7 @@ export async function applySetupActions(
        */
       case 'audit': {
         try {
-          const report = await auditSetup(action.area ?? 'todo');
+          const report = await auditSetup(userId, action.area ?? 'todo');
           auditReport = report.summary;
           applied.push(
             report.findings.length === 0
@@ -875,7 +884,7 @@ export async function applySetupActions(
 
       /** Volver atrás: se repone la foto del turno anterior. */
       case 'undo': {
-        const result = await undoLastSetupChange();
+        const result = await undoLastSetupChange(userId);
         applied.push(...result.restored);
         problems.push(...result.problems);
         if (result.restored.length > 0) {
@@ -908,7 +917,7 @@ export async function applySetupActions(
       }
 
       case 'pau-target': {
-        await updateDefaultProfile({ targetGradePau: action.value });
+        await prisma.userProfile.update({ where: { id: userId }, data: { targetGradePau: action.value } });
         applied.push(`Nota PAU objetivo: ${action.value}/14`);
         changed = true;
         break;
@@ -923,12 +932,12 @@ export async function applySetupActions(
 
   let blocks = 0;
   if (playlistDirty) {
-    const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
-    const plan = await regenerateWeeklyPlan((user?.studyMode as StudyMode) || 'athlete');
+    const user = await prisma.userProfile.findUnique({ where: { id: userId } });
+    const plan = await regenerateWeeklyPlan(userId, (user?.studyMode as StudyMode) || 'athlete');
     blocks = plan.count ?? 0;
   }
 
-  const { snapshot, checklist } = await getSetupState();
+  const { snapshot, checklist } = await getSetupState(userId);
 
   return { applied, problems, changed, blocks, snapshot, checklist, report: auditReport ?? undefined };
 }
@@ -951,9 +960,9 @@ const UNDO_TTL_MS = 30 * 60 * 1000;
 
 interface UndoSnapshot {
   at: number;
-  topics: Awaited<ReturnType<typeof prisma.topic.findMany>>;
-  exams: Awaited<ReturnType<typeof prisma.exam.findMany>>;
-  classes: Awaited<ReturnType<typeof prisma.classPeriod.findMany>>;
+  topics: Topic[];
+  exams: Exam[];
+  classes: ClassPeriod[];
   subjects: Array<{
     id: string;
     isTracked: boolean;
@@ -972,9 +981,10 @@ interface UndoSnapshot {
   } | null;
 }
 
-let lastUndo: UndoSnapshot | null = null;
+const undoSnapshots = new Map<string, UndoSnapshot>();
 
-async function captureUndoSnapshot(): Promise<void> {
+async function captureUndoSnapshot(userId: string): Promise<void> {
+  const prisma = db(userId);
   try {
     const [topics, exams, classes, subjects, user] = await Promise.all([
       prisma.topic.findMany(),
@@ -991,7 +1001,7 @@ async function captureUndoSnapshot(): Promise<void> {
         },
       }),
       prisma.userProfile.findUnique({
-        where: { id: 'user_default' },
+        where: { id: userId },
         select: {
           weeklyHoursCap: true,
           weeklyHoursDeclared: true,
@@ -1002,20 +1012,21 @@ async function captureUndoSnapshot(): Promise<void> {
         },
       }),
     ]);
-    lastUndo = { at: Date.now(), topics, exams, classes, subjects, user };
+    undoSnapshots.set(userId, { at: Date.now(), topics, exams, classes, subjects, user });
   } catch (error) {
     // Sin foto no hay deshacer, pero el turno sigue: la respuesta no se pierde.
     console.warn(
       '[puesta-a-punto] no he podido guardar la foto para deshacer:',
       error instanceof Error ? error.message : String(error)
     );
-    lastUndo = null;
+    undoSnapshots.delete(userId);
   }
 }
 
 /** ¿Hay algún cambio reciente que se pueda deshacer? */
-export function canUndoSetup(): boolean {
-  return lastUndo !== null && Date.now() - lastUndo.at <= UNDO_TTL_MS;
+export function canUndoSetup(userId: string): boolean {
+  const snapshot = undoSnapshots.get(userId);
+  return Boolean(snapshot && Date.now() - snapshot.at <= UNDO_TTL_MS);
 }
 
 /**
@@ -1026,8 +1037,9 @@ export function canUndoSetup(): boolean {
  * Después se recalcula el plan: un curso que vuelve atrás con el plan de después
  * es peor que no deshacer.
  */
-export async function undoLastSetupChange(): Promise<{ restored: string[]; problems: string[] }> {
-  const snapshot = lastUndo;
+export async function undoLastSetupChange(userId: string): Promise<{ restored: string[]; problems: string[] }> {
+  const prisma = db(userId);
+  const snapshot = undoSnapshots.get(userId);
   if (!snapshot) {
     return {
       restored: [],
@@ -1037,7 +1049,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
     };
   }
   if (Date.now() - snapshot.at > UNDO_TTL_MS) {
-    lastUndo = null;
+    undoSnapshots.delete(userId);
     return {
       restored: [],
       problems: [
@@ -1059,17 +1071,19 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
       async (tx) => {
         // 1. Fuera lo que se creó en este turno.
         const removedTopics = await tx.topic.deleteMany({
-          where: { id: { notIn: topicIds }, createdAt: { gte: snapshotAt } },
+          where: { userId, id: { notIn: topicIds }, createdAt: { gte: snapshotAt } },
         });
         const removedExams = await tx.exam.deleteMany({
-          where: { id: { notIn: examIds }, createdAt: { gte: snapshotAt } },
+          where: { userId, id: { notIn: examIds }, createdAt: { gte: snapshotAt } },
         });
-        const removedClasses = await tx.classPeriod.deleteMany({ where: { id: { notIn: classIds } } });
+        const removedClasses = await tx.classPeriod.deleteMany({
+          where: { userId, id: { notIn: classIds } },
+        });
 
         // 2. Vuelven las unidades que el turno se llevó por delante.
         let topicsBack = 0;
         for (const topic of snapshot.topics) {
-          const exists = await tx.topic.findUnique({ where: { id: topic.id }, select: { id: true } });
+          const exists = await tx.topic.findFirst({ where: { id: topic.id, userId }, select: { id: true } });
           if (exists) continue;
           const { createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = topic;
           await tx.topic.create({ data: rest });
@@ -1078,13 +1092,13 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
 
         // 3. Exámenes y horario, tal y como estaban.
         for (const exam of snapshot.exams) {
-          const exists = await tx.exam.findUnique({ where: { id: exam.id }, select: { id: true } });
+          const exists = await tx.exam.findFirst({ where: { id: exam.id, userId }, select: { id: true } });
           const { id, createdAt: _createdAt, ...rest } = exam;
           if (exists) await tx.exam.update({ where: { id }, data: rest });
           else await tx.exam.create({ data: { id, ...rest } });
         }
         for (const period of snapshot.classes) {
-          const exists = await tx.classPeriod.findUnique({ where: { id: period.id }, select: { id: true } });
+          const exists = await tx.classPeriod.findFirst({ where: { id: period.id, userId }, select: { id: true } });
           const data = {
             dayOfWeek: period.dayOfWeek,
             period: period.period,
@@ -1092,6 +1106,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
             endTime: period.endTime,
             subjectId: period.subjectId,
             classroom: period.classroom,
+            userId,
           };
           if (exists) await tx.classPeriod.update({ where: { id: period.id }, data });
           else await tx.classPeriod.create({ data: { id: period.id, ...data } });
@@ -1100,7 +1115,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
         // 4. Los datos de cada materia (notas, «solo horario», temario completo…).
         for (const subject of snapshot.subjects) {
           await tx.subject.updateMany({
-            where: { id: subject.id },
+            where: { id: subject.id, userId },
             data: {
               isTracked: subject.isTracked,
               syllabusComplete: subject.syllabusComplete,
@@ -1113,7 +1128,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
 
         // 5. Horas, ritmo, nota objetivo y estado de la puesta a punto.
         if (snapshot.user) {
-          await tx.userProfile.update({ where: { id: 'user_default' }, data: { ...snapshot.user } });
+          await tx.userProfile.update({ where: { id: userId }, data: { ...snapshot.user } });
         }
 
         return {
@@ -1126,7 +1141,7 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
       { timeout: 20_000 }
     );
 
-    lastUndo = null;
+    undoSnapshots.delete(userId);
 
     const restored = ['Deshecho: el curso vuelve a como estaba antes del último cambio.'];
     if (outcome.topicsBack > 0) restored.push(`${outcome.topicsBack} unidades recuperadas`);
@@ -1139,10 +1154,10 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
     // un temario que ya no existe.
     try {
       const user = await prisma.userProfile.findUnique({
-        where: { id: 'user_default' },
+        where: { id: userId },
         select: { studyMode: true },
       });
-      await regenerateWeeklyPlan((user?.studyMode as StudyMode) || 'athlete');
+      await regenerateWeeklyPlan(userId, (user?.studyMode as StudyMode) || 'athlete');
     } catch (error) {
       console.warn(
         '[puesta-a-punto] el plan no se ha podido rehacer tras deshacer:',
@@ -1167,11 +1182,11 @@ export async function undoLastSetupChange(): Promise<{ restored: string[]; probl
 }
 
 /** Cierra la puesta a punto (la marca como terminada). */
-export async function markSetupCompleted(at: Date = new Date()) {
-  await updateDefaultProfile({ setupCompletedAt: at });
+export async function markSetupCompleted(userId: string, at: Date = new Date()) {
+  await db(userId).userProfile.update({ where: { id: userId }, data: { setupCompletedAt: at } });
 }
 
 /** Reabre la puesta a punto para seguir añadiendo datos. */
-export async function reopenSetup() {
-  await updateDefaultProfile({ setupCompletedAt: null });
+export async function reopenSetup(userId: string) {
+  await db(userId).userProfile.update({ where: { id: userId }, data: { setupCompletedAt: null } });
 }

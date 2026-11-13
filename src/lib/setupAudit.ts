@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import type { SetupAuditArea } from './setup';
 
 /**
@@ -71,13 +71,17 @@ function isoDay(date: Date): string {
  * gravedad. Nunca lanza por un fallo de base: quien llama prefiere contestar sin
  * auditoría antes que romper el turno.
  */
-export async function auditSetup(area: SetupAuditArea = 'todo'): Promise<SetupAuditReport> {
+export async function auditSetup(
+  userId: string,
+  area: SetupAuditArea = 'todo'
+): Promise<SetupAuditReport> {
+  const prisma = db(userId);
   const wants = (target: Exclude<SetupAuditArea, 'todo'>): boolean => area === 'todo' || area === target;
   const now = new Date();
   const findings: SetupAuditFinding[] = [];
 
   const [user, subjects, periods] = await Promise.all([
-    prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+    prisma.userProfile.findUnique({ where: { id: userId } }),
     prisma.subject.findMany({
       orderBy: [{ order: 'asc' }, { name: 'asc' }],
       include: {

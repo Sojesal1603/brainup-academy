@@ -9,7 +9,7 @@
  *    modo autoevaluación guiada. La app nunca se queda sin funcionar.
  */
 
-import { prisma } from './prisma';
+import { db } from './db';
 import { hasAiProviderAsync, runAiText } from './tutor';
 import type { BlockResult, ExamBlock, ExamGrade, ExamPackage } from './examenTypes';
 
@@ -179,7 +179,8 @@ interface ExamTopic {
  * Antes bastaba con `orderBy masteryLevel asc`, así que un 0% de fábrica ponía
  * cualquier tema como «lo más flojo» sin que nadie lo hubiera medido.
  */
-async function pickTopics(subjectId: string): Promise<ExamTopic[]> {
+async function pickTopics(userId: string, subjectId: string): Promise<ExamTopic[]> {
+  const prisma = db(userId);
   const all = await prisma.topic.findMany({ where: { subjectId } });
 
   const toExamTopic = (topic: (typeof all)[number]): ExamTopic => ({
@@ -222,11 +223,12 @@ async function pickTopics(subjectId: string): Promise<ExamTopic[]> {
  * Genera el paquete de simulacro para una asignatura.
  * Intenta IA primero; si no puede, cae a las plantillas locales.
  */
-export async function buildExamPackage(subjectId: string): Promise<ExamPackage> {
+export async function buildExamPackage(userId: string, subjectId: string): Promise<ExamPackage> {
+  const prisma = db(userId);
   const subject = await prisma.subject.findUnique({ where: { id: subjectId } });
   if (!subject) throw new Error('Asignatura no encontrada en la base de datos.');
 
-  const topics = await pickTopics(subjectId);
+  const topics = await pickTopics(userId, subjectId);
   if (topics.length === 0) {
     throw new Error('Esta asignatura aún no tiene temas en el banco. Añádelos en el Cuaderno para generar simulacros.');
   }

@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath, updateTag } from 'next/cache';
-import { prisma } from './prisma';
+import { currentTenant } from './tenantContext';
 import {
   applySrsReview,
   isMasteredInterval,
@@ -52,6 +52,7 @@ export async function recordSrsReview(input: {
   rating: string;
   minutesSpent?: number;
 }): Promise<RecordSrsReviewResult> {
+  const { tenant: prisma } = await currentTenant();
   const topicId = typeof input?.topicId === 'string' ? input.topicId : '';
 
   if (!topicId) {
@@ -172,6 +173,7 @@ export async function recordSrsReview(input: {
  * Sirve para empezar de cero cuando un intervalo se ha ido de las manos.
  */
 export async function resetSrsSchedule(topicId: string): Promise<{ success: boolean; error?: string }> {
+  const { tenant: prisma } = await currentTenant();
   if (typeof topicId !== 'string' || topicId.length === 0) {
     return { success: false, error: 'Falta la unidad.' };
   }

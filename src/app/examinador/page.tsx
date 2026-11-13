@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { ensureUserProfile } from '@/lib/userProfile';
 import { getEbauCommunity, communityStructureLabel } from '@/lib/ebauCommunities';
 import { FileCheck2, Clock, BookOpen, Sparkles, History, AlertTriangle } from 'lucide-react';
@@ -29,7 +29,8 @@ function isSelfGraded(raw: string | null): boolean {
 }
 
 export default async function ExaminerPage() {
-  const user = await ensureUserProfile();
+  const { user: authUser, tenant: prisma } = await currentTenant();
+  const user = await ensureUserProfile(authUser.id);
   const community = getEbauCommunity(user?.community);
 
   const subjects = await prisma.subject.findMany({

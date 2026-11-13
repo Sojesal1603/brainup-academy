@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sanitizeNoteContent } from '@/lib/apuntesIa';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 
 /**
  * Descarga de un apunte en Markdown.
@@ -46,7 +47,8 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const note = await prisma.note.findUnique({
+  const user = await requireUser();
+  const note = await db(user.id).note.findFirst({
     where: { id },
     include: {
       topic: {

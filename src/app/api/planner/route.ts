@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { StudyMode } from '@/lib/types';
 import { ensureTodayPlan, replanToday, reviewDayProgress } from '@/lib/dayPlan';
+import { currentTenant } from '@/lib/tenantContext';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -44,8 +45,9 @@ export async function GET() {
     // En serie a propósito: `ensureTodayPlan` puede escribir el plan y SQLite
     // no permite leer mientras se escribe. Lanzarlas en paralelo hacía que la
     // lectura esperara al bloqueo y la petición pareciera colgada.
-    const plan = await ensureTodayPlan();
-    const review = await reviewDayProgress();
+    const { user } = await currentTenant();
+    const plan = await ensureTodayPlan(user.id);
+    const review = await reviewDayProgress(user.id);
     return NextResponse.json(
       {
         ok: true,
@@ -94,7 +96,8 @@ export async function POST(request: Request) {
     body.mode === 'comfort' || body.mode === 'athlete' ? body.mode : undefined;
 
   try {
-    const result = await replanToday({ budgetMinutes, mode });
+    const { user } = await currentTenant();
+    const result = await replanToday(user.id, { budgetMinutes, mode });
     const active = result.plan.sessions.filter(
       (session) => !session.isCompleted && session.status !== 'abandonada'
     );

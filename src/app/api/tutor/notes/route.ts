@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { currentTenant } from '@/lib/tenantContext';
 import {
   buildNoteWriterSystemPrompt,
   buildNoteWriterUserMessage,
@@ -183,18 +184,20 @@ function normalizeTitle(value: string): string {
  * sale bien, el aviso se queda ahí como histórico hasta que el taller lo cierre.
  */
 async function noteIncompleteIssue(
+  userId: string,
   noteId: string,
   title: string,
   quality: NoteQuality,
   content: string
 ): Promise<void> {
-  const existing = await prisma.systemIssue.findFirst({
+  const tenant = db(userId);
+  const existing = await tenant.systemIssue.findFirst({
     where: { title: NOTE_INCOMPLETE_ISSUE_TITLE, status: { not: 'resuelto' }, contextJson: { contains: noteId } },
     select: { id: true },
   });
   if (existing) return;
 
-  await prisma.systemIssue.create({
+  await tenant.systemIssue.create({
     data: {
       title: NOTE_INCOMPLETE_ISSUE_TITLE,
       detail: [
@@ -227,7 +230,7 @@ async function noteIncompleteIssue(
  * puerta, los dos caminos guardan igual —mismo control de duplicados, mismo
  * aviso al taller si sale sin estructura— y no pueden divergir con el tiempo.
  */
-async function saveNoteToNotebook(params: {
+async function saveNoteToNotebook(userId: string, params: {
   agentId: string;
   conversationId: string | null;
   unitId: string;
@@ -236,7 +239,8 @@ async function saveNoteToNotebook(params: {
 }): Promise<{ id: string; title: string; content: string; createdAt: Date; updated: boolean }> {
   // Si ya tenía un apunte del catedrático de esa misma unidad con el mismo
   // título, se actualiza en lugar de duplicarlo.
-  const sameUnit = await prisma.note.findMany({
+  const tenant = db(userId);
+  const sameUnit = await tenant.note.findMany({
     where: { topicId: params.unitId, author: 'catedratico' },
     select: { id: true, title: true },
   });
@@ -245,7 +249,7 @@ async function saveNoteToNotebook(params: {
   );
 
   const saved = duplicate
-    ? await prisma.note.update({
+    ? await tenant.note.update({
         where: { id: duplicate.id },
         data: {
           title: params.title,
@@ -254,7 +258,7 @@ async function saveNoteToNotebook(params: {
           updatedAt: new Date(),
         },
       })
-    : await prisma.note.create({
+    : await tenant.note.create({
         data: {
           topicId: params.unitId,
           title: params.title,
@@ -276,6 +280,7 @@ async function saveNoteToNotebook(params: {
 }
 
 export async function POST(request: Request) {
+  const { user: authUser, tenant } = await currentTenant();
   let body: NotesBody;
   try {
     body = (await request.json()) as NotesBody;
@@ -356,8 +361,8 @@ export async function POST(request: Request) {
 
     try {
       const [agent, unit] = await Promise.all([
-        prisma.aiAgent.findUnique({ where: { id: draft.agentId }, include: { subject: true } }),
-        prisma.topic.findUnique({ where: { id: draft.topicId } }),
+        tenant.aiAgent.findUnique({ where: { id: draft.agentId }, include: { subject: true } }),
+        tenant.topic.findUnique({ where: { id: draft.topicId } }),
       ]);
       if (!agent || !unit) {
         return NextResponse.json(
@@ -367,7 +372,7 @@ export async function POST(request: Request) {
       }
 
       const quality = noteQualityReport(draft.content);
-      const saved = await saveNoteToNotebook({
+      const saved = await saveNoteToNotebook(authUser.id, {
         agentId: agent.id,
         conversationId: draft.conversationId ?? conversationId,
         unitId: unit.id,
@@ -380,7 +385,7 @@ export async function POST(request: Request) {
       );
 
       if (quality.structureMissing.length > 0) {
-        await noteIncompleteIssue(saved.id, saved.title, quality, saved.content).catch(() => {});
+        await noteIncompleteIssue(authUser.id, saved.id, saved.title, quality, saved.content).catch(() => {});
       }
 
       return NextResponse.json({
@@ -458,7 +463,7 @@ export async function POST(request: Request) {
     }
 
   try {
-    const agent = await prisma.aiAgent.findUnique({
+    const agent = await tenant.aiAgent.findUnique({
       where: { id: agentId },
       include: { subject: true },
     });
@@ -469,14 +474,14 @@ export async function POST(request: Request) {
 
     // La memoria entre días: lo que este catedrático ya trabajó con él en esta
     // asignatura. El apunte continúa el hilo en vez de empezar de cero.
-    const memoryBlock = await loadMemoryBlock(agent.id).catch(() => '');
+    const memoryBlock = await loadMemoryBlock(authUser.id, agent.id).catch(() => '');
 
     // La unidad tiene que ser SUYA: un catedrático no escribe apuntes de otra
     // asignatura, por mucho que se lo pidan. Se trae el temario entero porque el
     // número que llega se contrasta con los títulos: si el catedrático se ha
     // equivocado de número (te pide orgánica —U9— y propone trabajo mecánico
     // —U16—), el título manda y los apuntes se escriben de la unidad de verdad.
-    const subjectUnits = await prisma.topic.findMany({
+    const subjectUnits = await tenant.topic.findMany({
       where: { subjectId: agent.subjectId },
       orderBy: { unitNumber: 'asc' },
       select: { id: true, unitNumber: true, title: true, status: true, teacherMethod: true },
@@ -579,23 +584,23 @@ export async function POST(request: Request) {
       teacherMaterials,
       teacherMethods,
     ] = await Promise.all([
-      prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+      tenant.userProfile.findUnique({ where: { id: authUser.id } }),
       // El temario ya está en `subjectUnits` (y con su id): no se pregunta dos veces.
       Promise.resolve(subjectUnits),
-      prisma.topic.findMany({
+      tenant.topic.findMany({
         where: { subjectId: agent.subjectId, masterySource: { not: 'sin_medir' } },
         orderBy: { masteryLevel: 'asc' },
         take: 10,
         select: { title: true, unitNumber: true, masteryLevel: true, masterySource: true },
       }),
-      prisma.exam.findMany({
+      tenant.exam.findMany({
         where: { subjectId: agent.subjectId, examDate: { gte: new Date() } },
         orderBy: { examDate: 'asc' },
         take: 3,
         select: { title: true, examDate: true, examType: true },
       }),
       // Su cuaderno completo de la materia: para completar, no para repetir.
-      prisma.note.findMany({
+      tenant.note.findMany({
         where: { topic: { subjectId: agent.subjectId } },
         orderBy: [{ isPinned: 'desc' }, { updatedAt: 'desc' }],
         take: 40,
@@ -610,7 +615,7 @@ export async function POST(request: Request) {
         },
       }),
       // Lo que ha subido su profesor a Moodle de esta asignatura (solo nombres).
-      prisma.moodleMaterial.findMany({
+      tenant.moodleMaterial.findMany({
         where: { course: { subjectId: agent.subjectId } },
         orderBy: { name: 'asc' },
         take: 20,
@@ -619,7 +624,7 @@ export async function POST(request: Request) {
       // Cómo ha explicado su profesor cada unidad, contado por el alumno. Es lo
       // que ata el apunte al aula: sin esto, el catedrático escribe un temario
       // genérico (correcto) que no tiene por qué parecerse a cómo le corrigen.
-      prisma.topic.findMany({
+      tenant.topic.findMany({
         where: { subjectId: agent.subjectId, teacherMethod: { not: null } },
         orderBy: { unitNumber: 'asc' },
         select: { unitNumber: true, title: true, teacherMethod: true },
@@ -806,7 +811,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const saved = await saveNoteToNotebook({
+    const saved = await saveNoteToNotebook(authUser.id, {
       agentId: agent.id,
       conversationId,
       unitId: unit.id,
@@ -823,7 +828,7 @@ export async function POST(request: Request) {
     // taller, porque un resumen sin los puntos desarrollados no es lo que se le
     // ha pedido y hay que poder reescribirlo.
     if (finalQuality.structureMissing.length > 0) {
-      await noteIncompleteIssue(saved.id, title, finalQuality, content).catch(() => {});
+      await noteIncompleteIssue(authUser.id, saved.id, title, finalQuality, content).catch(() => {});
     }
 
     return NextResponse.json({

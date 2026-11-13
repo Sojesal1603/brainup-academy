@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma } from './prisma';
+import { currentTenant } from './tenantContext';
 import {
   FOCUS_MIN_JUSTIFICATION,
   evaluateFocusPenalty,
@@ -36,6 +36,7 @@ export async function startFocusSession(input: {
   blockId?: string | null;
   plannedMinutes: number;
 }): Promise<StartFocusResult> {
+  const { user, tenant: prisma } = await currentTenant();
   const plannedMinutes = clampInt(input?.plannedMinutes, 5, 180);
   const topicId =
     typeof input?.topicId === 'string' && input.topicId.length > 0
@@ -108,6 +109,7 @@ export async function syncFocusSession(input: {
   pausedSeconds: number;
   interruptions: number;
 }): Promise<{ success: boolean }> {
+  const { user, tenant: prisma } = await currentTenant();
   if (typeof input?.sessionId !== 'string' || input.sessionId.length === 0) {
     return { success: false };
   }
@@ -129,10 +131,11 @@ export async function registerTutorTime(
   sessionId: string,
   seconds: number
 ): Promise<{ success: boolean }> {
+  const { user, tenant: prisma } = await currentTenant();
   if (typeof sessionId !== 'string' || sessionId.length === 0) {
     return { success: false };
   }
-  await incrementTutorSeconds(sessionId, clampInt(seconds, 1, 120));
+  await incrementTutorSeconds(user.id, sessionId, clampInt(seconds, 1, 120));
   return { success: true };
 }
 
@@ -145,6 +148,7 @@ export async function completeFocusSession(input: {
   tutorSeconds?: number;
   interruptions: number;
 }): Promise<{ success: boolean; error?: string }> {
+  const { user, tenant: prisma } = await currentTenant();
   if (typeof input?.sessionId !== 'string' || input.sessionId.length === 0) {
     return { success: false, error: 'Falta la sesión de enfoque.' };
   }
@@ -201,6 +205,7 @@ export async function abandonFocusSession(input: {
   pendingTasks?: number;
   totalTasks?: number;
 }): Promise<AbandonFocusResult> {
+  const { user, tenant: prisma } = await currentTenant();
   if (typeof input?.sessionId !== 'string' || input.sessionId.length === 0) {
     return { success: false, error: 'Falta la sesión de enfoque.' };
   }
@@ -306,7 +311,7 @@ export async function abandonFocusSession(input: {
   await prisma.agentMemory.upsert({
     where: {
       userId_scope_day: {
-        userId: 'user_default',
+        userId: user.id,
         scope: `focus-abandon-${session.id}`,
         day: todayStart.toISOString().slice(0, 10),
       },

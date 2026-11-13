@@ -2,6 +2,7 @@ import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { parseTenantId } from './tenantValidation';
+import { readSupabaseAuthConfig } from './supabaseConfig';
 
 /**
  * Identidad de la petición, validada en el servidor con Supabase Auth.
@@ -35,19 +36,6 @@ export interface AuthUser {
   email: string | null;
 }
 
-/** Falta configuración de Supabase Auth en el entorno. */
-export class SupabaseAuthConfigError extends Error {
-  readonly code = 'SUPABASE_AUTH_CONFIG';
-
-  constructor() {
-    super(
-      'Falta la configuración de Supabase Auth. Define NEXT_PUBLIC_SUPABASE_URL y ' +
-        'NEXT_PUBLIC_SUPABASE_ANON_KEY en el entorno del servidor.'
-    );
-    this.name = 'SupabaseAuthConfigError';
-  }
-}
-
 /** La petición no trae una sesión válida. */
 export class AuthRequiredError extends Error {
   readonly code = 'AUTH_REQUIRED';
@@ -56,27 +44,6 @@ export class AuthRequiredError extends Error {
     super(message);
     this.name = 'AuthRequiredError';
   }
-}
-
-interface SupabaseAuthConfig {
-  url: string;
-  anonKey: string;
-}
-
-function readSupabaseAuthConfig(): SupabaseAuthConfig {
-  const url = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').trim();
-  const anonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
-  if (!url || !anonKey) throw new SupabaseAuthConfigError();
-
-  try {
-    // Falla al arrancar si la URL no es una URL: mejor un error claro aquí que
-    // un `fetch` raro en mitad de la primera página.
-    new URL(url);
-  } catch {
-    throw new SupabaseAuthConfigError();
-  }
-
-  return { url, anonKey };
 }
 
 /**

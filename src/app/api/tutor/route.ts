@@ -1,5 +1,6 @@
 import { NextResponse, after } from 'next/server';
-import { prisma, withTransaction } from '@/lib/prisma';
+import { withTransaction } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { loadMemoryBlock, rememberConversation } from '@/lib/agentMemory';
 import { polishMemoryWithAi } from '@/lib/agentMemoryPolish';
 import {
@@ -190,6 +191,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  const { user: authUser, tenant } = await currentTenant();
   let body: TutorRequestBody;
   try {
     body = (await request.json()) as TutorRequestBody;
@@ -245,7 +247,7 @@ export async function POST(request: Request) {
   // quedarse en un error por configuración.
 
   try {
-    const agent = await prisma.aiAgent.findUnique({
+    const agent = await tenant.aiAgent.findUnique({
       where: { id: agentId },
       include: { subject: true },
     })
@@ -262,21 +264,21 @@ export async function POST(request: Request) {
     // navegador pierde el id (recarga, cambio de pestaña, móvil) y la memoria de
     // lo hablado sigue estando ahí. Solo se crea una si de verdad no hay ninguna.
     const conversation = conversationId
-      ? await prisma.aiConversation.findFirst({
+      ? await tenant.aiConversation.findFirst({
           where: { id: conversationId, agentId },
         })
       : freshConversation
-        ? await prisma.aiConversation.create({
+        ? await tenant.aiConversation.create({
             data: {
               agentId,
               title: (message || validAttachments[0]?.name || 'Consulta de Estudio').slice(0, 60),
             },
           })
-        : (await prisma.aiConversation.findFirst({
+        : (await tenant.aiConversation.findFirst({
             where: { agentId },
             orderBy: { createdAt: 'desc' },
           })) ??
-          (await prisma.aiConversation.create({
+          (await tenant.aiConversation.create({
             data: {
               agentId,
               title: (message || validAttachments[0]?.name || 'Consulta de Estudio').slice(0, 60),
@@ -285,7 +287,7 @@ export async function POST(request: Request) {
 
     const activeConversation =
       conversation ??
-      (await prisma.aiConversation.create({
+      (await tenant.aiConversation.create({
         data: {
           agentId,
           title: (message || validAttachments[0]?.name || 'Consulta de Estudio').slice(0, 60),
@@ -315,31 +317,31 @@ export async function POST(request: Request) {
       // materia. Cadena vacía el primer día (y entonces no se añade nada al prompt).
       memoryBlock,
     ] = await Promise.all([
-      prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
-      prisma.topic.findMany({
+      tenant.userProfile.findUnique({ where: { id: authUser.id } }),
+      tenant.topic.findMany({
         where: { subjectId: agent.subjectId, masterySource: { not: 'sin_medir' } },
         orderBy: { masteryLevel: 'asc' },
         take: 8,
         select: { title: true, masteryLevel: true, unitNumber: true, masterySource: true },
       }),
-      prisma.topic.count({ where: { subjectId: agent.subjectId, masterySource: 'sin_medir' } }),
-      prisma.topic.findMany({
+      tenant.topic.count({ where: { subjectId: agent.subjectId, masterySource: 'sin_medir' } }),
+      tenant.topic.findMany({
         where: { subjectId: agent.subjectId },
         orderBy: { unitNumber: 'asc' },
         select: { id: true, title: true, unitNumber: true, status: true },
       }),
-      prisma.exam.findMany({
+      tenant.exam.findMany({
         where: { subjectId: agent.subjectId, examDate: { gte: new Date() } },
         orderBy: { examDate: 'asc' },
         take: 3,
         select: { title: true, examDate: true, examType: true },
       }),
-      prisma.errorLog.count({
+      tenant.errorLog.count({
         where: { subjectId: agent.subjectId, isMastered: false },
       }),
       // Planificador → catedrático: lo que hay programado para hoy, con su
       // estado. Sin esto el chat podía proponer algo que la agenda ya descartó.
-      prisma.studyBlock.findMany({
+      tenant.studyBlock.findMany({
         where: { date: { gte: nowStart, lt: todayEnd } },
         orderBy: [{ orderIndex: 'asc' }],
         select: {
@@ -349,7 +351,7 @@ export async function POST(request: Request) {
           topic: { select: { title: true, subject: { select: { name: true } } } },
         },
       }),
-      prisma.aiMessage.findMany({
+      tenant.aiMessage.findMany({
         where: { conversationId: activeConversation.id },
         orderBy: { createdAt: 'asc' },
         select: {
@@ -363,7 +365,7 @@ export async function POST(request: Request) {
       // Los apuntes que el alumno ha escrito de esta materia: es lo que el
       // catedrático puede leer. Se traen de más y el módulo recorta.
       shareNotes
-        ? prisma.note
+        ? tenant.note
             .findMany({
               where: { topic: { subjectId: agent.subjectId } },
               orderBy: [{ isPinned: 'desc' }, { updatedAt: 'desc' }],
@@ -391,8 +393,8 @@ export async function POST(request: Request) {
               }))
             )
         : Promise.resolve([] as NoteRowForTutor[]),
-      prisma.note.count({ where: { topic: { subjectId: agent.subjectId } } }),
-      loadMemoryBlock(agent.id),
+      tenant.note.count({ where: { topic: { subjectId: agent.subjectId } } }),
+      loadMemoryBlock(authUser.id, agent.id),
     ]);
 
     // Unidad que está dando en clase (temario): dato real que sí se puede citar.
@@ -736,7 +738,12 @@ export async function POST(request: Request) {
     // revierte entera si falla antes de confirmar.
     const [userMessage, assistantMessage] = await withTransaction(async (tx) => {
       const user = await tx.aiMessage.create({
-        data: { conversationId: activeConversation.id, role: 'user', content: message },
+        data: {
+          userId: authUser.id,
+          conversationId: activeConversation.id,
+          role: 'user',
+          content: message,
+        },
       })
 
       if (stored.length > 0) {
@@ -753,6 +760,7 @@ export async function POST(request: Request) {
 
       const assistant = await tx.aiMessage.create({
         data: {
+          userId: authUser.id,
           conversationId: activeConversation.id,
           role: 'assistant',
           content: reply.text,
@@ -785,7 +793,7 @@ export async function POST(request: Request) {
     if (reply.level) {
       const unit = subjectUnits.find((candidate) => candidate.unitNumber === reply.level!.unitNumber);
       if (unit) {
-        await prisma.topic.update({
+        await tenant.topic.update({
           where: { id: unit.id },
           data: {
             masteryLevel: reply.level.mastery,
@@ -802,6 +810,7 @@ export async function POST(request: Request) {
         // agenda de hoy (ficha de error + plan rehecho). No se deja para luego:
         // un diagnóstico sin sesión es una etiqueta, no una corrección.
         plannerSync = await syncTutorWithPlanner({
+          userId: authUser.id,
           subjectId: agent.subjectId,
           topicId: unit.id,
           unitNumber: unit.unitNumber,
@@ -859,7 +868,7 @@ export async function POST(request: Request) {
     // respuesta ya está dada. Las reglas escriben siempre; el modelo solo pule.
     after(async () => {
       try {
-        const remembered = await rememberConversation({
+        const remembered = await rememberConversation(authUser.id, {
           scope: agent.id,
           conversationId: activeConversation.id,
           polish: (raw) =>

@@ -1,11 +1,11 @@
 import nextDynamic from 'next/dynamic';
-import { prisma } from '@/lib/prisma';
 import { ensureUserProfile } from '@/lib/userProfile';
+import { currentTenant } from '@/lib/tenantContext';
 import { getMoodleStatus } from '@/lib/moodleWsSync';
 import { readMoodleHealth } from '@/lib/moodleSelfHeal';
 import AccesoMovil from '@/components/ajustes/AccesoMovil';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
-import { readAuthConfig } from '@/lib/authGate';
+import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
 
 // Ajustes es un panel de paneles: cada uno baja cuando se va a ver, no todos
 // de golpe al abrir la sección.
@@ -38,11 +38,12 @@ export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   // Memoizado por petición: el Header del layout ya ha pedido este perfil.
-  const user = await ensureUserProfile();
+  const { user: authUser, tenant: prisma } = await currentTenant();
+  const user = await ensureUserProfile(authUser.id);
   // Solo hay sesión que cerrar si la puerta está puesta en el entorno.
-  const authOn = Boolean(readAuthConfig());
+  const authOn = hasSupabaseAuthConfig();
 
-  const [moodleStatus, moodleHealth] = await Promise.all([getMoodleStatus(), readMoodleHealth()]);
+  const [moodleStatus, moodleHealth] = await Promise.all([getMoodleStatus(authUser.id), readMoodleHealth(authUser.id)]);
 
   const notionConfigured = Boolean(process.env.NOTION_API_KEY);
   const notebookLmConfigured = Boolean(process.env.NOTEBOOKLM_MCP_PORT);

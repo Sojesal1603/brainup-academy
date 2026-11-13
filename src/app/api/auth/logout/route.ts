@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { AUTH_COOKIE, appUrl } from '@/lib/authGate';
+import { createSupabaseServerClient } from '@/lib/auth';
+import { appUrl } from '@/lib/requestUrl';
 
 /**
- * Cerrar sesión: se borra la cookie y se vuelve al formulario.
+ * Cerrar sesión: Supabase invalida el refresh token y borra sus cookies.
  *
  * Se acepta GET además de POST porque el botón de la cabecera es un formulario
  * (POST), pero un enlace directo a esta dirección también debe dejar la sesión
@@ -11,19 +12,20 @@ import { AUTH_COOKIE, appUrl } from '@/lib/authGate';
 
 export const dynamic = 'force-dynamic';
 
-function cerrar(request: Request): NextResponse {
-  // Vuelta al formulario por el host real del navegador: `request.url` trae la
-  // dirección interna del servidor (`0.0.0.0`), que no se puede abrir.
-  const response = NextResponse.redirect(appUrl(request, '/login'), 303);
-  response.cookies.set({
-    name: AUTH_COOKIE,
-    value: '',
-    httpOnly: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 0,
-  });
-  return response;
+async function cerrar(request: Request): Promise<NextResponse> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    await supabase.auth.signOut();
+  } catch (error) {
+    // Si Supabase no está configurado o no responde, la sesión local se va
+    // igualmente: el proxy no dejará pasar sin un getUser válido.
+    console.warn(
+      '[auth] no se ha podido cerrar la sesión remota:',
+      error instanceof Error ? error.message : error
+    );
+  }
+
+  return NextResponse.redirect(appUrl(request, '/login'), 303);
 }
 
 export async function POST(request: Request) {

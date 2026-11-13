@@ -17,7 +17,7 @@
  * el calendario con una fecha inventada sería falsear la analítica de retención.
  */
 
-import { prisma } from './prisma';
+import { db } from './db';
 import { persistDayPlan } from './dayPlan';
 
 /** Por debajo de este nivel medido, la unidad pide refuerzo inmediato. */
@@ -27,6 +27,7 @@ export const WEAK_MASTERY_THRESHOLD = 60;
 export const DIAGNOSTIC_ERROR_PREFIX = '[diagnóstico del catedrático]';
 
 export interface TutorPlannerSyncInput {
+  userId: string;
   subjectId: string;
   topicId: string;
   unitNumber: number | null;
@@ -58,6 +59,7 @@ export interface TutorPlannerSyncResult {
 export async function syncTutorWithPlanner(
   input: TutorPlannerSyncInput
 ): Promise<TutorPlannerSyncResult> {
+  const prisma = db(input.userId);
   const mastery = Number.isFinite(input.mastery)
     ? Math.max(0, Math.min(100, Math.round(input.mastery)))
     : 0;
@@ -105,7 +107,7 @@ export async function syncTutorWithPlanner(
   }
 
   try {
-    const plan = await persistDayPlan({});
+    const plan = await persistDayPlan(input.userId, {});
     return {
       synced: true,
       reason: `nivel medido ${mastery}% en ${unitLabel}: unidad débil programada en el plan de hoy`,

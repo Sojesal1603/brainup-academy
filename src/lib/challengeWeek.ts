@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import { weekEndOf, weekStartOf, type WeekWorkData } from './challenges';
 
 /**
@@ -54,7 +54,8 @@ export function matchSubjectByName(
 const STREAK_HORIZON_DAYS = 90;
 
 /** Todo lo que ha pasado en la ventana dada, listo para `challengeProgress`. */
-export async function loadWeekWorkData(window: WeekWindow): Promise<WeekWorkData> {
+export async function loadWeekWorkData(userId: string, window: WeekWindow): Promise<WeekWorkData> {
+  const prisma = db(userId);
   const [subjects, reviews, sessions, closedErrors, simulacros, streakSessions] = await Promise.all([
     prisma.subject.findMany({ select: { id: true, name: true } }),
     prisma.srsReview.findMany({
@@ -117,7 +118,8 @@ export async function loadWeekWorkData(window: WeekWindow): Promise<WeekWorkData
 }
 
 /** Racha de días de estudio contados de las sesiones reales, no del contador. */
-export async function loadStudyDays(limit = 200): Promise<Date[]> {
+export async function loadStudyDays(userId: string, limit = 200): Promise<Date[]> {
+  const prisma = db(userId);
   const sessions = await prisma.studySession.findMany({
     select: { startedAt: true },
     orderBy: { startedAt: 'desc' },

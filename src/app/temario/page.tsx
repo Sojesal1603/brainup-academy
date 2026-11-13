@@ -2,6 +2,7 @@ import nextDynamic from 'next/dynamic';
 import { BookOpenCheck, CalendarClock, Layers } from 'lucide-react';
 import { BoardSkeleton, PanelSkeleton } from '@/components/ui/Skeletons';
 import { getTemarioSubjects } from '@/lib/temario';
+import { currentTenant } from '@/lib/tenantContext';
 
 // Tablero e importador solo se descargan si se entra al temario, y cada uno
 // con su propio esqueleto: el resumen de arriba ya se lee mientras llegan.
@@ -15,7 +16,8 @@ const TemarioImporter = nextDynamic(() => import('@/components/temario/TemarioIm
 export const dynamic = 'force-dynamic';
 
 export default async function TemarioPage() {
-  const subjects = await getTemarioSubjects();
+  const { user } = await currentTenant();
+  const subjects = await getTemarioSubjects(user.id);
 
   const totals = subjects.reduce(
     (acc, subject) => ({

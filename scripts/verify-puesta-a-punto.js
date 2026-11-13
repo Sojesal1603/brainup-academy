@@ -17,6 +17,7 @@
  *   npm run verify:puesta-a-punto -- --live
  */
 const fs = require('fs');
+const { getTestUserId } = require('./testUser.js');
 const path = require('path');
 const ts = require('typescript');
 const { PrismaClient } = require('@prisma/client');
@@ -773,7 +774,7 @@ async function dataIntegrity() {
     ok('Una sola conversación de puesta a punto', `${conversations}`);
   }
 
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+  const user = await prisma.userProfile.findUnique({ where: { id: await getTestUserId() } });
   if (!user?.weeklyHoursDeclared) {
     warn('Todavía no le has dicho tus horas reales: la puesta a punto las pregunta primero');
   } else {
@@ -784,7 +785,7 @@ async function dataIntegrity() {
 async function routes() {
   console.log('\n5. Rutas en vivo');
 
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+  const user = await prisma.userProfile.findUnique({ where: { id: await getTestUserId() } });
   const checks = [
     {
       route: '/puesta-a-punto',
@@ -1087,14 +1088,14 @@ const BASE = process.env.BRAINUP_URL || 'http://localhost:3000';
     out.guardiaNoCrea = (await prisma.topic.count({ where: { title: { contains: 'TEMP Unidad guardián' } } })) === 0;
   }
 
-  const userBefore = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+  const userBefore = await prisma.userProfile.findUnique({ where: { id: await getTestUserId() } });
   if (userBefore) {
     const closed = await apply.applySetupActions([{ kind: 'timetable-complete' }]);
-    const userAfter = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+    const userAfter = await prisma.userProfile.findUnique({ where: { id: await getTestUserId() } });
     out.horarioCerrado = userAfter.timetableComplete === true;
     out.avisoHorario = closed.applied.join(' | ');
     await prisma.userProfile.update({
-      where: { id: 'user_default' },
+      where: { id: await getTestUserId() },
       data: { timetableComplete: userBefore.timetableComplete },
     });
   }

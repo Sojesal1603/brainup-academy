@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma } from './prisma';
+import { currentTenant } from './tenantContext';
 import { runAiText, hasAiProvider, TutorError } from './aiEngine';
 import { loadMaintenanceInput } from './maintenanceData';
 import { applyMaintenanceFixes as runApplyFixes, type ApplyFixesResult } from './maintenanceApply';
@@ -56,10 +56,11 @@ function revalidateEverything() {
 
 /** Ejecuta todas las comprobaciones y devuelve los hallazgos con su plan. */
 export async function scanSystem(): Promise<MaintenanceScanResult> {
+  const { user } = await currentTenant();
   const scannedAt = new Date().toISOString();
 
   try {
-    const input = await loadMaintenanceInput();
+    const input = await loadMaintenanceInput(user.id);
     const findings = scanAll(input);
     const fixes = allFixes(input);
 
@@ -93,7 +94,8 @@ export async function scanSystem(): Promise<MaintenanceScanResult> {
  * capa es lo exclusivo de Next: decirle qué vistas han dejado de ser ciertas.
  */
 export async function applyMaintenanceFixes(fixIds?: string[]): Promise<ApplyFixesResult> {
-  const result = await runApplyFixes(fixIds);
+  const { user } = await currentTenant();
+  const result = await runApplyFixes(user.id, fixIds);
   if (result.success) revalidateEverything();
   return result;
 }
@@ -114,6 +116,7 @@ export async function reportSystemIssue(input: {
   }
 
   try {
+    const { tenant: prisma } = await currentTenant();
     const issue = await prisma.systemIssue.create({
       data: {
         title,
@@ -145,6 +148,7 @@ export async function updateIssueStatus(input: {
   }
 
   try {
+    const { tenant: prisma } = await currentTenant();
     await prisma.systemIssue.update({
       where: { id },
       data: {
@@ -172,7 +176,8 @@ export async function updateIssueStatus(input: {
  * Next: revalidar la pantalla del taller para que veas el resultado sin recargar.
  */
 export async function triageReportedIssues(): Promise<IssueTriageResult> {
-  const result = await runIssueTriage();
+  const { user } = await currentTenant();
+  const result = await runIssueTriage(user.id);
   if (result.success) revalidatePath('/mantenimiento');
   return result;
 }
@@ -223,6 +228,7 @@ export async function auditSyllabusWithAi(subjectId: string): Promise<SyllabusAu
   }
 
   try {
+    const { user, tenant: prisma } = await currentTenant();
     const subject = await prisma.subject.findUnique({
       where: { id },
       select: {
@@ -245,7 +251,7 @@ export async function auditSyllabusWithAi(subjectId: string): Promise<SyllabusAu
 
     // La memoria del mantenimiento: qué se revisó los días anteriores y cómo
     // quedó el sistema. Evita proponer otra vez lo que ya se decidió no tocar.
-    const memoryBlock = await loadMemoryBlock(MEMORY_SCOPE_MAINTENANCE);
+    const memoryBlock = await loadMemoryBlock(user.id, MEMORY_SCOPE_MAINTENANCE);
 
     const systemInstruction = [
       'Eres el revisor de temarios de una academia de Bachillerato. Recibes la lista de unidades de UNA asignatura tal como la tiene cargada un alumno y tienes que detectar errores y proponer el orden correcto.',

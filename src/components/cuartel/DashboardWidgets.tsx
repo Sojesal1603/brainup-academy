@@ -12,8 +12,9 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
-import { prisma } from '@/lib/prisma';
-import { ensureUserProfile, getCachedProfileSummary, type ProfileSummary } from '@/lib/userProfile';
+import { db } from '@/lib/db';
+import { getTenantProfileSummary, type ProfileSummary } from '@/lib/userProfile';
+import { currentTenant } from '@/lib/tenantContext';
 import { safeDb } from '@/lib/dbTimeout';
 import { buildReviewQueue } from '@/lib/srs';
 import { levelFromXp, weekKeyOf } from '@/lib/challenges';
@@ -37,10 +38,10 @@ import { PanelSkeleton } from '@/components/ui/Skeletons';
  * siguen funcionando: una base lenta no vuelve a congelar toda la vista.
  */
 
-const getDashboardUser = cache(() =>
+const getDashboardUser = cache((userId: string) =>
   safeDb<ProfileSummary | null>(
     'cuartel.perfil',
-    async () => (await getCachedProfileSummary()) ?? (await ensureUserProfile()),
+    () => getTenantProfileSummary(userId),
     null,
     2_500
   )
@@ -56,8 +57,9 @@ interface TodayBlockPreview {
 }
 
 const readTodayBlocks = unstable_cache(
-  () =>
-    prisma.studyBlock.findMany({
+  (userId: string) => {
+    const prisma = db(userId);
+    return prisma.studyBlock.findMany({
       where: {
         date: {
           gte: startOfDay(new Date()),
@@ -66,13 +68,14 @@ const readTodayBlocks = unstable_cache(
       },
       select: { isCompleted: true, durationMinutes: true },
       orderBy: { orderIndex: 'asc' },
-    }),
-  ['cuartel-bloques-v1'],
+    });
+  },
+  ['cuartel-bloques-v2'],
   { revalidate: 10, tags: ['cuartel', 'plan'] }
 );
 
-const loadTodayBlocks = cache(() =>
-  safeDb<TodayBlockPreview[]>('cuartel.bloques', readTodayBlocks, [], 4_000)
+const loadTodayBlocks = cache((userId: string) =>
+  safeDb<TodayBlockPreview[]>('cuartel.bloques', () => readTodayBlocks(userId), [], 4_000)
 );
 
 interface ExamPreview {
@@ -83,8 +86,9 @@ interface ExamPreview {
 }
 
 const readUpcomingExams = unstable_cache(
-  () =>
-    prisma.exam.findMany({
+  (userId: string) => {
+    const prisma = db(userId);
+    return prisma.exam.findMany({
       where: { isCompleted: false, examDate: { gte: startOfDay(new Date()) } },
       select: {
         id: true,
@@ -94,13 +98,14 @@ const readUpcomingExams = unstable_cache(
       },
       orderBy: { examDate: 'asc' },
       take: 3,
-    }),
-  ['cuartel-examenes-v1'],
+    });
+  },
+  ['cuartel-examenes-v2'],
   { revalidate: 30, tags: ['cuartel', 'examenes'] }
 );
 
-const loadUpcomingExams = cache(() =>
-  safeDb<ExamPreview[]>('cuartel.examenes', readUpcomingExams, [], 4_000)
+const loadUpcomingExams = cache((userId: string) =>
+  safeDb<ExamPreview[]>('cuartel.examenes', () => readUpcomingExams(userId), [], 4_000)
 );
 
 interface RiskTopicPreview {
@@ -117,7 +122,8 @@ interface RiskData {
 }
 
 const readRiskData = unstable_cache(
-  async (): Promise<RiskData> => {
+  async (userId: string): Promise<RiskData> => {
+    const prisma = db(userId);
     const [measuredUnitsCount, riskTopics] = await Promise.all([
       prisma.topic.count({ where: { masterySource: { not: 'sin_medir' } } }),
       prisma.topic.findMany({
@@ -141,14 +147,14 @@ const readRiskData = unstable_cache(
     ]);
     return { measuredUnitsCount, riskTopics };
   },
-  ['cuartel-riesgo-v1'],
+  ['cuartel-riesgo-v2'],
   { revalidate: 20, tags: ['cuartel', 'temario', 'errores'] }
 );
 
-const loadRiskData = cache(() =>
+const loadRiskData = cache((userId: string) =>
   safeDb<RiskData>(
     'cuartel.riesgo',
-    readRiskData,
+    () => readRiskData(userId),
     { measuredUnitsCount: 0, riskTopics: [] },
     4_000
   )
@@ -167,7 +173,8 @@ interface FocusData {
 }
 
 const readFocusData = unstable_cache(
-  async (): Promise<FocusData> => {
+  async (userId: string): Promise<FocusData> => {
+    const prisma = db(userId);
     const [rawTopics, aggregate, abandoned] = await Promise.all([
         prisma.topic.findMany({
           where: { subject: { isTracked: true } },
@@ -202,14 +209,14 @@ const readFocusData = unstable_cache(
       },
     };
   },
-  ['cuartel-enfoque-v1'],
+  ['cuartel-enfoque-v2'],
   { revalidate: 15, tags: ['cuartel', 'enfoque'] }
 );
 
-const loadFocusData = cache(() =>
+const loadFocusData = cache((userId: string) =>
   safeDb<FocusData>(
     'cuartel.enfoque',
-    readFocusData,
+    () => readFocusData(userId),
     { topics: [], today: { focusedMinutes: 0, tutorMinutes: 0, abandoned: 0 } },
     4_000
   )
@@ -224,8 +231,9 @@ interface HabitPreview {
 }
 
 const readHabits = unstable_cache(
-  () =>
-    prisma.habit.findMany({
+  (userId: string) => {
+    const prisma = db(userId);
+    return prisma.habit.findMany({
       select: {
         id: true,
         title: true,
@@ -236,13 +244,14 @@ const readHabits = unstable_cache(
           select: { id: true },
         },
       },
-    }),
-  ['cuartel-habitos-v1'],
+    });
+  },
+  ['cuartel-habitos-v2'],
   { revalidate: 10, tags: ['cuartel', 'habitos'] }
 );
 
-const loadHabits = cache(() =>
-  safeDb<HabitPreview[]>('cuartel.habitos', readHabits, [], 4_000)
+const loadHabits = cache((userId: string) =>
+  safeDb<HabitPreview[]>('cuartel.habitos', () => readHabits(userId), [], 4_000)
 );
 
 interface ReviewData {
@@ -254,41 +263,42 @@ interface ReviewData {
 }
 
 const readReviewData = unstable_cache(
-  async (): Promise<ReviewData> => {
-    const user = await getDashboardUser();
-      const now = new Date();
-      const [srsScheduledTopics, weekChallengeRows] = await Promise.all([
-        prisma.topic.findMany({
-          where: { lastReviewedAt: { not: null } },
-          select: {
-            id: true,
-            lastReviewedAt: true,
-            srsIntervalDays: true,
-            srsEaseFactor: true,
-          },
-        }),
-        prisma.weeklyChallenge.findMany({
-          where: { weekKey: weekKeyOf(now) },
-          select: { status: true },
-        }),
-      ]);
+  async (userId: string): Promise<ReviewData> => {
+    const prisma = db(userId);
+    const now = new Date();
+    const [srsScheduledTopics, weekChallengeRows, profile] = await Promise.all([
+      prisma.topic.findMany({
+        where: { lastReviewedAt: { not: null } },
+        select: {
+          id: true,
+          lastReviewedAt: true,
+          srsIntervalDays: true,
+          srsEaseFactor: true,
+        },
+      }),
+      prisma.weeklyChallenge.findMany({
+        where: { weekKey: weekKeyOf(now) },
+        select: { status: true },
+      }),
+      prisma.userProfile.findUnique({ where: { id: userId }, select: { challengeXp: true } }),
+    ]);
 
     return {
       dueReviewsCount: buildReviewQueue(srsScheduledTopics, now, { onlyDue: true }).length,
       scheduledCount: srsScheduledTopics.length,
       challengesCompleted: weekChallengeRows.filter((row) => row.status === 'completed').length,
       challengesTotal: weekChallengeRows.length,
-      level: levelFromXp(user?.challengeXp ?? 0),
+      level: levelFromXp(profile?.challengeXp ?? 0),
     };
   },
-  ['cuartel-repaso-v1'],
+  ['cuartel-repaso-v2'],
   { revalidate: 15, tags: ['cuartel', 'repaso'] }
 );
 
-const loadReviewData = cache(() =>
+const loadReviewData = cache((userId: string) =>
   safeDb<ReviewData>(
     'cuartel.repaso',
-    readReviewData,
+    () => readReviewData(userId),
     {
       dueReviewsCount: 0,
       scheduledCount: 0,
@@ -311,8 +321,9 @@ interface MoodleTaskPreview {
 }
 
 const readMoodleTasks = unstable_cache(
-  () =>
-    prisma.moodleTask.findMany({
+  (userId: string) => {
+    const prisma = db(userId);
+    return prisma.moodleTask.findMany({
       where: { isCompleted: false, dueDate: { gte: startOfDay(new Date()) } },
       select: {
         id: true,
@@ -325,13 +336,14 @@ const readMoodleTasks = unstable_cache(
       },
       orderBy: { dueDate: 'asc' },
       take: 4,
-    }),
-  ['cuartel-moodle-v1'],
+    });
+  },
+  ['cuartel-moodle-v2'],
   { revalidate: 30, tags: ['cuartel', 'moodle'] }
 );
 
-const loadMoodleTasks = cache(() =>
-  safeDb<MoodleTaskPreview[]>('cuartel.moodle', readMoodleTasks, [], 4_000)
+const loadMoodleTasks = cache((userId: string) =>
+  safeDb<MoodleTaskPreview[]>('cuartel.moodle', () => readMoodleTasks(userId), [], 4_000)
 );
 
 /**
@@ -341,24 +353,24 @@ const loadMoodleTasks = cache(() =>
  * Cuartel ya estuviera cacheado.
  */
 const readDayPlan = unstable_cache(
-  async (dayKey: string) => {
+  async (userId: string, dayKey: string) => {
     const [year, month, day] = dayKey.split('-').map(Number);
     const now = new Date();
     now.setFullYear(year, month - 1, day);
-    return ensureTodayPlan(now);
+    return ensureTodayPlan(userId, now);
   },
-  ['cuartel-plan-v1'],
+  ['cuartel-plan-v2'],
   { revalidate: 15, tags: ['cuartel', 'plan'] }
 );
 
 const readTodayCheckIn = unstable_cache(
-  async (dayKey: string) => {
+  async (userId: string, dayKey: string) => {
     const [year, month, day] = dayKey.split('-').map(Number);
     const now = new Date();
     now.setFullYear(year, month - 1, day);
-    return getTodayClassCheckIn(now);
+    return getTodayClassCheckIn(userId, now);
   },
-  ['cuartel-clase-v1'],
+  ['cuartel-clase-v2'],
   { revalidate: 15, tags: ['cuartel', 'clase', 'temario'] }
 );
 
@@ -367,18 +379,20 @@ const readTodayCheckIn = unstable_cache(
 /* ------------------------------------------------------------------ */
 
 export async function DashboardIntro() {
-  const user = await getDashboardUser();
+  const { user } = await currentTenant();
+  const profile = await getDashboardUser(user.id);
   return (
     <p className="mt-1 text-xs text-slate-400">
       Centro de mando diario. Enfoque absoluto en tu nota de corte PAU (
-      {user?.targetGradePau ?? 13.5}/14).
+      {profile?.targetGradePau ?? 13.5}/14).
     </p>
   );
 }
 
 export async function DashboardMode() {
-  const user = await getDashboardUser();
-  return <ModeSwitcher currentMode={(user?.studyMode as StudyMode) || 'athlete'} />;
+  const { user } = await currentTenant();
+  const profile = await getDashboardUser(user.id);
+  return <ModeSwitcher currentMode={(profile?.studyMode as StudyMode) || 'athlete'} />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -386,10 +400,11 @@ export async function DashboardMode() {
 /* ------------------------------------------------------------------ */
 
 export async function DashboardMetrics() {
+  const { user } = await currentTenant();
   const [todayBlocks, upcomingExams, risk] = await Promise.all([
-    loadTodayBlocks(),
-    loadUpcomingExams(),
-    loadRiskData(),
+    loadTodayBlocks(user.id),
+    loadUpcomingExams(user.id),
+    loadRiskData(user.id),
   ]);
 
   const completedBlocksCount = todayBlocks.filter((block) => block.isCompleted).length;
@@ -510,7 +525,8 @@ export async function DashboardMetrics() {
 /* ------------------------------------------------------------------ */
 
 export async function DashboardFocus() {
-  const focus = await loadFocusData();
+  const { user } = await currentTenant();
+  const focus = await loadFocusData(user.id);
   return <FocusLock topics={focus.topics} today={focus.today} />;
 }
 
@@ -519,17 +535,18 @@ export async function DashboardFocus() {
 /* ------------------------------------------------------------------ */
 
 export async function DashboardToday() {
+  const { user } = await currentTenant();
   const dayKey = localDayKey(new Date());
   const [plan, checkInItems] = await Promise.all([
     safeDb<Awaited<ReturnType<typeof ensureTodayPlan>> | null>(
       'cuartel.plan',
-      () => readDayPlan(dayKey),
+      () => readDayPlan(user.id, dayKey),
       null,
       5_500
     ),
     safeDb<Awaited<ReturnType<typeof getTodayClassCheckIn>>>(
       'cuartel.clase',
-      () => readTodayCheckIn(dayKey),
+      () => readTodayCheckIn(user.id, dayKey),
       [],
       3_500
     ),
@@ -613,7 +630,8 @@ export function DashboardRadar() {
 }
 
 async function ExamsWidget() {
-  const exams = await loadUpcomingExams();
+  const { user } = await currentTenant();
+  const exams = await loadUpcomingExams(user.id);
 
   return (
     <div className="glass-card p-4 rounded-2xl space-y-3">
@@ -683,7 +701,8 @@ async function ExamsWidget() {
 }
 
 async function MoodleWidget() {
-  const moodleTasks = await loadMoodleTasks();
+  const { user } = await currentTenant();
+  const moodleTasks = await loadMoodleTasks(user.id);
 
   return (
     <div className="glass-card p-4 rounded-2xl space-y-3">
@@ -762,7 +781,8 @@ async function MoodleWidget() {
 }
 
 async function RiskWidget() {
-  const risk = await loadRiskData();
+  const { user } = await currentTenant();
+  const risk = await loadRiskData(user.id);
 
   return (
     <div className="glass-card p-4 rounded-2xl space-y-3">
@@ -818,7 +838,8 @@ async function RiskWidget() {
 }
 
 async function ReviewWidget() {
-  const review = await loadReviewData();
+  const { user } = await currentTenant();
+  const review = await loadReviewData(user.id);
 
   return (
     <div className="glass-card p-4 rounded-2xl space-y-3">
@@ -882,7 +903,8 @@ async function ReviewWidget() {
 }
 
 async function HabitsWidget() {
-  const habits = await loadHabits();
+  const { user } = await currentTenant();
+  const habits = await loadHabits(user.id);
   const habitItems = habits.map((habit) => ({
     id: habit.id,
     title: habit.title,

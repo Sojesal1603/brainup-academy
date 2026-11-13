@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import {
   buildWeeklyChallengeSeeds,
   challengeProgress,
@@ -79,8 +79,10 @@ export interface RefreshChallengesOptions {
 }
 
 export async function refreshWeeklyChallenges(
+  userId: string,
   options: RefreshChallengesOptions = {}
 ): Promise<RefreshChallengesResult> {
+  const prisma = db(userId);
   const empty: RefreshChallengesResult = {
     success: false,
     created: 0,
@@ -98,7 +100,7 @@ export async function refreshWeeklyChallenges(
     const weekKey = weekKeyOf(now);
     const prevWeek = previousWeekWindow(now);
 
-    const profile = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+    const profile = await prisma.userProfile.findUnique({ where: { id: userId } });
     if (!profile) return { ...empty, error: 'No existe el perfil del alumno.' };
 
     const [subjects, measuredTopics, dueTopicRows, pendingErrors, closedErrorsLastWeek, upcomingExamRows] =
@@ -166,7 +168,7 @@ export async function refreshWeeklyChallenges(
     // El trabajo real de la semana se carga ANTES de generar: la racha que entra
     // en los retos es la medida de las sesiones, no el contador del perfil, para
     // que la descripción del reto y su progreso digan lo mismo.
-    const workData = await loadWeekWorkData({ start: weekStart, end: weekEnd });
+    const workData = await loadWeekWorkData(userId, { start: weekStart, end: weekEnd });
     const measuredStreak = currentStudyStreak(workData.studyDays, now);
 
     const input: WeeklyChallengeInput = {
@@ -330,7 +332,8 @@ export async function refreshWeeklyChallenges(
 }
 
 /** Racha actual contada de las sesiones reales (para el resumen del Cuartel). */
-export async function readCurrentStudyStreak(): Promise<number> {
+export async function readCurrentStudyStreak(userId: string): Promise<number> {
+  const prisma = db(userId);
   const sessions = await prisma.studySession.findMany({
     select: { startedAt: true },
     orderBy: { startedAt: 'desc' },

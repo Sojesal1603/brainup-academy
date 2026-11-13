@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { prisma, withTransaction } from '@/lib/prisma';
-import { ensureUserProfile } from '@/lib/userProfile';
+import { db } from '@/lib/db';
+import { withTransaction } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { reviewDayProgress } from '@/lib/dayPlan';
 import {
   NIGHT_CLOSE_SCOPE,
@@ -23,7 +24,7 @@ function todayBounds(now: Date = new Date()): { start: Date; end: Date } {
 
 async function loadPending(userId: string, now: Date = new Date()) {
   const { start, end } = todayBounds(now);
-  return prisma.studyBlock.findMany({
+  return db(userId).studyBlock.findMany({
     where: {
       userId,
       date: { gte: start, lt: end },
@@ -55,12 +56,12 @@ function pendingView(rows: PendingRow[]) {
  */
 export async function GET() {
   try {
-    const user = await ensureUserProfile();
-    const review = await reviewDayProgress();
+    const { user, tenant } = await currentTenant();
+    const review = await reviewDayProgress(user.id);
 
     const [rows, closeMemory, delayMemory] = await Promise.all([
       loadPending(user.id),
-      prisma.agentMemory.findUnique({
+      tenant.agentMemory.findUnique({
         where: {
           userId_scope_day: {
             userId: user.id,
@@ -69,7 +70,7 @@ export async function GET() {
           },
         },
       }),
-      prisma.agentMemory.findUnique({
+      tenant.agentMemory.findUnique({
         where: {
           userId_scope_day: {
             userId: user.id,
@@ -132,8 +133,8 @@ export async function POST(request: Request) {
     typeof body.justification === 'string' ? body.justification.trim() : '';
 
   try {
-    const user = await ensureUserProfile();
-    const review = await reviewDayProgress();
+    const { user, tenant } = await currentTenant();
+    const review = await reviewDayProgress(user.id);
     const rows = await loadPending(user.id);
 
     if (action === 'cerrar') {
@@ -149,7 +150,7 @@ export async function POST(request: Request) {
         );
       }
 
-      await prisma.agentMemory.upsert({
+      await tenant.agentMemory.upsert({
         where: {
           userId_scope_day: {
             userId: user.id,

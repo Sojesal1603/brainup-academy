@@ -1,4 +1,5 @@
-import { prisma } from './prisma';
+import { db } from './db';
+import { resolveBackgroundUserId } from './backgroundUser';
 import { loadMaintenanceInput } from './maintenanceData';
 import {
   SRS_MAX_EASE,
@@ -91,6 +92,8 @@ export interface VigilanteReport {
 }
 
 export interface VigilanteOptions {
+  /** Cuenta cuyos datos se revisan. Sin esto se resuelve el único perfil. */
+  userId?: string;
   /** Dónde preguntar por la salud de la app. */
   serverUrl?: string;
   /** Aplicar los arreglos marcados como seguros. Por defecto, sí. */
@@ -383,9 +386,11 @@ function issueTitleFor(finding: MaintenanceFinding): string {
  * incidencias nuevas.
  */
 export async function syncIssues(
+  userId: string,
   findings: MaintenanceFinding[],
   options: { aiSummary?: string | null; dry?: boolean; log?: (line: string) => void } = {}
 ): Promise<{ opened: string[]; resolved: string[] }> {
+  const prisma = db(userId);
   const log = options.log ?? (() => {});
   const opened: string[] = [];
   const resolved: string[] = [];
@@ -526,6 +531,7 @@ function headlineOf(report: Omit<VigilanteReport, 'headline'>): string {
  * problema que existe para resolver.
  */
 export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise<VigilanteReport> {
+  const userId = options.userId ?? (await resolveBackgroundUserId());
   const log = options.log ?? (() => {});
   const startedAt = new Date();
   const dry = options.dry === true;
@@ -551,7 +557,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
    * el taller y el vigilante no pueden discrepar.
    */
   const loadInput = async (): Promise<MaintenanceInput> => {
-    const loaded = await loadMaintenanceInput(startedAt);
+    const loaded = await loadMaintenanceInput(userId, startedAt);
     if (loaded.trace) {
       loaded.trace.health = { reachable: health.reachable, ok: health.ok, detail: health.detail };
     }
@@ -601,7 +607,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
   if (autoFix && input) {
     const safeFixes = allFixes(input).filter((fix) => fix.safe);
     if (safeFixes.length > 0) {
-      const result = await applyMaintenanceFixes();
+      const result = await applyMaintenanceFixes(userId);
       applied = result.applied;
       problems.push(...result.problems);
       if (result.applied.length > 0) {
@@ -680,7 +686,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
       // La memoria del mantenimiento: cómo quedó el sistema en la ronda anterior y
       // qué se decidió no tocar. Sin esto, cada vuelta vuelve a proponer lo mismo
       // sobre los mismos hallazgos y no se avanza.
-      const memoryBlock = await loadMemoryBlock(MEMORY_SCOPE_MAINTENANCE);
+      const memoryBlock = await loadMemoryBlock(userId, MEMORY_SCOPE_MAINTENANCE);
       const reply = await runAiText({
         systemInstruction: memoryBlock
           ? `${AI_SYSTEM_INSTRUCTION}\n\n${memoryBlock}`
@@ -696,12 +702,12 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
       ai.summary = plan.summary;
 
       if (plan.fix) {
-        const result = await applyFixPlan([plan.fix]);
+        const result = await applyFixPlan(userId, [plan.fix]);
         ai.applied = result.applied.reduce((sum, item) => sum + item.count, 0);
         problems.push(...result.problems);
         log(`plan de la IA aplicado (${ai.model}): ${ai.applied} cambio(s)`);
 
-        input = await loadMaintenanceInput(startedAt);
+        input = await loadMaintenanceInput(userId, startedAt);
         findingsAfter = scanAll(input);
       } else {
         log(`la IA no propone cambios (${ai.model})`);
@@ -721,7 +727,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
   let triage: Awaited<ReturnType<typeof runIssueTriage>> | null = null;
   if (askAi && !dry) {
     try {
-      triage = await runIssueTriage({ log });
+      triage = await runIssueTriage(userId, { log });
       if (triage.success && triage.reviewed > 0) {
         notes.push(`reportes del alumno atendidos: ${triage.reviewed}`);
         if (triage.applied > 0) {
@@ -744,7 +750,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
   // comprobación lleva enfriamiento para no llamar a Moodle en cada ronda.
   if (!dry) {
     try {
-      const moodle = await healMoodleConnection({ log });
+      const moodle = await healMoodleConnection(userId, { log });
       if (moodle.synced || moodle.tokenState === 'caducado') notes.push(moodle.note);
     } catch (error) {
       notes.push(
@@ -763,7 +769,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
   // esto es una precaución de fondo, no una tarea de la que dependa nada.
   if (!dry) {
     try {
-      const snapshot = await snapshotTemarioIfStale();
+      const snapshot = await snapshotTemarioIfStale(userId);
       if (snapshot) notes.push(`copia del temario del día: ${snapshot}`);
     } catch (error) {
       notes.push(
@@ -775,7 +781,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
   }
 
   // 5. Lo que sigue mal, apuntado (y lo que ya no está, cerrado).
-  const issues = await syncIssues(findingsAfter, { aiSummary: ai.summary, dry, log });
+  const issues = await syncIssues(userId, findingsAfter, { aiSummary: ai.summary, dry, log });
 
   // 6. La ronda queda escrita para la próxima: es la memoria del mantenimiento.
   //
@@ -815,7 +821,7 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
       }
       if (ai.error) parts.push(`La IA no pudo ayudar: ${ai.error.slice(0, 120)}.`);
 
-      await saveDayMemory({
+      await saveDayMemory(userId, {
         scope: MEMORY_SCOPE_MAINTENANCE,
         summary: parts.join(' ').slice(0, 900),
         facts: [

@@ -1,5 +1,5 @@
 import { unstable_cache } from 'next/cache';
-import { prisma } from './prisma';
+import { db } from './db';
 import { isTopicStatus, TopicStatus, TOPIC_STATUSES } from './types';
 
 /**
@@ -184,8 +184,8 @@ function toUnit(topic: RawTopic): TemarioUnit {
 type TemarioSubjectBase = Omit<TemarioSubject, 'stats'>;
 
 const loadTemarioBase = unstable_cache(
-  async (): Promise<TemarioSubjectBase[]> => {
-    const subjects = await prisma.subject.findMany({
+  async (userId: string): Promise<TemarioSubjectBase[]> => {
+    const subjects = await db(userId).subject.findMany({
       orderBy: [{ order: 'asc' }, { name: 'asc' }],
       include: { topics: true },
     });
@@ -197,13 +197,13 @@ const loadTemarioBase = unstable_cache(
       units: sortUnits(subject.topics.map(toUnit)),
     }));
   },
-  ['temario-base-v1'],
+  ['temario-base-v2'],
   { revalidate: 20, tags: ['temario'] }
 );
 
 /** Todas las asignaturas con su temario, ordenado y con estadísticas. */
-export async function getTemarioSubjects(now = new Date()): Promise<TemarioSubject[]> {
-  const subjects = await loadTemarioBase();
+export async function getTemarioSubjects(userId: string, now = new Date()): Promise<TemarioSubject[]> {
+  const subjects = await loadTemarioBase(userId);
 
   return subjects.map((subject) => ({
     ...subject,
@@ -229,7 +229,8 @@ export interface CheckInItem {
  * Qué asignaturas has tenido hoy y qué unidad tocaría marcar en cada una.
  * Solo devuelve asignaturas cuya clase ya ha terminado (no interrumpe la mañana).
  */
-export async function getTodayClassCheckIn(now = new Date()): Promise<CheckInItem[]> {
+export async function getTodayClassCheckIn(userId: string, now = new Date()): Promise<CheckInItem[]> {
+  const prisma = db(userId);
   const dayOfWeek = now.getDay();
   if (dayOfWeek < 1 || dayOfWeek > 5) return [];
 
@@ -243,7 +244,7 @@ export async function getTodayClassCheckIn(now = new Date()): Promise<CheckInIte
   });
   if (periods.length === 0) return [];
 
-  const subjects = await getTemarioSubjects(now);
+  const subjects = await getTemarioSubjects(userId, now);
   const byId = new Map(subjects.map((subject) => [subject.id, subject]));
 
   const items: CheckInItem[] = [];
@@ -285,10 +286,10 @@ export async function getTodayClassCheckIn(now = new Date()): Promise<CheckInIte
 }
 
 /** Unidades de hoy resumidas para el Cuartel: qué toca dar en cada asignatura. */
-export async function getCurrentUnitBySubject(now = new Date()): Promise<
+export async function getCurrentUnitBySubject(userId: string, now = new Date()): Promise<
   Map<string, { current: TemarioUnit | null; next: TemarioUnit | null; total: number; seen: number }>
 > {
-  const subjects = await getTemarioSubjects(now);
+  const subjects = await getTemarioSubjects(userId, now);
   const map = new Map<
     string,
     { current: TemarioUnit | null; next: TemarioUnit | null; total: number; seen: number }
@@ -308,7 +309,7 @@ export async function getCurrentUnitBySubject(now = new Date()): Promise<
  * Obtiene el estado actual del temario para su uso en el planificador.
  * Devuelve las asignaturas con sus unidades y estados de progreso.
  */
-export async function fetchTemarioState(now = new Date()) {
-  const subjects = await getTemarioSubjects(now);
+export async function fetchTemarioState(userId: string, now = new Date()) {
+  const subjects = await getTemarioSubjects(userId, now);
   return { subjects };
 }

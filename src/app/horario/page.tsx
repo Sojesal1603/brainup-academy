@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { getCurrentUnitBySubject } from '@/lib/temario';
 import { CalendarClock, Clock, MapPin, School } from 'lucide-react';
 
@@ -21,13 +21,14 @@ function nextSchoolDayIndex(date: Date): number {
 }
 
 export default async function SchedulePage() {
+  const { user, tenant: prisma } = await currentTenant();
   const periods = await prisma.classPeriod.findMany({
     include: { subject: { select: { name: true, color: true } } },
     orderBy: [{ dayOfWeek: 'asc' }, { period: 'asc' }],
   });
 
   // Temario: en qué unidad va cada asignatura, para leer el horario con contexto.
-  const temarioBySubject = await getCurrentUnitBySubject();
+  const temarioBySubject = await getCurrentUnitBySubject(user.id);
   const unitLabel = (subjectId: string): string | null => {
     const entry = temarioBySubject.get(subjectId);
     const unit = entry?.current ?? entry?.next ?? null;

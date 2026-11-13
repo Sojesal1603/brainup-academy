@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { prisma } from './prisma';
+import { db } from './db';
 import { writeTemarioBackup } from './temarioBackup';
 
 /**
@@ -299,7 +299,8 @@ function findSubject(backup: LoadedBackup, subjectName: string): TemarioUnit[] |
  * tenía vuelta. Se llama desde la ronda del vigilante y no cuesta ni una llamada
  * de IA: son unos kilobytes de JSON.
  */
-export async function snapshotTemarioIfStale(hours = 20): Promise<string | null> {
+export async function snapshotTemarioIfStale(userId: string, hours = 20): Promise<string | null> {
+  const prisma = db(userId);
   const files = readDirSafe(BACKUP_DIR).filter((name) => TEMARIO_FILE.test(name));
   const newest = files
     .map((name) => {
@@ -378,7 +379,11 @@ export async function snapshotTemarioIfStale(hours = 20): Promise<string | null>
  * antes de escribir nada y, si no puede reponer una materia, lo dice con su
  * motivo en vez de dejarla a medias en silencio.
  */
-export async function restoreEmptyTemarios(reason = 'Reposición automática del temario perdido'): Promise<TemarioRestoreResult> {
+export async function restoreEmptyTemarios(
+  userId: string,
+  reason = 'Reposición automática del temario perdido'
+): Promise<TemarioRestoreResult> {
+  const prisma = db(userId);
   const restored: TemarioRestoreResult['restored'] = [];
   const problems: string[] = [];
   const safety: string[] = [];
@@ -397,7 +402,7 @@ export async function restoreEmptyTemarios(reason = 'Reposición automática del
   // materia (con el mismo formato que usan las demás puertas).
   for (const subject of subjects) {
     if (subject._count.topics === 0) continue;
-    const file = await writeTemarioBackup(subject.id, subject.name, reason).catch(() => null);
+    const file = await writeTemarioBackup(userId, subject.id, subject.name, reason).catch(() => null);
     if (file) safety.push(file);
   }
 

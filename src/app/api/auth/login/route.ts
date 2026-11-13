@@ -1,31 +1,14 @@
 import { NextResponse } from 'next/server';
-import {
-  AUTH_COOKIE,
-  appUrl,
-  createSessionToken,
-  readAuthConfig,
-  requestOrigin,
-  safeNextPath,
-  sessionMaxAgeSeconds,
-  verifyCredentials,
-} from '@/lib/authGate';
+import { createSupabaseServerClient } from '@/lib/auth';
+import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
+import { appUrl, safeNextPath } from '@/lib/requestUrl';
 
 /**
  * El botón «Entrar» del formulario de `/login`.
  *
- * Es un POST de formulario normal (no una acción de servidor) justo para que
- * funcione sin JavaScript: en el móvil, con la app recién instalada, no hay que
- * esperar a que hidrate nada para poder entrar.
- *
- * Cuatro cosas que hace a propósito:
- *   - Contesta 303, así que el navegador cambia el POST por un GET a la página
- *     pedida y recargar no reenvía la contraseña.
- *   - Solo la pone en la cookie si las credenciales son correctas, y nunca la
- *     devuelve en la respuesta ni en un mensaje de error.
- *   - Cuenta los intentos fallidos por IP: sin esto, una contraseña corta se
- *     prueba sola desde internet.
- *   - Si no hay credenciales configuradas, lo dice en la propia página en vez de
- *     dejar un formulario que no puede acertar nunca.
+ * Es un POST de formulario normal (no una acción de servidor) para que funcione
+ * sin JavaScript. Supabase Auth valida el email y la contraseña y deja su cookie
+ * de sesión; aquí no se guarda la contraseña ni se devuelve en la respuesta.
  */
 
 export const dynamic = 'force-dynamic';
@@ -36,8 +19,7 @@ const WINDOW_MS = 10 * 60 * 1000;
 
 /**
  * El contador vive en la memoria de la instancia. En Netlify cada función
- * arranca en frío, así que no es un muro: es un freno para el que insiste. Con
- * una contraseña larga (la que se genera en `.env`) eso basta.
+ * arranca en frío, así que no es un muro: es un freno para el que insiste.
  */
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
@@ -66,19 +48,7 @@ function registerFail(key: string, now: number): void {
   entry.count += 1;
 }
 
-/**
- * ¿Se está sirviendo por HTTPS? La cookie `Secure` solo puede ir con TLS: si se
- * marca en una visita por `http://`, el navegador la descarta y no hay sesión.
- * Se pregunta al mismo origen que se usa para redirigir (host y protocolo reales),
- * no a `request.url`, que ve el `0.0.0.0` donde escucha el servidor.
- */
-function isHttps(request: Request): boolean {
-  return requestOrigin(request).startsWith('https://');
-}
-
 function backToLogin(request: Request, reason: string, next: string): NextResponse {
-  // Con el origen del navegador, no con el del proceso: `request.url` trae el
-  // `0.0.0.0` en el que escucha `sirve.js`, y ese `Location` no se puede abrir.
   const url = appUrl(request, '/login');
   url.searchParams.set('error', reason);
   if (next !== '/') url.searchParams.set('next', next);
@@ -86,8 +56,7 @@ function backToLogin(request: Request, reason: string, next: string): NextRespon
 }
 
 export async function POST(request: Request) {
-  const config = readAuthConfig();
-  if (!config) return backToLogin(request, 'config', '/');
+  if (!hasSupabaseAuthConfig()) return backToLogin(request, 'config', '/');
 
   const now = Date.now();
   const key = clientKey(request);
@@ -100,26 +69,32 @@ export async function POST(request: Request) {
     return backToLogin(request, '1', '/');
   }
 
-  const usuario = String(form.get('usuario') ?? '');
-  const contrasena = String(form.get('contrasena') ?? '');
+  const email = String(form.get('email') ?? '').trim();
+  const password = String(form.get('password') ?? '');
   const destino = safeNextPath(form.get('next'));
 
-  if (!(await verifyCredentials(config, usuario, contrasena))) {
+  if (!email || !password) {
     registerFail(key, now);
     return backToLogin(request, '1', destino);
   }
 
-  attempts.delete(key);
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
-  const response = NextResponse.redirect(appUrl(request, destino), 303);
-  response.cookies.set({
-    name: AUTH_COOKIE,
-    value: await createSessionToken(config, now),
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isHttps(request),
-    path: '/',
-    maxAge: sessionMaxAgeSeconds(config),
-  });
-  return response;
+    if (error) {
+      registerFail(key, now);
+      console.warn(`[auth] login rechazado para ${email.slice(0, 3)}…: ${error.message}`);
+      return backToLogin(request, '1', destino);
+    }
+
+    attempts.delete(key);
+    return NextResponse.redirect(appUrl(request, destino), 303);
+  } catch (error) {
+    console.error(
+      '[auth] no se ha podido iniciar sesión:',
+      error instanceof Error ? error.message : error
+    );
+    return backToLogin(request, 'conexion', destino);
+  }
 }

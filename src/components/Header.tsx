@@ -2,9 +2,11 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { Flame, Target, Zap, Play, LogOut } from 'lucide-react';
 import { ensureUserProfile, getCachedProfileSummary } from '@/lib/userProfile';
+import { getOptionalUser } from '@/lib/auth';
 import { safeDb } from '@/lib/dbTimeout';
-import { readAuthConfig } from '@/lib/authGate';
+import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
 import PwaRegister from './PwaRegister';
+import AppReadySignal from './AppReadySignal';
 
 /**
  * El perfil que pinta la cabecera, sin poder tumbar la app.
@@ -24,13 +26,17 @@ async function loadProfile() {
       console.warn('[header] DATABASE_URL no está definida: cabecera con valores por defecto.');
       return null;
     }
+    const authUser = await getOptionalUser();
+    if (!authUser) return null;
+
     // La foto ligera se reutiliza entre navegaciones; si aún no existe la fila,
     // se crea una vez con el camino normal. El tope corto evita que una base
     // lenta retenga el stream de la cabecera: los valores por defecto ya están
     // pintados y la siguiente visita recibirá la foto cacheada.
     return await safeDb(
       'header.perfil',
-      async () => (await getCachedProfileSummary()) ?? (await ensureUserProfile()),
+      async () =>
+        (await getCachedProfileSummary(authUser.id)) ?? (await ensureUserProfile(authUser.id)),
       null,
       1_200
     );
@@ -54,7 +60,7 @@ type HeaderUser = Awaited<ReturnType<typeof loadProfile>>;
  * quedan detrás de esa consulta en Render.
  */
 export default function Header() {
-  const authOn = Boolean(readAuthConfig());
+  const authOn = hasSupabaseAuthConfig();
 
   return (
     <header className="sticky top-0 z-40 bg-[#0a0a0c]/90 backdrop-blur-md border-b border-white/10 px-4 py-3.5 sm:px-6">
@@ -67,7 +73,13 @@ export default function Header() {
 
 async function HeaderProfile({ authOn }: { authOn: boolean }) {
   const user = await loadProfile();
-  return <HeaderChrome user={user} authOn={authOn} />;
+  return (
+    <>
+      <HeaderChrome user={user} authOn={authOn} />
+      {/* Avisa a la splash de que los datos del usuario ya están resueltos. */}
+      <AppReadySignal />
+    </>
+  );
 }
 
 function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {

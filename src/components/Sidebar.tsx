@@ -124,12 +124,15 @@ export default function Sidebar() {
                 aria-hidden="true"
                 className="absolute inset-0 rounded-xl border border-white/15 bg-white/[0.04] shadow-[0_0_22px_rgba(139,92,246,0.35)]"
               />
+              {/* Sin optimizador: el PNG se sirve directo y, al cambiar el logo,
+                  no se queda una miniatura vieja cacheada durante horas. */}
               <Image
                 src="/logo-brainup.png"
-                alt="Logo de BrainUp Academy: un cerebro estudioso con birrete, gafas y libro"
+                alt="Logo de BrainUp Academy: un cerebro rojo guiñando un ojo, con bombilla y gráfica"
                 width={40}
                 height={40}
                 priority
+                unoptimized
                 className="relative h-9 w-9 rounded-lg transition-transform duration-300 group-hover:scale-105"
               />
             </span>

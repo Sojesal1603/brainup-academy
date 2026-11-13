@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import {
   buildRetentionAnalytics,
   buildReviewQueue,
@@ -49,6 +49,7 @@ function agoLabel(date: Date, now: Date): string {
 }
 
 export default async function RepasoPage() {
+  const { tenant: prisma } = await currentTenant();
   const now = new Date();
   const windowStart = new Date(now.getTime() - ANALYSIS_WINDOW_DAYS * 86400000);
 

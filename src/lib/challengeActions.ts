@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { currentTenant } from './tenantContext';
 import {
   refreshWeeklyChallenges as runRefresh,
   type RefreshChallengesResult,
@@ -16,7 +17,8 @@ import {
  */
 
 export async function refreshWeeklyChallenges(): Promise<RefreshChallengesResult> {
-  return runRefresh({
+  const { user } = await currentTenant();
+  return runRefresh(user.id, {
     onChanged: () => {
       revalidatePath('/retos');
       revalidatePath('/');

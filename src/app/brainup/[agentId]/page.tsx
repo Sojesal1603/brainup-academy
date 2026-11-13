@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { agentSlug, looksLikeUuid } from '@/lib/agentSlug';
 import nextDynamic from 'next/dynamic';
 import { ChatSkeleton } from '@/components/ui/Skeletons';
@@ -49,6 +49,7 @@ export default async function TutorPage({
 }: {
   params: Promise<{ agentId: string }>;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const { agentId } = await params;
   const modelLabel = getConfiguredModelLabel();
   // Motores que pueden escribir ahora mismo: con ellos se comparan las

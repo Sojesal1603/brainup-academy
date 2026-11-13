@@ -16,7 +16,7 @@
  * (una carpeta rota no puede tumbar la sincronización entera).
  */
 
-import { prisma } from './prisma';
+import { db } from './db';
 import { MoodleError, matchSubjectForCourse, type MoodleCourseInfo, type MoodleMaterialDraft } from './moodleWs';
 import { getMoodleSessionAuth, saveMoodleSessionAuth } from './moodleAuth';
 import {
@@ -67,15 +67,16 @@ export interface MoodleSessionCheck {
  * Solo entra y mira quién es. La usa el vigilante para saber si la conexión está
  * viva sin sincronizar todo.
  */
-export async function checkMoodleSession(): Promise<MoodleSessionCheck> {
-  const auth = await getMoodleSessionAuth();
+export async function checkMoodleSession(userId: string): Promise<MoodleSessionCheck> {
+  const prisma = db(userId);
+  const auth = await getMoodleSessionAuth(userId);
   if (!auth) throw new MoodleSessionNotConnectedError();
 
   const session = await loginToMoodle(auth);
 
   // Se apunta la comprobación: es un dato, no una promesa.
   await prisma.userProfile.update({
-    where: { id: 'user_default' },
+    where: { id: userId },
     data: {
       moodleSessionAt: new Date(),
       moodleTokenState: 'ok',
@@ -151,11 +152,13 @@ async function enrichMaterials(
  * lo pinte igual.
  */
 export async function syncMoodleViaSession(
+  userId: string,
   options: { log?: (line: string) => void } = {}
 ): Promise<MoodleWsSyncStats> {
+  const prisma = db(userId);
   const log = options.log ?? (() => {});
 
-  const auth = await getMoodleSessionAuth();
+  const auth = await getMoodleSessionAuth(userId);
   if (!auth) throw new MoodleSessionNotConnectedError();
 
   const session = await loginToMoodle(auth);
@@ -215,15 +218,15 @@ export async function syncMoodleViaSession(
       );
     }
 
-    await storeCourseWithMaterials({ course, subjectId, sections, materials });
+    await storeCourseWithMaterials(userId, { course, subjectId, sections, materials });
     perCourse.push({ name: course.fullName, materials: materials.length, tasks: taskCount });
   }
 
-  const storedTasks = await storeTasks(allTasks);
+  const storedTasks = await storeTasks(userId, allTasks);
 
   // La conexión queda dada por buena: se acaba de entrar de verdad.
   await prisma.userProfile.update({
-    where: { id: 'user_default' },
+    where: { id: userId },
     data: {
       moodleSiteName: session.siteName,
       moodleSessionAt: new Date(),
@@ -238,11 +241,11 @@ export async function syncMoodleViaSession(
   // dijo que NO se guardara su contraseña, no se guarda ahora por la puerta de
   // atrás. Solo se actualiza la marca de la última sesión.
   const profile = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
+    where: { id: userId },
     select: { moodlePasswordSealed: true },
   });
 
-  await saveMoodleSessionAuth({
+  await saveMoodleSessionAuth(userId, {
     baseUrl: session.baseUrl,
     username: auth.username,
     password: auth.password,
@@ -264,8 +267,8 @@ export async function syncMoodleViaSession(
 }
 
 /** Cursos del alumno, entrando por sesión (para diagnósticos y pruebas). */
-export async function listMoodleSessionCourses(): Promise<MoodleCourseInfo[]> {
-  const auth = await getMoodleSessionAuth();
+export async function listMoodleSessionCourses(userId: string): Promise<MoodleCourseInfo[]> {
+  const auth = await getMoodleSessionAuth(userId);
   if (!auth) throw new MoodleSessionNotConnectedError();
   const session = await loginToMoodle(auth);
   return fetchEnrolledCourses(session);

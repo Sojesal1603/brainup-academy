@@ -1,5 +1,4 @@
-import { prisma } from './prisma';
-import { updateDefaultProfile } from './userProfile';
+import { db } from './db';
 import { effectiveMastery } from './knowledge';
 import { estimateRetention, isDue, overdueDays, startOfDay } from './srs';
 import { dueReviewCardsByTopic } from './reviewCards';
@@ -213,11 +212,12 @@ interface PlanningContext {
   hasTemario: boolean;
 }
 
-async function loadPlanningContext(now: Date): Promise<PlanningContext> {
+async function loadPlanningContext(userId: string, now: Date): Promise<PlanningContext> {
+  const prisma = db(userId);
   const todayStart = startOfDay(now);
 
   const [user, subjects, periods, tasks, todaySessions, recentBlocks, lastSession] = await Promise.all([
-    prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+    prisma.userProfile.findUnique({ where: { id: userId } }),
     prisma.subject.findMany({
       where: { isTracked: true },
       orderBy: [{ order: 'asc' }, { name: 'asc' }],
@@ -442,6 +442,7 @@ export interface PersistDayResult {
  * hace nueve días no es trabajo, es culpa.
  */
 export async function persistDayPlan(
+  userId: string,
   options: {
     day?: Date;
     now?: Date;
@@ -450,10 +451,11 @@ export async function persistDayPlan(
     budgetMinutes?: number;
   } = {}
 ): Promise<PersistDayResult> {
+  const prisma = db(userId);
   const now = options.now ?? new Date();
   const day = startOfDay(options.day ?? now);
   const isToday = day.getTime() === startOfDay(now).getTime();
-  const ctx = await loadPlanningContext(now);
+  const ctx = await loadPlanningContext(userId, now);
 
   if (!ctx.hasTemario) {
     return {
@@ -627,7 +629,7 @@ export async function persistDayPlan(
   // deja de ser una pantalla aparte y aparece en la agenda del día.
   if (isToday && effectiveMinutes >= 10) {
     try {
-      const dueGroups = (await dueReviewCardsByTopic(now)).slice(0, 2);
+      const dueGroups = (await dueReviewCardsByTopic(userId, now)).slice(0, 2);
       if (dueGroups.length > 0) {
         const dueTopics = await prisma.topic.findMany({
           where: { id: { in: dueGroups.map((group) => group.topicId) } },
@@ -698,16 +700,17 @@ export async function persistDayPlan(
 }
 
 /** Rehace el plan de los próximos siete días con duraciones variables. */
-export async function regenerateWeekPlan(mode?: StudyMode): Promise<{
+export async function regenerateWeekPlan(userId: string, mode?: StudyMode): Promise<{
   success: boolean;
   days: number;
   count: number;
   plannedMinutes: number;
   weeklyHoursCap: number;
 }> {
+  const prisma = db(userId);
   const now = new Date();
   if (mode) {
-    await updateDefaultProfile({ studyMode: mode });
+    await prisma.userProfile.update({ where: { id: userId }, data: { studyMode: mode } });
   }
 
   // Una primera pasada guarda hoy (con el tiempo que queda de verdad); las
@@ -716,12 +719,12 @@ export async function regenerateWeekPlan(mode?: StudyMode): Promise<{
   let plannedMinutes = 0;
   for (let offset = 0; offset < 7; offset++) {
     const day = new Date(startOfDay(now).getTime() + offset * DAY_MS);
-    const result = await persistDayPlan({ day, now });
+    const result = await persistDayPlan(userId, { day, now });
     count += result.created;
     plannedMinutes += result.plannedMinutes;
   }
 
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+  const user = await prisma.userProfile.findUnique({ where: { id: userId } });
 
   return {
     success: true,
@@ -768,8 +771,9 @@ function isoDay(date: Date): string {
 }
 
 /** Lee el plan guardado de hoy y lo completa con el contexto vivo. */
-export async function computeDayPlan(now: Date = new Date()): Promise<DayPlan> {
-  const ctx = await loadPlanningContext(now);
+export async function computeDayPlan(userId: string, now: Date = new Date()): Promise<DayPlan> {
+  const prisma = db(userId);
+  const ctx = await loadPlanningContext(userId, now);
   const todayStart = startOfDay(now);
   const periods = ctx.periodByDay.get(todayStart.getDay()) ?? [];
 
@@ -883,25 +887,28 @@ export async function computeDayPlan(now: Date = new Date()): Promise<DayPlan> {
  * segunda espera a la primera, y mientras tanto todas las navegaciones se
  * quedan en «cargando». Compartir la misma promesa lo evita de raíz.
  */
-let ensureInFlight: Promise<DayPlan> | null = null;
-/** Día local en el que ya se comprobó el plan: no se repite en cada clic. */
-let ensuredDayKey: string | null = null;
+const ensureInFlight = new Map<string, Promise<DayPlan>>();
+/** Días locales ya comprobados, por cuenta: no se repiten en cada clic. */
+const ensuredDayKeys = new Set<string>();
 
 /**
  * Se llama al abrir el Cuartel: si hoy no hay plan (o solo quedan sesiones
  * cerradas), lo genera. Es idempotente y barato: si ya hay sesiones vivas, no
  * escribe nada. Así la app funciona sin que haya que organizar nada.
  */
-export async function ensureTodayPlan(now: Date = new Date()): Promise<DayPlan> {
+export async function ensureTodayPlan(userId: string, now: Date = new Date()): Promise<DayPlan> {
   const dayKey = isoDay(now);
+  const key = `${userId}:${dayKey}`;
 
   // Ya se miró hoy: leer el plan es barato y no puede bloquear a nadie.
-  if (ensuredDayKey === dayKey) return computeDayPlan(now);
+  if (ensuredDayKeys.has(key)) return computeDayPlan(userId, now);
 
-  // Hay una comprobación en marcha: se espera a ESA, no se lanza otra.
-  if (ensureInFlight) return ensureInFlight;
+  // Hay una comprobación en marcha para esta cuenta: se espera a ESA.
+  const inFlight = ensureInFlight.get(key);
+  if (inFlight) return inFlight;
 
-  ensureInFlight = (async () => {
+  const run = (async () => {
+    const prisma = db(userId);
     try {
       const todayStart = startOfDay(now);
       // Un plan «vivo» es el que ha hecho este motor: trae objetivo y motivo. Los
@@ -919,31 +926,34 @@ export async function ensureTodayPlan(now: Date = new Date()): Promise<DayPlan> 
       });
 
       if (live === 0) {
-        await regenerateWeekPlan();
+        await regenerateWeekPlan(userId);
       }
 
       // Se marca aunque el motor no haya podido crear sesiones (por ejemplo,
       // sin ventana de tiempo). Si no, cada visita volvería a regenerar la
       // semana entera: exactamente el bucle de escrituras que congelaba la app.
-      ensuredDayKey = dayKey;
+      ensuredDayKeys.add(key);
     } catch (error) {
       // Que la generación falle no puede tumbar el Cuartel: se enseña lo que
       // haya, pero se deja rastro para que el vigilante pueda verlo.
       console.error('[plan] no se pudo generar el plan del día:', error);
-    } finally {
-      ensureInFlight = null;
     }
 
-    return computeDayPlan(now);
+    return computeDayPlan(userId, now);
   })();
 
-  return ensureInFlight;
+  ensureInFlight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    ensureInFlight.delete(key);
+  }
 }
 
 /** Fuerza la regeneración de hoy (botón «Recalcular»). */
-export async function regenerateTodayPlan(now: Date = new Date()): Promise<DayPlan> {
-  await persistDayPlan({ day: startOfDay(now), now, force: true });
-  return computeDayPlan(now);
+export async function regenerateTodayPlan(userId: string, now: Date = new Date()): Promise<DayPlan> {
+  await persistDayPlan(userId, { day: startOfDay(now), now, force: true });
+  return computeDayPlan(userId, now);
 }
 
 /* ------------------------------------------------------------------ */
@@ -990,9 +1000,10 @@ export interface DayReview {
 }
 
 /** Revisa qué se ha completado hoy y qué se ha retrasado. */
-export async function reviewDayProgress(now: Date = new Date()): Promise<DayReview> {
+export async function reviewDayProgress(userId: string, now: Date = new Date()): Promise<DayReview> {
+  const prisma = db(userId);
   const todayStart = startOfDay(now);
-  const ctx = await loadPlanningContext(now);
+  const ctx = await loadPlanningContext(userId, now);
   const periods = ctx.periodByDay.get(todayStart.getDay()) ?? [];
   const availability = computeAvailability({
     day: todayStart,
@@ -1112,20 +1123,25 @@ export interface ReplanResult {
  * de verdad queda hoy entre los exámenes y el temario activos.
  */
 export async function replanToday(
+  userId: string,
   options: { now?: Date; budgetMinutes?: number; mode?: StudyMode } = {}
 ): Promise<ReplanResult> {
+  const prisma = db(userId);
   const now = options.now ?? new Date();
   if (options.mode) {
-    await updateDefaultProfile({ studyMode: options.mode });
+    await prisma.userProfile.update({ where: { id: userId }, data: { studyMode: options.mode } });
   }
 
-  const persisted = await persistDayPlan({
+  const persisted = await persistDayPlan(userId, {
     day: startOfDay(now),
     now,
     force: true,
     budgetMinutes: options.budgetMinutes,
   });
-  const [plan, review] = await Promise.all([computeDayPlan(now), reviewDayProgress(now)]);
+  const [plan, review] = await Promise.all([
+    computeDayPlan(userId, now),
+    reviewDayProgress(userId, now),
+  ]);
 
   return {
     plan,
@@ -1140,9 +1156,11 @@ export async function replanToday(
 
 /** Unidades con probabilidad baja de recuerdo el día del examen. */
 export async function examCriticalTopics(
+  userId: string,
   now: Date = new Date(),
   limit = 5
 ): Promise<Array<{ topicId: string; title: string; subjectName: string; recall: number; daysToExam: number }>> {
+  const prisma = db(userId);
   const todayStart = startOfDay(now);
   const topics = await prisma.topic.findMany({
     where: { srsStability: { not: null }, lastReviewedAt: { not: null } },

@@ -1,6 +1,6 @@
 import nextDynamic from 'next/dynamic';
 import { notFound } from 'next/navigation';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
 // La corrección no lleva estado ni manejadores: se renderiza en el servidor y
 // no envía JavaScript propio al móvil.
@@ -19,6 +19,7 @@ export default async function PauSessionPage({
 }: {
   params: Promise<{ sessionId: string }>;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const { sessionId } = await params;
 
   const session = await prisma.pauExamSession.findUnique({ where: { id: sessionId } });

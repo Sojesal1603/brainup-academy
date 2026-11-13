@@ -1,5 +1,4 @@
-import { prisma } from '@/lib/prisma';
-import { ensureUserProfile } from '@/lib/userProfile';
+import { currentTenant } from '@/lib/tenantContext';
 import { calculateRequiredHoursForTopic } from '@/lib/planner';
 import { reviewDayProgress } from '@/lib/dayPlan';
 import { StudyMode } from '@/lib/types';
@@ -26,12 +25,15 @@ function localDayKey(date: Date): string {
 }
 
 export default async function PlannerPage() {
-  // Memoizado por petición: el Header del layout ya ha pedido este perfil.
-  const user = await ensureUserProfile();
+  const { user, tenant: prisma } = await currentTenant();
+  const profile = await prisma.userProfile.findUnique({
+    where: { id: user.id },
+    select: { studyMode: true, weeklyHoursCap: true },
+  });
 
   // Foto del avance real del día: es la misma que usa el motor al recalcular,
   // así que la tarjeta y el plan nuevo no pueden contar cosas distintas.
-  const review = await reviewDayProgress();
+  const review = await reviewDayProgress(user.id);
 
   const subjects = await prisma.subject.findMany({
     include: {
@@ -108,7 +110,7 @@ export default async function PlannerPage() {
           </p>
         </div>
 
-        <ModeSwitcher currentMode={(user?.studyMode as StudyMode) || 'athlete'} />
+        <ModeSwitcher currentMode={(profile?.studyMode as StudyMode) || 'athlete'} />
       </div>
 
       {/* Revisión diaria: qué se ha hecho, qué queda y qué se retrasó */}
@@ -244,7 +246,7 @@ export default async function PlannerPage() {
           </div>
           <div className="flex items-baseline gap-2">
             <span className="metric-glow text-2xl font-black text-blue-400 font-mono">
-              {user?.weeklyHoursCap}h
+              {profile?.weeklyHoursCap ?? 0}h
             </span>
             <span className="text-xs text-slate-400">por semana configuradas</span>
           </div>

@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import CreateErrorLauncher from '@/components/errores/CreateErrorLauncher';
 import ErrorCard from '@/components/errores/ErrorCard';
 import { AlertOctagon, ShieldCheck, AlertTriangle, Filter, Sparkles } from 'lucide-react';
@@ -11,6 +11,7 @@ export default async function ErrorsPage({
 }: {
   searchParams: Promise<{ subjectId?: string; cause?: string }>;
 }) {
+  const { tenant: prisma } = await currentTenant();
   const { subjectId, cause } = await searchParams;
 
   const subjects = await prisma.subject.findMany({

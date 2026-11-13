@@ -36,6 +36,7 @@
  */
 
 const fs = require('fs');
+const { getTestUserId } = require('./testUser.js');
 const path = require('path');
 const ts = require('typescript');
 
@@ -1768,7 +1769,7 @@ async function liveSection() {
     // decidió y se ejecutó) no se borra. Es la última red: el motor y la IA ya
     // prometen esto, y esto lo exige.
     const Apply = require(path.join(outDir, 'maintenanceApply.js'));
-    const negado = await Apply.applyFixPlan([
+    const negado = await Apply.applyFixPlan(await getTestUserId(), [
       {
         id: 'prueba_guardian',
         label: 'Plan que pide borrar una unidad con datos dentro',
@@ -1853,7 +1854,7 @@ async function liveSection() {
     const Data = require(path.join(outDir, 'maintenanceData.js'));
     const Control = require(path.join(outDir, 'serverControl.js'));
 
-    const inputReal = await Data.loadMaintenanceInput();
+    const inputReal = await Data.loadMaintenanceInput(await getTestUserId());
     check(
       'El rastro se lee de los logs de verdad',
       inputReal.trace?.serverLogFound === true && typeof inputReal.trace?.serverLogAt === 'string',
@@ -2031,7 +2032,7 @@ async function reportsAndMoodleSection() {
     try {
       // La IA contesta lo que contestaría de verdad: que eso no lo arregla el taller.
       canned = `no | ${report.id} | Eso es la velocidad de tu ordenador al montar las pantallas, no un dato roto del sistema. No hay nada que ordenar ni que borrar por nuestra parte.`;
-      const result = await T.triageReportedIssues({ log: () => {} });
+      const result = await T.triageReportedIssues(await getTestUserId(), { log: () => {} });
       const after = await prisma.systemIssue.findUnique({ where: { id: report.id } });
 
       check('El reporte tuyo entra en la pasada', result.success === true && result.reviewed >= 1, `${result.reviewed} revisado(s) · ${result.model}`);
@@ -2045,7 +2046,7 @@ async function reportsAndMoodleSection() {
       // Y si la IA propone un arreglo que no existe, no se toca nada.
       const before = await prisma.systemIssue.count();
       canned = `arreglo | ${report.id} | arreglo_inventado | da igual`;
-      await T.triageReportedIssues({ log: () => {} });
+      await T.triageReportedIssues(await getTestUserId(), { log: () => {} });
       check('Un arreglo inventado no cambia el estado del reporte', (await prisma.systemIssue.count()) === before);
     } finally {
       await prisma.systemIssue.deleteMany({ where: { id: report.id } });
@@ -2053,7 +2054,7 @@ async function reportsAndMoodleSection() {
 
     /* --- En vivo: un Moodle de mentira ---------------------------------- */
     const http = require('http');
-    const profile = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+    const profile = await prisma.userProfile.findUnique({ where: { id: await getTestUserId() } });
 
     if (profile.moodleBaseUrl || profile.moodleToken) {
       console.log('  (omitido: ya tienes un Moodle conectado; no se toca lo que funciona)');
@@ -2097,7 +2098,7 @@ async function reportsAndMoodleSection() {
 
     try {
       await prisma.userProfile.update({
-        where: { id: 'user_default' },
+        where: { id: await getTestUserId() },
         data: {
           moodleBaseUrl: `http://127.0.0.1:${port}`,
           moodleToken: 'token-de-prueba-1234567890',
@@ -2110,7 +2111,7 @@ async function reportsAndMoodleSection() {
       });
 
       const dead = await H.healMoodleConnection({ force: true, log: () => {} });
-      const marked = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+      const marked = await prisma.userProfile.findUnique({ where: { id: await getTestUserId() } });
       const aviso = await prisma.systemIssue.findFirst({
         where: { title: H.MOODLE_TOKEN_ISSUE_TITLE, status: { not: 'resuelto' } },
       });
@@ -2136,7 +2137,7 @@ async function reportsAndMoodleSection() {
     } finally {
       fake.close();
       await prisma.userProfile.update({
-        where: { id: 'user_default' },
+        where: { id: await getTestUserId() },
         data: {
           moodleBaseUrl: profile.moodleBaseUrl,
           moodleToken: profile.moodleToken,
@@ -2150,7 +2151,7 @@ async function reportsAndMoodleSection() {
       });
       await prisma.systemIssue.deleteMany({ where: { title: H.MOODLE_TOKEN_ISSUE_TITLE } });
 
-      const restored = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+      const restored = await prisma.userProfile.findUnique({ where: { id: await getTestUserId() } });
       check(
         'La conexión de verdad del alumno se queda como estaba',
         restored.moodleBaseUrl === null && restored.moodleToken === null && restored.moodleTokenState === profile.moodleTokenState,
@@ -2230,7 +2231,7 @@ async function temarioCopiesSection() {
 
     // La copia del día: con 0 horas de caducidad se escribe siempre que haya
     // temario. Así se comprueba que la red existe de verdad, no solo la función.
-    const creada = await R.snapshotTemarioIfStale(0).catch((error) => {
+    const creada = await R.snapshotTemarioIfStale(await getTestUserId(), 0).catch((error) => {
       check('La copia del día se puede escribir', false, error.message);
       return null;
     });

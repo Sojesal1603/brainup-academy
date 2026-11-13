@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { scanSystem } from '@/lib/maintenanceActions';
 import { loadMaintenanceInput } from '@/lib/maintenanceData';
 import { SEVERITY_META, type MaintenanceSeverity } from '@/lib/maintenance';
@@ -52,9 +52,10 @@ const SEVERITY_ICON: Record<MaintenanceSeverity, typeof AlertOctagon> = {
 };
 
 export default async function MaintenancePage() {
+  const { user, tenant: prisma } = await currentTenant();
   const [scan, input, issues, subjects] = await Promise.all([
     scanSystem(),
-    loadMaintenanceInput(),
+    loadMaintenanceInput(user.id),
     prisma.systemIssue.findMany({
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       take: 40,

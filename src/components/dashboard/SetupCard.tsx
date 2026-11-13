@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight, ClipboardList } from 'lucide-react';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { getSetupState } from '@/lib/setupApply';
 
 /**
@@ -15,7 +15,8 @@ import { getSetupState } from '@/lib/setupApply';
  * Es un componente de servidor puro: no añade JavaScript al móvil.
  */
 export default async function SetupCard() {
-  const setup = await getSetupState();
+  const { user, tenant: prisma } = await currentTenant();
+  const setup = await getSetupState(user.id);
   const setupPending = setup.checklist.pending.map((subject) => subject.name);
   const showSetupCard =
     !setup.snapshot.setupCompletedAt &&

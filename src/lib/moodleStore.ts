@@ -14,8 +14,7 @@
  *     quita del índice, pero la copia local que ya tenía se queda en su disco.
  */
 
-import { prisma } from './prisma';
-import { currentUserId } from './tenant';
+import { db } from './db';
 import type { MoodleCourseInfo, MoodleMaterialDraft } from './moodleWs';
 
 export interface StoreCourseResult {
@@ -27,7 +26,7 @@ export interface StoreCourseResult {
  * Guarda (o actualiza) un curso y sus materiales, y quita del índice los
  * materiales que ya no están en Moodle.
  */
-export async function storeCourseWithMaterials(params: {
+export async function storeCourseWithMaterials(userId: string, params: {
   course: MoodleCourseInfo;
   subjectId: string | null;
   sections: number;
@@ -36,7 +35,7 @@ export async function storeCourseWithMaterials(params: {
   const { course, subjectId, sections, materials } = params;
   // Cada cuenta tiene sus propios cursos: el mismo `moodleId` puede repetirse
   // entre dos alumnos de centros distintos sin pisarse.
-  const userId = currentUserId();
+  const prisma = db(userId);
 
   const row = await prisma.moodleCourse.upsert({
     where: { userId_moodleId: { userId, moodleId: course.moodleId } },
@@ -113,8 +112,8 @@ const NO_DATE = new Date(0);
  *   3. y si no, se adopta la entrega que entró antes por el calendario iCal en vez
  *      de crear otra.
  */
-export async function storeTasks(drafts: MoodleTaskWrite[]): Promise<StoreTasksResult> {
-  const userId = currentUserId();
+export async function storeTasks(userId: string, drafts: MoodleTaskWrite[]): Promise<StoreTasksResult> {
+  const prisma = db(userId);
   let tasks = 0;
   let submitted = 0;
   let adopted = 0;

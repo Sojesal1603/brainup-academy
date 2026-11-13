@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import { effectiveMastery } from './knowledge';
 import { regenerateWeekPlan } from './dayPlan';
 import { StudyMode } from './types';
@@ -36,8 +36,9 @@ export function calculateRequiredHoursForTopic(
  *   - estima el trabajo que queda por fases,
  *   - y reparte **sesiones de 10 a 90 minutos** que caben exactamente.
  */
-export async function regenerateWeeklyPlan(mode: StudyMode = 'athlete') {
-  const result = await regenerateWeekPlan(mode);
+export async function regenerateWeeklyPlan(userId: string, mode: StudyMode = 'athlete') {
+  const prisma = db(userId);
+  const result = await regenerateWeekPlan(userId, mode);
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -47,7 +48,7 @@ export async function regenerateWeeklyPlan(mode: StudyMode = 'athlete') {
       where: { date: { gte: todayStart }, isCompleted: false },
       _sum: { durationMinutes: true },
     }),
-    prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+    prisma.userProfile.findUnique({ where: { id: userId } }),
   ]);
 
   return {

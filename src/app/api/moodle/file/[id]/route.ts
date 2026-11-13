@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 import { isSafeMoodleFileUrl } from '@/lib/moodleWs';
 import { getMoodleConnection, safeLocalFileName } from '@/lib/moodleWsSync';
 
@@ -37,10 +38,12 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await requireUser();
+  const prisma = db(user.id);
   const { id } = await params;
   const download = new URL(request.url).searchParams.get('download') === '1';
 
-  const material = await prisma.moodleMaterial.findUnique({
+  const material = await prisma.moodleMaterial.findFirst({
     where: { id },
     include: { course: { select: { fullName: true, shortName: true } } },
   });
@@ -64,7 +67,7 @@ export async function GET(
     // Sin copia local: se descarga.
   }
 
-  const connection = await getMoodleConnection();
+  const connection = await getMoodleConnection(user.id);
   if (!connection) {
     return NextResponse.json(
       { error: 'Tu Moodle no está conectado: vuelve a pegar la dirección y el token en Ajustes.' },

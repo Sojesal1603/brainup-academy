@@ -13,7 +13,7 @@ ALTER TABLE "PauExamSession"
 
 CREATE TABLE IF NOT EXISTS "ReviewCard" (
   "id" TEXT NOT NULL,
-  "userId" TEXT NOT NULL DEFAULT 'user_default',
+  "userId" TEXT NOT NULL,
   "topicId" TEXT NOT NULL,
   "noteId" TEXT,
   "kind" TEXT NOT NULL DEFAULT 'flashcard',
@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS "ReviewCard_userId_topicId_idx"
 
 CREATE TABLE IF NOT EXISTS "FocusSession" (
   "id" TEXT NOT NULL,
-  "userId" TEXT NOT NULL DEFAULT 'user_default',
+  "userId" TEXT NOT NULL,
   "topicId" TEXT,
   "blockId" TEXT,
   "plannedMinutes" INTEGER NOT NULL DEFAULT 25,

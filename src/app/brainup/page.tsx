@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { agentSlug } from '@/lib/agentSlug';
 import {
   Sparkles,
@@ -58,6 +58,7 @@ function subjectIcon(name: string) {
  * real de las unidades y de la fecha del próximo examen.
  */
 export default async function BrainUpHubPage() {
+  const { tenant: prisma } = await currentTenant();
   const agents = await prisma.aiAgent.findMany({
     include: {
       subject: {

@@ -12,7 +12,7 @@
  * sola cada mañana sin pedirle nada al alumno. En claro no se guarda nunca.
  */
 
-import { prisma } from './prisma';
+import { db } from './db';
 import { normalizeMoodleBaseUrl } from './moodleWs';
 import { canSealSecrets, openSecret, sealSecret } from './localSecrets';
 
@@ -38,18 +38,18 @@ function modeOf(value: string | null | undefined): MoodleAuthMode {
 }
 
 /** La vía elegida ahora mismo. */
-export async function getMoodleAuthMode(): Promise<MoodleAuthMode> {
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
+export async function getMoodleAuthMode(userId: string): Promise<MoodleAuthMode> {
+  const user = await db(userId).userProfile.findUnique({
+    where: { id: userId },
     select: { moodleAuthMode: true },
   });
   return modeOf(user?.moodleAuthMode);
 }
 
 /** Estado de las credenciales para pintarlo en Ajustes (sin la contraseña). */
-export async function getMoodleCredentialState(): Promise<MoodleCredentialState> {
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
+export async function getMoodleCredentialState(userId: string): Promise<MoodleCredentialState> {
+  const user = await db(userId).userProfile.findUnique({
+    where: { id: userId },
     select: { moodleAuthMode: true, moodleUsername: true, moodlePasswordSealed: true },
   });
 
@@ -66,9 +66,9 @@ export async function getMoodleCredentialState(): Promise<MoodleCredentialState>
  * falta algo (dirección, usuario o contraseña legible): en ese caso hay que
  * volver a conectarlo a mano, y eso la app lo dice.
  */
-export async function getMoodleSessionAuth(): Promise<MoodleSessionAuth | null> {
-  const user = await prisma.userProfile.findUnique({
-    where: { id: 'user_default' },
+export async function getMoodleSessionAuth(userId: string): Promise<MoodleSessionAuth | null> {
+  const user = await db(userId).userProfile.findUnique({
+    where: { id: userId },
     select: { moodleBaseUrl: true, moodleUsername: true, moodlePasswordSealed: true },
   });
 
@@ -85,7 +85,7 @@ export async function getMoodleSessionAuth(): Promise<MoodleSessionAuth | null> 
  * contraseña cifrada. Con `seal: false` no se guarda nada de la contraseña: la
  * app entra y sincroniza, pero mañana volverá a pedirla.
  */
-export async function saveMoodleSessionAuth(params: {
+export async function saveMoodleSessionAuth(userId: string, params: {
   baseUrl: string;
   username: string;
   password: string;
@@ -96,8 +96,8 @@ export async function saveMoodleSessionAuth(params: {
   const baseUrl = normalizeMoodleBaseUrl(params.baseUrl);
   if (!baseUrl) return;
 
-  await prisma.userProfile.update({
-    where: { id: 'user_default' },
+  await db(userId).userProfile.update({
+    where: { id: userId },
     data: {
       moodleBaseUrl: baseUrl,
       moodleAuthMode: 'sesion',
@@ -114,9 +114,9 @@ export async function saveMoodleSessionAuth(params: {
 }
 
 /** Borra la contraseña guardada (el resto de la conexión se queda). */
-export async function forgetMoodleSessionPassword(): Promise<void> {
-  await prisma.userProfile.update({
-    where: { id: 'user_default' },
+export async function forgetMoodleSessionPassword(userId: string): Promise<void> {
+  await db(userId).userProfile.update({
+    where: { id: userId },
     data: { moodlePasswordSealed: null },
   });
 }

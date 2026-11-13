@@ -29,8 +29,7 @@
  * base de datos); lo único que toca Prisma es guardar y leer.
  */
 
-import { prisma } from './prisma';
-import { currentUserId } from './tenant';
+import { db } from './db';
 
 /** Ámbitos que no son un catedrático. */
 export const MEMORY_SCOPE_COORDINATOR = 'coordinador';
@@ -259,7 +258,7 @@ function toDayMemory(row: MemoryRowLike): DayMemory {
 }
 
 /** Guarda (o actualiza) el recuerdo de un ámbito en un día. */
-export async function saveDayMemory(input: {
+export async function saveDayMemory(userId: string, input: {
   scope: string;
   day?: string;
   summary: string;
@@ -273,7 +272,7 @@ export async function saveDayMemory(input: {
   const day = input.day ?? dayKey();
   const factsJson = JSON.stringify((input.facts ?? []).slice(0, MEMORY_MAX_FACTS));
   const writtenBy = input.writtenBy ?? 'reglas';
-  const userId = currentUserId();
+  const prisma = db(userId);
 
   await prisma.agentMemory.upsert({
     where: { userId_scope_day: { userId, scope, day } },
@@ -283,12 +282,13 @@ export async function saveDayMemory(input: {
 }
 
 /** Los recuerdos de los últimos días de un ámbito, del más reciente al más viejo. */
-export async function loadRecentMemories(scope: string, days: number = MEMORY_DAYS): Promise<DayMemory[]> {
+export async function loadRecentMemories(userId: string, scope: string, days: number = MEMORY_DAYS): Promise<DayMemory[]> {
+  const prisma = db(userId);
   const from = new Date();
   from.setDate(from.getDate() - Math.max(0, days));
 
   const rows = await prisma.agentMemory.findMany({
-    where: { userId: currentUserId(), scope, createdAt: { gte: from } },
+    where: { userId, scope, createdAt: { gte: from } },
     orderBy: { createdAt: 'desc' },
     take: days + 1,
     select: { day: true, summary: true, factsJson: true, writtenBy: true },
@@ -298,9 +298,9 @@ export async function loadRecentMemories(scope: string, days: number = MEMORY_DA
 }
 
 /** El bloque de memoria listo para el prompt (cadena vacía si no hay nada). */
-export async function loadMemoryBlock(scope: string, days: number = MEMORY_DAYS): Promise<string> {
+export async function loadMemoryBlock(userId: string, scope: string, days: number = MEMORY_DAYS): Promise<string> {
   try {
-    return buildMemoryBlock(await loadRecentMemories(scope, days));
+    return buildMemoryBlock(await loadRecentMemories(userId, scope, days));
   } catch {
     // Sin memoria se responde igual: es un extra, no un requisito.
     return '';
@@ -315,7 +315,7 @@ export async function loadMemoryBlock(scope: string, days: number = MEMORY_DAYS)
  * pasa `polishWithAi`, además se le pide al modelo una redacción mejor; si falla
  * —o si no hay clave— se queda la de las reglas, que ya está guardada.
  */
-export async function rememberConversation(input: {
+export async function rememberConversation(userId: string, input: {
   scope: string;
   conversationId: string;
   /** Redacción mejor a cargo del modelo. Se usa **una vez al día por ámbito**. */
@@ -324,6 +324,7 @@ export async function rememberConversation(input: {
   const scope = String(input.scope ?? '').trim();
   if (scope.length === 0) return null;
 
+  const prisma = db(userId);
   const messages = await prisma.aiMessage.findMany({
     where: { conversationId: input.conversationId },
     orderBy: { createdAt: 'asc' },
@@ -334,16 +335,16 @@ export async function rememberConversation(input: {
   if (messages.length < 3) return null;
 
   const { summary, facts } = digestConversation(messages);
-  await saveDayMemory({ scope, summary, facts, writtenBy: 'reglas' });
+  await saveDayMemory(userId, { scope, summary, facts, writtenBy: 'reglas' });
 
   // El pulido cuesta una llamada de IA. Se pide **una vez al día y ámbito**, no en
   // cada turno: la memoria no puede competir por la cuota con lo que el alumno
   // está preguntando ahora mismo (ver el tope de tiempo del motor).
-  if (input.polish && !(await isPolishedToday(scope))) {
+  if (input.polish && !(await isPolishedToday(userId, scope))) {
     try {
       const polished = await input.polish(summary);
       if (polished && polished.trim().length > 0) {
-        await saveDayMemory({ scope, summary: polished.trim(), facts, writtenBy: 'ia' });
+        await saveDayMemory(userId, { scope, summary: polished.trim(), facts, writtenBy: 'ia' });
         return { summary: polished.trim(), facts, polished: true };
       }
     } catch {
@@ -355,10 +356,11 @@ export async function rememberConversation(input: {
 }
 
 /** ¿El recuerdo de hoy de este ámbito ya lo redactó el modelo? */
-export async function isPolishedToday(scope: string, day: string = dayKey()): Promise<boolean> {
+export async function isPolishedToday(userId: string, scope: string, day: string = dayKey()): Promise<boolean> {
+  const prisma = db(userId);
   try {
     const row = await prisma.agentMemory.findUnique({
-      where: { userId_scope_day: { userId: currentUserId(), scope, day } },
+      where: { userId_scope_day: { userId, scope, day } },
       select: { writtenBy: true },
     });
     return row?.writtenBy === 'ia';

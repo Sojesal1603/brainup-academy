@@ -25,6 +25,7 @@ duplica nada, que los mide, que `/retos` los pinta con su progreso y que el
  *   node scripts/verify-retos.js --live    → además, el camino real con la base
  */
 const path = require('path');
+const { getTestUserId } = require('./testUser.js');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 
@@ -305,7 +306,7 @@ async function live() {
     warn(`La parte viva no se pudo completar: ${error.message}`);
   } finally {
     await prisma.weeklyChallenge.deleteMany({});
-    await prisma.userProfile.update({ where: { id: 'user_default' }, data: { challengeXp: beforeXp } });
+    await prisma.userProfile.update({ where: { id: await getTestUserId() }, data: { challengeXp: beforeXp } });
     const leftoverChallenges = await prisma.weeklyChallenge.count();
     const xpNow = (await prisma.userProfile.findFirst({ select: { challengeXp: true } }))?.challengeXp ?? -1;
     check('la base queda como estaba (sin retos nuevos)', leftoverChallenges === 0, String(leftoverChallenges));

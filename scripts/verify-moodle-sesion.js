@@ -25,6 +25,7 @@
  */
 
 const path = require('path');
+const { getTestUserId } = require('./testUser.js');
 const fs = require('fs');
 const http = require('http');
 const { execFileSync } = require('child_process');
@@ -575,7 +576,7 @@ function startFakeMoodle() {
     const Heal = require(path.join(outDir, 'moodleSelfHeal.js'));
     const Live = require(path.join(outDir, 'moodleSync.js'));
 
-    const ID = 'user_default';
+    const ID = await getTestUserId();
     const before = await prisma.userProfile.findUnique({ where: { id: ID } });
     const countsBefore = {
       cursos: await prisma.moodleCourse.count(),

@@ -17,7 +17,7 @@
  * valida y Prisma guarda. Igual que en el resto del sistema.
  */
 
-import { prisma } from './prisma';
+import { db } from './db';
 import { hasAiProviderAsync, runAiText } from './tutor';
 import { parseJsonLoose } from './examinador';
 import {
@@ -84,7 +84,8 @@ function matchTopicId(
  *   2. Lo que está dando en clase y lo ya visto.
  *   3. El resto del temario, por orden de unidad.
  */
-async function pickEbauTopics(subjectId: string): Promise<ExamTopic[]> {
+async function pickEbauTopics(userId: string, subjectId: string): Promise<ExamTopic[]> {
+  const prisma = db(userId);
   const all = await prisma.topic.findMany({ where: { subjectId } });
 
   const toExamTopic = (topic: (typeof all)[number]): ExamTopic => ({
@@ -186,7 +187,11 @@ export interface BuildEbauInput {
  * Genera el paquete de simulacro. La estructura la manda la comunidad; el
  * contenido, el temario real y el método del profesor.
  */
-export async function buildEbauPackage(input: BuildEbauInput): Promise<ExamPackage> {
+export async function buildEbauPackage(
+  userId: string,
+  input: BuildEbauInput
+): Promise<ExamPackage> {
+  const prisma = db(userId);
   const subject = await prisma.subject.findUnique({
     where: { id: input.subjectId },
     include: { user: true },
@@ -196,7 +201,7 @@ export async function buildEbauPackage(input: BuildEbauInput): Promise<ExamPacka
   const community = getEbauCommunity(
     input.communityCode ?? subject.user?.community ?? null
   );
-  const topics = await pickEbauTopics(input.subjectId);
+  const topics = await pickEbauTopics(userId, input.subjectId);
   if (topics.length === 0) {
     throw new Error(
       'Esta asignatura aún no tiene temas en el banco. Añádelos en el Cuaderno para generar simulacros.'
@@ -464,7 +469,11 @@ export interface AuditEbauInput {
  * Es idempotente por sesión: corregir dos veces el mismo simulacro no duplica
  * ni fichas ni píldoras.
  */
-export async function auditEbauErrors(input: AuditEbauInput): Promise<ExamAudit> {
+export async function auditEbauErrors(
+  userId: string,
+  input: AuditEbauInput
+): Promise<ExamAudit> {
+  const prisma = db(userId);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date(todayStart.getTime() + 86_400_000);

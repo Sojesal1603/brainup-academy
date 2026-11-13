@@ -1,5 +1,5 @@
 import nextDynamic from 'next/dynamic';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import MoodleMaterialsPanel from '@/components/apuntes/MoodleMaterialsPanel';
 import { EditorSkeleton } from '@/components/ui/Skeletons';
 import { BookOpen } from 'lucide-react';
@@ -13,6 +13,7 @@ const NotionWorkspace = nextDynamic(() => import('@/components/apuntes/NotionWor
 export const dynamic = 'force-dynamic';
 
 export default async function NotesPage() {
+  const { tenant: prisma } = await currentTenant();
   const notes = await prisma.note.findMany({
     include: {
       // La unidad y la asignatura dan la sección del cuaderno; el agente dice

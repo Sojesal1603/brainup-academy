@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import CreateExamLauncher from '@/components/examenes/CreateExamLauncher';
 import ExamControls from '@/components/examenes/ExamControls';
 import {
@@ -20,6 +20,7 @@ function isoDay(date: Date): string {
 export const dynamic = 'force-dynamic';
 
 export default async function ExamsPage() {
+  const { tenant: prisma } = await currentTenant();
   const subjects = await prisma.subject.findMany({
     select: { id: true, name: true },
     orderBy: { order: 'asc' },

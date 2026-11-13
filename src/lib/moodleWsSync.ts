@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { db } from './db';
 import { storeCourseWithMaterials, storeTasks } from './moodleStore';
 import {
   MoodleError,
@@ -57,8 +57,8 @@ export class MoodleNotConnectedError extends Error {
 }
 
 /** Devuelve la conexión guardada, o null si nunca se ha conectado. */
-export async function getMoodleConnection(): Promise<MoodleConnection | null> {
-  const user = await prisma.userProfile.findUnique({ where: { id: 'user_default' } });
+export async function getMoodleConnection(userId: string): Promise<MoodleConnection | null> {
+  const user = await db(userId).userProfile.findUnique({ where: { id: userId } });
   const baseUrl = (user?.moodleBaseUrl ?? '').trim();
   const token = (user?.moodleToken ?? '').trim();
   if (!baseUrl || !token) return null;
@@ -98,9 +98,10 @@ export interface MoodlePublicStatus {
  * contraseña). «Conectado» significa cosas distintas según la vía: con clave,
  * que hay clave; por sesión, que hay usuario y contraseña guardada.
  */
-export async function getMoodleStatus(): Promise<MoodlePublicStatus> {
+export async function getMoodleStatus(userId: string): Promise<MoodlePublicStatus> {
+  const prisma = db(userId);
   const [user, courses, materials, pendingTasks] = await Promise.all([
-    prisma.userProfile.findUnique({ where: { id: 'user_default' } }),
+    prisma.userProfile.findUnique({ where: { id: userId } }),
     prisma.moodleCourse.count(),
     prisma.moodleMaterial.count(),
     prisma.moodleTask.count({ where: { isCompleted: false, submitted: { not: true } } }),
@@ -133,7 +134,11 @@ export async function getMoodleStatus(): Promise<MoodlePublicStatus> {
  * la conexión solo si de verdad funciona y el token trae las funciones que
  * necesitamos. Si algo falla, no se toca nada de lo que ya estaba.
  */
-export async function connectMoodle(rawBaseUrl: string, rawToken: string): Promise<MoodleSiteInfo> {
+export async function connectMoodle(
+  userId: string,
+  rawBaseUrl: string,
+  rawToken: string
+): Promise<MoodleSiteInfo> {
   const baseUrl = normalizeMoodleBaseUrl(rawBaseUrl);
   if (!baseUrl) {
     throw new MoodleError(
@@ -162,8 +167,8 @@ export async function connectMoodle(rawBaseUrl: string, rawToken: string): Promi
     );
   }
 
-  await prisma.userProfile.update({
-    where: { id: 'user_default' },
+  await db(userId).userProfile.update({
+    where: { id: userId },
     data: {
       moodleBaseUrl: baseUrl,
       moodleToken: token,
@@ -186,12 +191,13 @@ export async function connectMoodle(rawBaseUrl: string, rawToken: string): Promi
  * La contraseña no se guarda en ningún momento: solo viaja en esa petición.
  */
 export async function connectMoodleWithPassword(
+  userId: string,
   rawBaseUrl: string,
   username: string,
   password: string
 ): Promise<MoodleSiteInfo> {
   const { token } = await requestMoodleToken(rawBaseUrl, username, password);
-  return connectMoodle(rawBaseUrl, token);
+  return connectMoodle(userId, rawBaseUrl, token);
 }
 
 /**
@@ -202,9 +208,9 @@ export async function connectMoodleWithPassword(
  * de verdad hay que quitar cuando alguien pulsa «desconectar»). Lo que ya está
  * descargado —cursos, apuntes y tareas— no se toca: es del alumno.
  */
-export async function disconnectMoodle(): Promise<void> {
-  await prisma.userProfile.update({
-    where: { id: 'user_default' },
+export async function disconnectMoodle(userId: string): Promise<void> {
+  await db(userId).userProfile.update({
+    where: { id: userId },
     data: {
       moodleBaseUrl: null,
       moodleToken: null,
@@ -234,17 +240,18 @@ export function safeLocalFileName(name: string): string {
  * Sincroniza cursos, apuntes y tareas del alumno desde Moodle y lo vuelca en la
  * base local. Devuelve un resumen honesto de lo que ha entrado.
  */
-export async function syncMoodleWebServices(): Promise<MoodleWsSyncStats> {
-  const connection = await getMoodleConnection();
+export async function syncMoodleWebServices(userId: string): Promise<MoodleWsSyncStats> {
+  const prisma = db(userId);
+  const connection = await getMoodleConnection(userId);
   if (!connection) throw new MoodleNotConnectedError();
 
   const { baseUrl, token } = connection;
 
   const site = await getSiteInfo(baseUrl, token);
-  const userId = site.userId || connection.userId;
-  if (!userId) throw new MoodleError('Moodle no ha dicho qué usuario eres: no puedo pedir tus cursos.', 'no_user');
+  const moodleUserId = site.userId || connection.userId;
+  if (!moodleUserId) throw new MoodleError('Moodle no ha dicho qué usuario eres: no puedo pedir tus cursos.', 'no_user');
 
-  const courses = await getEnrolledCourses(baseUrl, token, userId);
+  const courses = await getEnrolledCourses(baseUrl, token, moodleUserId);
   const subjects = await prisma.subject.findMany({ select: { id: true, name: true } });
 
   const courseIds = courses.map((course) => course.moodleId);
@@ -269,7 +276,7 @@ export async function syncMoodleWebServices(): Promise<MoodleWsSyncStats> {
 
     // El guardado lo hace el escritor compartido: por aquí entran igual los
     // materiales que vengan de Web Services y los que vengan de la sesión web.
-    const stored = await storeCourseWithMaterials({
+    const stored = await storeCourseWithMaterials(userId, {
       course,
       subjectId,
       sections: sections.length,
@@ -285,7 +292,7 @@ export async function syncMoodleWebServices(): Promise<MoodleWsSyncStats> {
     });
   }
 
-  const drafts = mapAssignments(assignmentCourses, submissions, userId, baseUrl);
+  const drafts = mapAssignments(assignmentCourses, submissions, moodleUserId, baseUrl);
   const perCourse = new Map<number, { name: string; materials: number; tasks: number }>();
 
   for (const course of courses) {
@@ -298,6 +305,7 @@ export async function syncMoodleWebServices(): Promise<MoodleWsSyncStats> {
 
   // Guardado sin duplicados (y adoptando lo que ya entró por el calendario).
   const stored = await storeTasks(
+    userId,
     drafts.map((draft) => ({
       externalId: null,
       assignmentId: draft.assignmentId,
@@ -323,11 +331,11 @@ export async function syncMoodleWebServices(): Promise<MoodleWsSyncStats> {
     if (bucket) bucket.tasks++;
   }
 
-  await prisma.userProfile.update({
-    where: { id: 'user_default' },
+  await db(userId).userProfile.update({
+    where: { id: userId },
     data: {
       moodleSiteName: site.siteName,
-      moodleUserId: userId,
+      moodleUserId,
       moodleConnectedAt: connection.connectedAt ?? new Date(),
     },
   });

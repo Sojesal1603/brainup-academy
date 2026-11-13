@@ -11,7 +11,7 @@
  * `connectMoodleAnyWay`, que es lo que usa la pantalla de Ajustes.
  */
 
-import { prisma } from './prisma';
+import { db } from './db';
 import { MoodleError, getSiteInfo, normalizeMoodleBaseUrl, requestMoodleToken } from './moodleWs';
 import {
   connectMoodle,
@@ -31,13 +31,14 @@ export interface MoodleSyncOutcome {
 
 /** Sincroniza por la vía que esté elegida. */
 export async function syncMoodleAnyWay(
+  userId: string,
   options: { log?: (line: string) => void } = {}
 ): Promise<MoodleSyncOutcome> {
-  const mode = await getMoodleAuthMode();
+  const mode = await getMoodleAuthMode(userId);
   if (mode === 'sesion') {
-    return { via: 'sesion', stats: await syncMoodleViaSession(options) };
+    return { via: 'sesion', stats: await syncMoodleViaSession(userId, options) };
   }
-  return { via: 'token', stats: await syncMoodleWebServices() };
+  return { via: 'token', stats: await syncMoodleWebServices(userId) };
 }
 
 export interface MoodleCheckOutcome {
@@ -54,11 +55,11 @@ export interface MoodleCheckOutcome {
  * credenciales ya no valen, lanza un `MoodleError` con el mensaje que hay que
  * enseñarle al alumno.
  */
-export async function checkMoodleAnyWay(): Promise<MoodleCheckOutcome> {
-  const mode = await getMoodleAuthMode();
+export async function checkMoodleAnyWay(userId: string): Promise<MoodleCheckOutcome> {
+  const mode = await getMoodleAuthMode(userId);
 
   if (mode === 'sesion') {
-    const check = await checkMoodleSession();
+    const check = await checkMoodleSession(userId);
     return {
       via: 'sesion',
       siteName: check.siteName,
@@ -68,7 +69,7 @@ export async function checkMoodleAnyWay(): Promise<MoodleCheckOutcome> {
     };
   }
 
-  const connection = await getMoodleConnection();
+  const connection = await getMoodleConnection(userId);
   if (!connection) throw new MoodleNotConnectedError();
   const site = await getSiteInfo(connection.baseUrl, connection.token);
   return {
@@ -104,7 +105,9 @@ export interface MoodleConnectOutcome {
  *     (la contraseña, cifrada, si el alumno lo ha permitido).
  *   - Si trae **solo la clave**: se conecta por Web Services, como siempre.
  */
-export async function connectMoodleAnyWay(params: {
+export async function connectMoodleAnyWay(
+  userId: string,
+  params: {
   baseUrl: string;
   token?: string | null;
   username?: string | null;
@@ -117,11 +120,13 @@ export async function connectMoodleAnyWay(params: {
   const password = String(params.password ?? '');
   const token = String(params.token ?? '').trim();
 
+  const prisma = db(userId);
+
   // Vía de la clave, tal cual la pide el alumno.
   if (token.length > 0 && username.length === 0) {
-    const site = await connectMoodle(baseUrl, token);
+    const site = await connectMoodle(userId, baseUrl, token);
     await prisma.userProfile.update({
-      where: { id: 'user_default' },
+      where: { id: userId },
       data: {
         moodleAuthMode: 'token',
         moodlePasswordSealed: null,
@@ -149,10 +154,10 @@ export async function connectMoodleAnyWay(params: {
   let tokenTrouble: string | null = null;
   try {
     const { token: requested } = await requestMoodleToken(baseUrl, username, password);
-    const site = await connectMoodle(baseUrl, requested);
+    const site = await connectMoodle(userId, baseUrl, requested);
 
     await prisma.userProfile.update({
-      where: { id: 'user_default' },
+      where: { id: userId },
       data: {
         moodleAuthMode: 'token',
         moodleUsername: username.slice(0, 120),
@@ -193,7 +198,7 @@ export async function connectMoodleAnyWay(params: {
     );
   }
 
-  await saveMoodleSessionAuth({
+  await saveMoodleSessionAuth(userId, {
     baseUrl: session.baseUrl,
     username,
     password,

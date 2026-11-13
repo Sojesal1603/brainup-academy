@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 import { sanitizeNoteContent } from '@/lib/apuntesIa';
 
 /**
@@ -17,9 +18,10 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await requireUser();
   const { id } = await params;
 
-  const note = await prisma.note.findUnique({
+  const note = await db(user.id).note.findFirst({
     where: { id },
     include: {
       topic: { include: { subject: { select: { name: true } } } },

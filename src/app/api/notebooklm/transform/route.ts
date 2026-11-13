@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 import { runAiText, hasAiProviderAsync, hasAnyFreeKey, type ChatMessage } from '@/lib/aiEngine';
 import { formatNotebookLmContent } from '@/lib/notebooklm';
 import { sanitizeNoteContent, NOTE_WRITER_INSTRUCTIONS } from '@/lib/apuntesIa';
 
 export async function POST(req: Request) {
   try {
+    const user = await requireUser();
+    const prisma = db(user.id);
     const body = await req.json();
     const { topicId, rawContent, flowName } = body;
 
@@ -37,7 +40,7 @@ export async function POST(req: Request) {
     }
 
     // 1. Obtener tema, asignatura y su Catedrático correspondiente
-    const topic = await prisma.topic.findUnique({
+    const topic = await prisma.topic.findFirst({
       where: { id: topicId },
       include: {
         subject: {

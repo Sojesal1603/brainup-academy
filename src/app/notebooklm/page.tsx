@@ -1,5 +1,5 @@
 import nextDynamic from 'next/dynamic';
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
 
 // El estudio (interfaz completa y render de apuntes) se descarga al abrir la
@@ -11,6 +11,7 @@ const NotebookLmStudio = nextDynamic(() => import('@/components/notebooklm/Noteb
 export const dynamic = 'force-dynamic';
 
 export default async function NotebookLmPage() {
+  const { tenant: prisma } = await currentTenant();
   const subjects = await prisma.subject.findMany({
     where: { isTracked: true },
     orderBy: { order: 'asc' },

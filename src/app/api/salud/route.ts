@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getOptionalUser } from '@/lib/auth';
+import { db } from '@/lib/db';
 import {
   databaseHint,
   databaseTarget,
@@ -74,13 +76,6 @@ interface HealthSnapshot {
 
 let cache: HealthSnapshot | null = null;
 
-/** Lo último que se pudo leer de la base, aunque sea de hace un minuto. */
-const details: { counts: Counts | null; memory: HealthMemory | null } = {
-  counts: null,
-  memory: null,
-};
-
-let loadingDetails = false;
 
 /**
  * Identificador de la compilación que está sirviendo la app.
@@ -152,61 +147,60 @@ async function probeDatabase(): Promise<DatabaseSnapshot> {
  * Cuentas y memoria, por detrás. Es información de adorno para el parte: si
  * tarda o falla, se conserva lo último leído y la respuesta ya ha salido.
  */
-async function refreshDetails(): Promise<void> {
-  if (loadingDetails) return;
-  loadingDetails = true;
-  try {
-    const [counts, memory] = await Promise.allSettled([
-      withDeadline(
-        Promise.all([prisma.subject.count(), prisma.topic.count(), prisma.note.count()]),
-        DETAIL_TIMEOUT_MS,
-        'cuentas de la base'
-      ).then(([subjects, topics, notes]): Counts => ({ subjects, topics, notes })),
-      withDeadline(
-        (async (): Promise<HealthMemory> => {
-          const [days, latest, scopes] = await Promise.all([
-            prisma.agentMemory.count(),
-            prisma.agentMemory.findFirst({
-              orderBy: { updatedAt: 'desc' },
-              select: { scope: true, day: true, summary: true, writtenBy: true },
-            }),
-            prisma.agentMemory.findMany({ distinct: ['scope'], select: { scope: true } }),
-          ]);
-          return {
-            days,
-            scopes: scopes.length,
-            latest: latest
-              ? {
-                  scope: latest.scope,
-                  day: latest.day,
-                  chars: latest.summary.length,
-                  writtenBy: latest.writtenBy,
-                }
-              : null,
-          };
-        })(),
-        DETAIL_TIMEOUT_MS,
-        'memoria de la IA'
-      ),
-    ]);
+/**
+ * Cuentas y memoria de UNA cuenta. No se guarda en la caché compartida del
+ * parte: el proceso sirve a varias cuentas y estos números son suyos.
+ */
+async function refreshDetails(
+  userId: string
+): Promise<{ counts: Counts | null; memory: HealthMemory | null }> {
+  const scoped = db(userId);
+  const [counts, memory] = await Promise.allSettled([
+    withDeadline(
+      Promise.all([scoped.subject.count(), scoped.topic.count(), scoped.note.count()]),
+      DETAIL_TIMEOUT_MS,
+      'cuentas de la base'
+    ).then(([subjects, topics, notes]): Counts => ({ subjects, topics, notes })),
+    withDeadline(
+      (async (): Promise<HealthMemory> => {
+        const [days, latest, scopes] = await Promise.all([
+          scoped.agentMemory.count(),
+          scoped.agentMemory.findFirst({
+            orderBy: { updatedAt: 'desc' },
+            select: { scope: true, day: true, summary: true, writtenBy: true },
+          }),
+          scoped.agentMemory.findMany({ distinct: ['scope'], select: { scope: true } }),
+        ]);
+        return {
+          days,
+          scopes: scopes.length,
+          latest: latest
+            ? {
+                scope: latest.scope,
+                day: latest.day,
+                chars: latest.summary.length,
+                writtenBy: latest.writtenBy,
+              }
+            : null,
+        };
+      })(),
+      DETAIL_TIMEOUT_MS,
+      'memoria de la IA'
+    ),
+  ]);
 
-    if (counts.status === 'fulfilled') details.counts = counts.value;
-    if (memory.status === 'fulfilled') details.memory = memory.value;
-
-    // El parte que ya está en caché se completa sin volver a sondear: la
-    // siguiente petición trae las cuentas y la memoria al día.
-    if (cache && cache.database.ok) {
-      cache.database.counts = details.counts;
-      cache.memory = details.memory;
-    }
-  } catch (error) {
-    console.warn('[salud] no se han podido leer los detalles:', error);
-  } finally {
-    loadingDetails = false;
-  }
+  return {
+    counts: counts.status === 'fulfilled' ? counts.value : null,
+    memory: memory.status === 'fulfilled' ? memory.value : null,
+  };
 }
 
-function render(snapshot: HealthSnapshot, startedAt: number, fromCache: boolean) {
+function render(
+  snapshot: HealthSnapshot,
+  startedAt: number,
+  fromCache: boolean,
+  details: { counts: Counts | null; memory: HealthMemory | null } | null
+) {
   const database = snapshot.database;
   const providers = getConfiguredProviders();
 
@@ -228,10 +222,10 @@ function render(snapshot: HealthSnapshot, startedAt: number, fromCache: boolean)
         // Qué hacer, en castellano: es lo que enseña la pantalla de error.
         hint: database.ok ? undefined : databaseHint(database.detail, database.code),
         target: databaseTarget(),
-        counts: database.counts,
+        counts: details?.counts ?? null,
         probeMs: database.probeMs,
       },
-      memory: snapshot.memory,
+      memory: details?.memory ?? null,
       ai: {
         configured: hasAiProvider(),
         providers,
@@ -248,31 +242,33 @@ function render(snapshot: HealthSnapshot, startedAt: number, fromCache: boolean)
 
 export async function GET() {
   const startedAt = Date.now();
+  const authUser = await getOptionalUser();
 
-  // Con caché, se contesta ya. Si está caducada, se refresca por detrás sin que
-  // nadie espere: el lanzador pregunta cada 20 s y no puede quedarse 8 s
-  // colgado, porque entonces mataría el servidor en mitad de una respuesta.
+  // Son los datos de una cuenta: solo se leen si hay sesión. El parte público
+  // (lanzador, vigilante, pantalla de error) sigue diciendo si la base responde.
+  const details = authUser ? await refreshDetails(authUser.id) : null;
+
+  // Con caché, se contesta ya. La caché solo guarda la sonda de la base, nunca
+  // las cuentas ni la memoria de nadie.
+  if (cache && Date.now() - cache.at < HEALTH_CACHE_MS) {
+    return render(cache, startedAt, true, details);
+  }
+
   if (cache) {
-    if (Date.now() - cache.at >= HEALTH_CACHE_MS) void refreshDetails();
-    return render(cache, startedAt, true);
+    const database = await probeDatabase();
+    cache = { at: Date.now(), database, memory: null };
+    return render(cache, startedAt, true, details);
   }
 
   // Primera pregunta desde que arrancó el proceso: una sola sonda, con tope.
   const database = await probeDatabase();
 
-  // Si la base ha contestado rápido, se espera un momento a los detalles para
-  // que el primer parte ya venga completo. Si no, se entregan cuando lleguen.
-  if (database.ok && database.probeMs < 1_200) await refreshDetails();
-
   const snapshot: HealthSnapshot = {
     at: Date.now(),
     database,
-    memory: details.memory,
+    memory: null,
   };
-  database.counts = details.counts;
   cache = snapshot;
 
-  if (!details.memory) void refreshDetails();
-
-  return render(snapshot, startedAt, false);
+  return render(snapshot, startedAt, false, details);
 }

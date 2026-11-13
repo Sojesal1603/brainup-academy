@@ -1,23 +1,19 @@
 /**
  * Generador de iconos de BrainUp Academy.
  *
- * Hay **una sola fuente de verdad**: el logo del cerebro estudioso que está en
- * la raíz del proyecto (`Cerebro estudioso con gafas y libro.png`). De ahí salen
- * todos los tamaños que usa la app:
+ * Hay **una sola fuente de verdad**: el logo del cerebro que está en
+ * `public/PublicLogoNuevo.png` (cerebro rojo guiñando un ojo, con bombilla y
+ * gráfica). De ahí salen todos los tamaños que usa la app:
  *
  *   - `public/icon.png` y `public/icon-512.png` → manifest de la PWA
- *   - `public/apple-touch-icon.png`            → icono de iOS (opaco: iOS pinta
- *                                                 de negro lo transparente)
- *   - `public/logo-brainup.png`                → marca del menú lateral
+ *   - `public/apple-touch-icon.png`            → icono de iOS
+ *   - `public/logo-brainup.png`                → marca del menú lateral y login
  *   - `public/favicon.ico` y `public/brainup.ico` → pestaña y acceso directo de
  *                                                 Windows (ICO real, con varias
  *                                                 tallas dentro)
  *
- * El PNG original viene con un fondo blanco sólido y esquinas redondeadas. Si
- * se deja así, en Android y en el escritorio se ve un cuadrado blanco alrededor
- * del logo: aquí se hace transparente **solo el blanco conectado al borde**
- * (relleno por inundación desde las cuatro esquinas), sin tocar los blancos de
- * dentro —ojos, dientes del libro, destellos—, que quedarían agujereados.
+ * La ilustración ya viene con su propio fondo oscuro, así que se usa tal cual:
+ * no hay que recortar ni hacer transparente ningún borde.
  *
  * Uso: `node scripts/generate-icons.js`
  */
@@ -27,64 +23,15 @@ const fs = require('fs');
 
 const projectRoot = path.join(__dirname, '..');
 const publicDir = path.join(projectRoot, 'public');
-const sourcePath = path.join(projectRoot, 'Cerebro estudioso con gafas y libro.png');
+const sourcePath = path.join(publicDir, 'PublicLogoNuevo.png');
 const BACKGROUND = '#090d16';
 
-/** Umbral de «blanco de fondo»: el original es 253-255 en las esquinas. */
-const WHITE = 244;
-
 if (!fs.existsSync(sourcePath)) {
-  console.error(
-    `Falta el logo original: ${path.basename(sourcePath)} (debe estar en la carpeta del proyecto).`
-  );
+  console.error(`Falta el logo original: ${path.relative(projectRoot, sourcePath)}.`);
   process.exit(1);
 }
 
 if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
-
-/**
- * Hace transparente el blanco que rodea al logo (el que está conectado a las
- * esquinas), dejando intactos los blancos interiores del dibujo.
- */
-async function logoWithTransparentCorners() {
-  const { data, info } = await sharp(sourcePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const { width, height, channels } = info;
-  const pixels = width * height;
-  const visited = new Uint8Array(pixels);
-  const stack = [];
-
-  const isBackground = (index) =>
-    data[index] >= WHITE && data[index + 1] >= WHITE && data[index + 2] >= WHITE;
-
-  const visit = (x, y) => {
-    if (x < 0 || y < 0 || x >= width || y >= height) return;
-    const pixel = y * width + x;
-    if (visited[pixel]) return;
-    const index = pixel * channels;
-    if (!isBackground(index)) return;
-    visited[pixel] = 1;
-    // Transparente de verdad y conservando el color del borde: así el suavizado
-    // del cuadrado redondeado no deja un fleco blanco.
-    data[index + 3] = 0;
-    stack.push(x, y);
-  };
-
-  visit(0, 0);
-  visit(width - 1, 0);
-  visit(0, height - 1);
-  visit(width - 1, height - 1);
-
-  while (stack.length > 0) {
-    const y = stack.pop();
-    const x = stack.pop();
-    visit(x + 1, y);
-    visit(x - 1, y);
-    visit(x, y + 1);
-    visit(x, y - 1);
-  }
-
-  return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
-}
 
 /** ICO real: cabecera + una entrada por talla, cada una con su PNG dentro. */
 function buildIco(images) {
@@ -114,7 +61,7 @@ function buildIco(images) {
 }
 
 async function main() {
-  const logo = await logoWithTransparentCorners();
+  const logo = await sharp(sourcePath).png().toBuffer();
 
   const png = (size) =>
     sharp(logo)

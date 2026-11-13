@@ -8,7 +8,7 @@ import { ChatSkeleton } from '@/components/ui/Skeletons';
 const SetupChat = nextDynamic(() => import('@/components/setup/SetupChat'), {
   loading: () => <ChatSkeleton />,
 });
-import { prisma } from '@/lib/prisma';
+import { currentTenant } from '@/lib/tenantContext';
 import { getSetupState } from '@/lib/setupApply';
 import { getConfiguredModelLabel } from '@/lib/aiEngine';
 
@@ -17,8 +17,9 @@ export const dynamic = 'force-dynamic';
 const SETUP_TITLE = 'Puesta a punto';
 
 export default async function SetupPage() {
+  const { user, tenant: prisma } = await currentTenant();
   const [{ snapshot, checklist }, conversation] = await Promise.all([
-    getSetupState(),
+    getSetupState(user.id),
     prisma.aiConversation.findFirst({
       where: { agentId: null, title: SETUP_TITLE },
       orderBy: { createdAt: 'desc' },

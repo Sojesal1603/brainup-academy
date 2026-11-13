@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import SplashScreen from '@/components/SplashScreen';
 import AppErrorReporter from '@/components/AppErrorReporter';
 
 // La app entera depende de PostgreSQL en tiempo de petición. Sin esto, Next
@@ -17,7 +18,7 @@ export const metadata: Metadata = {
   // Nombre con el que el sistema guarda la app instalada (móvil y escritorio).
   applicationName: 'BrainUp Academy',
   manifest: '/manifest.json',
-  // Iconos generados desde el logo del cerebro estudioso (`scripts/generate-icons.js`).
+  // Iconos generados desde el logo del cerebro (`scripts/generate-icons.js`).
   // El PNG va primero: los navegadores modernos lo prefieren al .ico, que queda
   // como `shortcut` para los que aún lo piden.
   icons: {
@@ -58,6 +59,12 @@ export default function RootLayout({
   return (
     <html lang="es" className="dark">
       <body className="bg-[#0a0a0c] text-slate-100 min-h-screen flex antialiased selection:bg-emerald-500 selection:text-slate-950">
+        {/* Tapa la app hasta que el perfil de la cabecera está resuelto. */}
+        <SplashScreen />
+        {/* Sin JavaScript no hay quien retire la splash: se oculta por CSS. */}
+        <noscript>
+          <style>{'#brainup-splash{display:none !important}'}</style>
+        </noscript>
         {/* Escucha los errores que se escapan de React y los apunta en el taller. */}
         <AppErrorReporter />
         <Sidebar />

@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { db } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
 
 export async function GET() {
   try {
+    const user = await requireUser();
+    const prisma = db(user.id);
     const backup = {
       exportDate: new Date().toISOString(),
       version: '1.0.0',
