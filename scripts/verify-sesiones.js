@@ -316,8 +316,12 @@ console.log('\n5 · Descansos y microtareas');
   check('cada sesión lleva su descanso', plan.every((session) => session.breakMinutes >= 3));
   check('una sesión de 50 no lleva los 5 minutos del pomodoro clásico', plan[0].breakMinutes !== 5, `${plan[0].breakMinutes} min`);
 
+  check('el repaso SM-2 no se añade si solo quedan 5 minutos', E.srsReviewMinutesFor(5) === 0);
+  check('con 10-14 minutos cabe un repaso de 10', E.srsReviewMinutesFor(10) === 10 && E.srsReviewMinutesFor(12) === 10);
+  check('con 15 o más cabe el repaso de 15', E.srsReviewMinutesFor(15) === 15 && E.srsReviewMinutesFor(40) === 15);
+
   const micros = E.microTasks({ errorsOpen: 3, dueReviews: 2 });
-  check('ofrece microtareas de 5-10 minutos', micros.length >= 3 && micros.every((task) => task.minutes <= 10), micros.map((m) => m.minutes).join(', '));
+  check('ofrece una microacción de 2 minutos y el resto de 5-10', micros.some((task) => task.minutes === 2) && micros.every((task) => task.minutes <= 10), micros.map((m) => m.minutes).join(', '));
   check('van ordenadas de la más corta a la más larga', micros.every((task, i) => i === 0 || micros[i - 1].minutes <= task.minutes));
   check('el último error aparece si lo hay', micros.some((task) => /error/i.test(task.label)));
   check('sin errores no se inventa ese trabajo', !E.microTasks({ errorsOpen: 0 }).some((task) => /error/i.test(task.label)));

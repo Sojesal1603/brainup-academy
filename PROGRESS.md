@@ -12,15 +12,15 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 | 4. Tests del motor | hecho | este commit | `scripts/verify-planificador.js`: determina con el mismo contexto y con el orden invertido, capacidad 70 %, energía 0.5/1/1.2, mínimo, 3–5 bloques, máximo 2 por materia, examen a 2 días e intercalado. 11 comprobaciones, exit 0. | Nada. |
 | 5. Orquestador `ensureTodayPlan` | hecho | este commit | Advisory lock de PostgreSQL `hashtextextended(userId:día)` + doble comprobación dentro de la transacción + `PlanState` idempotente. Solo se borran bloques pendientes generados por el plan (`plan`/`reprogramada`/`recuperacion`); `en_curso`, completados, abandonados y `micro` se conservan. Ensayo contra copia local: dos aperturas simultáneas → 1 `PlanState`, repetir no duplica y los bloques en curso/completados siguen intactos. Corregido el `this` de `db().$transaction`. | Nada. |
 | 6. `invalidatePlan` y disparadores | hecho | este commit | `invalidatePlan(userId, reason)` guarda `status=invalidated`, fecha, motivo y versión en `PlanState` (columna nueva `invalidationReason`). Disparadores conectados: completar/abandonar/reabrir bloque y sesión, crear/editar/borrar/completar examen, avance de clase, recalcular y sincronización de Moodle con cambios. La siguiente apertura reconstruye una sola vez y conserva lo empezado. Ensayo local: motivo conservado, versión +1, un solo `PlanState`. `tsc`/`eslint` limpios. | Los disparadores de UI no se han recorrido uno a uno en navegador; sí compilan y comparten la misma función. |
-| 7. Entradas reales (`loadInputs`/`buildCandidates`/`toRow`) | hecho | este commit | `loadPlanningContext` usa FSRS/ReviewCard/ErrorLog/MoodleTask/Exam/ClassPeriod y ahora agrega `FocusSession` (`focusedSeconds`) y `SrsReview` (`minutesSpent`) por unidad. `calibrateUnitEstimate` solo ajusta con ≥3 sesiones, ≥45 min y unidad avanzada; hasta entonces `source='estimado'`. La UI muestra «X h · estimado» o «X h · ajustado (N)». Producción: 102 unidades, 0 FocusSession y 0 SrsReview → todas «estimado». `verify-sesiones.js`: 112 comprobaciones en verde. `dayPlan.ts` no importa IA. | La calibración real se verá cuando haya sesiones medidas; los tests cubren el cálculo, no datos de producción (no existen todavía). |
-| 8. UX del Cuartel | pendiente | — | — | — |
+| 7. Entradas reales (`loadInputs`/`buildCandidates`/`toRow`) | hecho | este commit | `loadPlanningContext` usa FSRS/ReviewCard/ErrorLog/MoodleTask/Exam/ClassPeriod y ahora agrega `FocusSession` (`focusedSeconds`) y `SrsReview` (`minutesSpent`) por unidad. `calibrateUnitEstimate` solo ajusta con ≥3 sesiones, ≥45 min y unidad avanzada; hasta entonces `source='estimado'`. La UI muestra «X h · estimado» o «X h · ajustado (N)». Producción: 102 unidades, 0 FocusSession y 0 SrsReview → todas «estimado». `verify-sesiones.js`: 115 comprobaciones en verde. `dayPlan.ts` no importa IA. | La calibración real se verá cuando haya sesiones medidas; los tests cubren el cálculo, no datos de producción (no existen todavía). |
+| 8. UX del Cuartel | hecho | este commit | Un único «Ahora» (el bloque pausado o el primero) con Empezar/material; el resto en un `<details>` «Después» reordenable por arrastre limitado (solo pendientes, no toca lo empezado). Selector de energía que escribe `PlanState.energy` y reconstruye (0.5/1/1.2); microacción de 2 min. Aviso Web Push: VAPID, tabla `PushSubscription` (RLS activo, 0 privilegios anon), suscripción desde el navegador, cron `/api/push/send-due` protegido y `push`/`notificationclick` en `sw.js`. Prueba real contra endpoint HTTPS local: `due=1`, `sent=1`, 361 B `aes128gcm`, `lastNotifiedDay=2026-11-13`; perfil y suscripción restaurados. Plan real: 1 sesión de 50 min en 55 disponibles, `estimado`; sin IA. | El envío al navegador real requiere instalar la PWA y dar permiso (no hay sesión de navegador en este entorno); el camino de servidor está probado. |
 | 9. Restricciones y contexto del tutor | pendiente | — | — | — |
 | 10. Cierre de sesión, corrector, foto y banco | pendiente | — | — | — |
 | 11. B3 pedagogía activa | pendiente | — | — | — |
 | 12. Verificación SymPy/unidades/química | pendiente | — | — | — |
 | 13. Proactividad diaria | pendiente | — | — | — |
 | 14. B7 modos por materia | pendiente | — | — | — |
-| 15. Fase 0 de seguridad | en curso (parte segura) | este commit | RLS activo en 29/29 tablas de `public`; `anon` y `authenticated` sin privilegios (0 filas en `information_schema.role_table_grants`); anon recibe HTTP 401/42501 en las 6 tablas probadas. TLS con CA de Supabase y `sslaccept=strict`. | Defaults de `supabase_admin` siguen abiertos (requiere SQL como ese rol); faltan `prisma_app`, secretos Moodle y retry de lecturas. |
+| 15. Fase 0 de seguridad | en curso (parte segura) | este commit | RLS activo en 30/30 tablas de `public` (incluida `PushSubscription`); `anon` y `authenticated` sin privilegios (0 filas en `information_schema.role_table_grants`); anon recibe HTTP 401/42501 en las 6 tablas probadas. TLS con CA de Supabase y `sslaccept=strict`. | Defaults de `supabase_admin` siguen abiertos (requiere SQL como ese rol); faltan `prisma_app`, secretos Moodle y retry de lecturas. |
 
 Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
 
@@ -54,16 +54,13 @@ Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
 
 ## Corte actual (2026-11-13)
 
-Hechos y verificados: pasos **1 a 6**. El plan diario ya se decide con reglas
-(determinista, una sola vez, con lock), se invalida con motivo y conserva lo
-empezado.
+Hechos y verificados: pasos **1 a 8**. El plan diario se decide con reglas
+(determinista, una sola vez, con lock), se invalida con motivo, conserva lo
+empezado, calibra horas con sesiones reales y el Cuartel tiene un solo «Ahora»,
+selector de energía y aviso push.
 
-Pendientes: pasos **7 a 14**. No se han empezado. Bloqueos concretos conocidos:
+Pendientes: pasos **9 a 14**. No se han empezado. Bloqueos concretos conocidos:
 
-- 7: falta calibrar `estimatedHours` con `FocusSession`/`SrsReview` y mostrar
-  «estimado» en la UI; el resto de entradas reales ya existe en `dayPlan.ts`.
-- 8: falta el selector de energía que escriba el plan y el push a la hora
-  elegida; «Ahora» y las microtareas ya existen.
 - 9: no existen `responseSchema`, `open_document` ni la confirmación Zod de
   restricciones.
 - 10: no existen `frontHash`, `TutorSessionOutcome` en el cierre ni doble
@@ -77,8 +74,11 @@ Pendientes: pasos **7 a 14**. No se han empezado. Bloqueos concretos conocidos:
 
 - `npm run build`: exit 0 con el código actual.
 - `/api/salud`: HTTP 200, `database.ok = true`; `/` → 307 a `/login`; `/login` 200; `/api/moodle/status` y `/api/planner` 401.
-- `npx tsc --noEmit`: limpio tras el paso 6.
-- `npm run lint`: limpio tras el paso 6.
+- `npx tsc --noEmit`: limpio tras el paso 8.
+- `npm run lint`: limpio tras el paso 8.
+- `node scripts/verify-sesiones.js`: 115 comprobaciones en verde (incluye calibración por unidad, microacción de 2 min y presupuesto del repaso SM-2).
+- `node scripts/verify-planificador.js`: 11 comprobaciones en verde.
+- Migración `20261113213000_push_reminder` aplicada a producción; `PushSubscription` nace con RLS y sin grants de anon.
 - `npx prisma validate`: esquema válido.
 - Recuentos post-1e: `UserProfile` 1, `_prisma_migrations` 2, 473 filas en el UUID del autor (471 migradas + 2 `SystemIssue` del vigilante creadas a las 19:05:36Z), 0 en la cuenta de prueba, 0 restos de `user_default`.
 - Ensayo local: restauración con `--exit-on-error` y 26/26 tablas iguales; `migrate-user-id.js --apply` contra `127.0.0.1:55432/brainup_test`.

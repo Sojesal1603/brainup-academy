@@ -46,6 +46,40 @@ async function planDayFor(userId: string, now: Date): Promise<Date> {
  * dos veces por el mismo motivo, la segunda solo actualiza la fecha y el
  * contador de versión, no crea otro plan.
  */
+/**
+ * Energía declarada por el alumno para hoy: 0.5 baja, 1 normal, 1.2 alta.
+ * Se guarda en `PlanState` y la reconstrucción la usa en vez de la hora del reloj.
+ */
+export type PlanEnergy = 0.5 | 1 | 1.2;
+
+export async function setPlanEnergy(
+  userId: string,
+  energy: PlanEnergy,
+  now: Date = new Date()
+): Promise<void> {
+  const planDay = await planDayFor(userId, now);
+  const factor = energy === 0.5 || energy === 1.2 ? energy : 1;
+
+  await db(userId).planState.upsert({
+    where: { userId_day: { userId, day: planDay } },
+    create: {
+      userId,
+      day: planDay,
+      status: 'invalidated',
+      energy: factor,
+      invalidatedAt: now,
+      invalidationReason: 'energía elegida',
+    },
+    update: {
+      energy: factor,
+      status: 'invalidated',
+      invalidatedAt: now,
+      invalidationReason: 'energía elegida',
+      version: { increment: 1 },
+    },
+  });
+}
+
 export async function invalidatePlan(
   userId: string,
   reason: string,

@@ -22,6 +22,7 @@ import { ensureTodayPlan } from '@/lib/dayPlan';
 import { getTodayClassCheckIn } from '@/lib/temario';
 import { StudyMode } from '@/lib/types';
 import HoyTocaEsto from './HoyTocaEsto';
+import ReminderControl from './ReminderControl';
 import ClassCheckIn from './ClassCheckIn';
 import FocusLock from '@/components/enfoque/FocusLock';
 import HabitItem from '@/components/dashboard/HabitItem';
@@ -534,6 +535,29 @@ export async function DashboardFocus() {
 /* Columna principal: clase + plan del día                             */
 /* ------------------------------------------------------------------ */
 
+/** Hora y estado del aviso diario, leídos aparte para no bloquear el plan. */
+export async function DashboardReminder() {
+  const { user } = await currentTenant();
+  const profile = await safeDb<{ reminderEnabled: boolean; reminderTime: string | null } | null>(
+    'cuartel.aviso',
+    () =>
+      db(user.id).userProfile.findUnique({
+        where: { id: user.id },
+        select: { reminderEnabled: true, reminderTime: true },
+      }),
+    null,
+    2_500
+  );
+
+  if (!profile) return null;
+  return (
+    <ReminderControl
+      initialEnabled={profile.reminderEnabled}
+      initialTime={profile.reminderTime ?? '17:00'}
+    />
+  );
+}
+
 export async function DashboardToday() {
   const { user } = await currentTenant();
   const dayKey = localDayKey(new Date());
@@ -557,7 +581,10 @@ export async function DashboardToday() {
       <ClassCheckIn items={checkInItems} />
 
       {plan ? (
-        <HoyTocaEsto plan={plan} />
+        <>
+          <HoyTocaEsto plan={plan} />
+          <DashboardReminder />
+        </>
       ) : (
         <div className="glass-card rounded-2xl border-amber-500/25 p-5">
           <p className="text-sm font-semibold text-slate-100">El plan de hoy aún no está listo</p>

@@ -876,6 +876,18 @@ function buildMaterial(candidate: PlanCandidate, stage: SessionStage): string {
   }
 }
 
+/**
+ * Minutos que puede ocupar el repaso SM-2 sin romper el presupuesto del día.
+ * Devuelve 0 si ya no caben los 10 minutos mínimos: un repaso no puede dejar
+ * el día con más trabajo que tiempo disponible.
+ */
+export function srsReviewMinutesFor(leftoverMinutes: number): 0 | 10 | 15 {
+  const left = Math.max(0, Math.floor(Number(leftoverMinutes) || 0));
+  if (left >= 15) return 15;
+  if (left >= 10) return 10;
+  return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* 5. Microtareas, recuperación y reprogramación                        */
 /* ------------------------------------------------------------------ */
@@ -887,8 +899,8 @@ export interface MicroTask {
 }
 
 /**
- * «Si termino antes de tiempo, dame algo útil de 5 minutos.» Nunca trabajo
- * nuevo: cinco preguntas, cinco tarjetas o el último error.
+ * «Si termino antes de tiempo, dame algo útil de 2 minutos.» Nunca trabajo
+ * nuevo: una idea de memoria, cinco preguntas, cinco tarjetas o el último error.
  */
 export function microTasks(input: {
   topicTitle?: string | null;
@@ -896,6 +908,11 @@ export function microTasks(input: {
   dueReviews?: number;
 }): MicroTask[] {
   const tasks: MicroTask[] = [
+    {
+      minutes: 2,
+      label: 'Escribe de memoria la idea principal de lo último que has visto',
+      reason: 'Dos minutos de recuperación activa valen más que releer veinte',
+    },
     {
       minutes: 5,
       label: '5 preguntas de recuperación del tema de hoy',

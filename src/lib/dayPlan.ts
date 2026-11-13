@@ -10,6 +10,7 @@ import {
   energyForMoment,
   estimateTopicWork,
   microTasks,
+  srsReviewMinutesFor,
   planSessions,
   recallAtExam,
   recoveryPlan,
@@ -209,6 +210,10 @@ interface PlanningContext {
   candidates: PlanCandidate[];
   /** Horas por unidad, ajustadas con FocusSession y SrsReview. */
   unitEstimates: Map<string, UnitEstimate>;
+  /** Energía efectiva del día: la elegida o la que toca por la hora. */
+  energy: EnergyLevel;
+  /** true si la energía viene del selector del alumno, no del reloj. */
+  energyChosen: boolean;
   periodByDay: Map<number, AvailabilityPeriod[]>;
   studiedMinutesToday: number;
   daysSinceStudy: number | null;
@@ -311,6 +316,22 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
   }
 
   const nextDaySubjects = subjectsByDay.get(nextSchoolDayIndex(now)) ?? new Set<string>();
+
+  const timezone = user?.timezone || 'Europe/Madrid';
+  const planDay = planDayFromKey(dayKeyInZone(now, timezone));
+  const planState = await prisma.planState.findUnique({
+    where: { userId_day: { userId, day: planDay } },
+    select: { energy: true },
+  });
+  const selectedEnergy = planState?.energy;
+  const energy: EnergyLevel =
+    selectedEnergy === 0.5
+      ? 'baja'
+      : selectedEnergy === 1.2
+        ? 'alta'
+        : selectedEnergy === 1
+          ? 'media'
+          : energyForMoment(now, now.getDay() === 0 || now.getDay() === 6);
 
   const nextTaskBySubject = new Map<string, Date>();
   for (const task of tasks) {
@@ -478,6 +499,8 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
     calibration,
     candidates,
     unitEstimates,
+    energy,
+    energyChosen: selectedEnergy === 0.5 || selectedEnergy === 1 || selectedEnergy === 1.2,
     periodByDay,
     studiedMinutesToday,
     daysSinceStudy,
@@ -640,7 +663,7 @@ export async function persistDayPlan(
 
   const sessions = planSessions(candidates, effectiveMinutes, {
     mode: ctx.mode,
-    energy: availability.energy,
+    energy: ctx.energy,
     recovery: recovery.active,
     maxSessions: recovery.active ? recovery.maxSessions : undefined,
   });
@@ -699,7 +722,11 @@ export async function persistDayPlan(
   // No se inyecta la unidad entera: se crea una sesión corta (15 min) por cada
   // una de las dos unidades con más tarjetas vencidas. Así el repaso espaciado
   // deja de ser una pantalla aparte y aparece en la agenda del día.
-  if (isToday && effectiveMinutes >= 10) {
+  // El repaso SM-2 no puede romper el presupuesto: si el plan principal ya ha
+  // gastado la ventana, se queda para mañana. Antes se añadía un bloque de 15
+  // minutos aunque solo quedaran 5 y el día terminaba con más trabajo que tiempo.
+  const reviewMinutes = srsReviewMinutesFor(effectiveMinutes - plannedMinutes);
+  if (isToday && reviewMinutes >= 10) {
     try {
       const dueGroups = (await dueReviewCardsByTopic(userId, now)).slice(0, 2);
       if (dueGroups.length > 0) {
@@ -725,7 +752,7 @@ export async function persistDayPlan(
             data: {
               topicId: topic.id,
               date: start,
-              durationMinutes: 15,
+              durationMinutes: reviewMinutes,
               technique: 'srs_review',
               mode: ctx.mode,
               isCompleted: false,
@@ -746,7 +773,7 @@ export async function persistDayPlan(
           alreadyScheduled.add(topic.id);
           injected += 1;
           createdAt += 1;
-          plannedMinutes += 15;
+          plannedMinutes += reviewMinutes;
         }
       }
     } catch (error) {
@@ -823,6 +850,7 @@ export interface DayPlan {
   windowLabel: string;
   availabilityReason: string;
   energy: EnergyLevel;
+  energyChosen: boolean;
   headline: string;
   sessions: DayPlanSessionView[];
   micro: MicroTask[];
@@ -949,7 +977,8 @@ export async function computeDayPlan(userId: string, now: Date = new Date()): Pr
     studiedMinutes: ctx.studiedMinutesToday,
     windowLabel: availability.windowLabel,
     availabilityReason: availability.reason,
-    energy: availability.energy,
+    energy: ctx.energy,
+    energyChosen: ctx.energyChosen,
     headline,
     sessions,
     micro: microTasks({

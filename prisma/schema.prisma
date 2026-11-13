@@ -56,6 +56,9 @@ model UserProfile {
   // servidor: en Netlify el proceso corre en UTC y un alumno en Madrid vería el
   // cambio de día a las 02:00. Por defecto, Europe/Madrid.
   timezone             String    @default("Europe/Madrid")
+  // Aviso diario del plan: hora local del alumno y si lo quiere activo.
+  reminderEnabled      Boolean   @default(false)
+  reminderTime         String? // "HH:MM" en su zona; null = sin aviso
   targetGradePau       Float     @default(13.5) // Nota objetivo sobre 14
   weeklyHoursCap       Float     @default(25.0) // Horas disponibles a la semana
   weeklyHoursDeclared  Boolean   @default(false) // ¿Las ha dicho él? (si no, es un valor de partida)
@@ -129,6 +132,24 @@ model UserProfile {
   plans            PlanState[]
   planConstraints  PlanConstraint[]
   tutorOutcomes    TutorSessionOutcome[]
+  pushSubscriptions PushSubscription[]
+}
+
+// Suscripción Web Push de un dispositivo. El endpoint es único en el mundo;
+// `lastNotifiedDay` evita repetir el aviso del mismo día en ese dispositivo.
+model PushSubscription {
+  id              String      @id @default(cuid())
+  userId          String
+  user            UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  endpoint        String      @unique
+  p256dh          String
+  auth            String
+  userAgent       String?
+  lastNotifiedDay String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([userId])
 }
 
 // 2. Asignaturas y Ponderaciones PAU

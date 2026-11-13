@@ -6,7 +6,7 @@ import { currentTenant } from './tenantContext';
 import { writeTemarioBackup } from './temarioBackup';
 import { regenerateWeeklyPlan } from './planner';
 import { regenerateTodayPlan } from './dayPlan';
-import { invalidatePlan } from './planner/state';
+import { invalidatePlan, setPlanEnergy, type PlanEnergy } from './planner/state';
 import { isTopicStatus, StudyMode, TopicStatus } from './types';
 import { nextUnit, sortUnits } from './temario';
 import {
@@ -186,6 +186,90 @@ export async function abandonSession(blockId: string) {
   updateTag('cuartel');
   revalidatePath('/planificador');
   return { success: true };
+}
+
+/**
+ * Reordena solo las sesiones de hoy que aún no han empezado. Es el «arrastre
+ * limitado» del Cuartel: no toca lo completado, lo que está en marcha ni los
+ * bloques de otros días, y no invalida el plan (solo cambia el orden visual).
+ */
+export async function reorderTodayBlocks(blockIds: string[], firstOrder = 2) {
+  const { tenant: prisma, userId } = await currentTenant();
+  const ids = Array.isArray(blockIds)
+    ? [...new Set(blockIds.filter((id): id is string => typeof id === 'string' && id.length > 0))]
+    : [];
+  if (ids.length === 0 || ids.length > 12) {
+    return { success: false, error: 'Lista de sesiones no válida.' };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today.getTime() + 86_400_000);
+
+  const blocks = await prisma.studyBlock.findMany({
+    where: { id: { in: ids }, date: { gte: today, lt: tomorrow } },
+    select: { id: true, isCompleted: true, status: true },
+  });
+  if (blocks.length !== ids.length) {
+    return { success: false, error: 'Alguna sesión ya no está en el plan de hoy.' };
+  }
+  if (blocks.some((block) => block.isCompleted || block.status === 'en_curso' || block.status === 'parcial')) {
+    return { success: false, error: 'No se puede mover una sesión empezada o completada.' };
+  }
+
+  const start = Number.isFinite(firstOrder) ? Math.min(50, Math.max(1, Math.round(firstOrder))) : 2;
+  await withTransaction(async (tx) => {
+    for (const [index, id] of ids.entries()) {
+      await tx.studyBlock.update({ where: { id, userId }, data: { orderIndex: start + index } });
+    }
+  });
+
+  revalidatePath('/');
+  updateTag('cuartel');
+  revalidatePath('/planificador');
+  return { success: true };
+}
+
+/**
+ * Guarda la hora del aviso diario. La hora es local del alumno; el envío la
+ * compara con `UserProfile.timezone`, no con la zona del servidor.
+ */
+export async function saveReminder(time: string, enabled: boolean) {
+  const { tenant: prisma, userId } = await currentTenant();
+  const clean = String(time ?? '').trim();
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(clean)) {
+    return { success: false, error: 'La hora debe tener el formato HH:MM.' };
+  }
+
+  await prisma.userProfile.update({
+    where: { id: userId },
+    data: { reminderTime: clean, reminderEnabled: Boolean(enabled) },
+  });
+
+  revalidatePath('/');
+  updateTag('cuartel');
+  return { success: true, time: clean, enabled: Boolean(enabled) };
+}
+
+/**
+ * Cambia la energía con la que se reparte el plan de hoy.
+ *
+ * No es un adorno: con energía baja el motor evita bloques de 60-90 minutos y
+ * prioriza repaso; con alta puede meter avance nuevo. La elección se guarda en
+ * `PlanState` y sobrevive a la reconstrucción del plan.
+ */
+export async function setTodayEnergy(level: 'baja' | 'media' | 'alta') {
+  const { userId } = await currentTenant();
+  const factor: PlanEnergy = level === 'baja' ? 0.5 : level === 'alta' ? 1.2 : 1;
+
+  await setPlanEnergy(userId, factor);
+  const plan = await regenerateTodayPlan(userId);
+
+  revalidatePath('/');
+  updateTag('cuartel');
+  revalidatePath('/planificador');
+
+  return { success: true, energy: plan.energy, sessions: plan.sessions.length };
 }
 
 /** Recalcula el plan de hoy con el tiempo que queda ahora mismo. */

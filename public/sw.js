@@ -30,7 +30,8 @@
 // las cachés viejas en `activate`, que son las que podían servir código rancio.
 // v6: cambia el logo, así que hay que soltar los iconos cacheados con la marca
 // anterior.
-const CACHE_NAME = 'brainup-v6';
+// v7: se añade el aviso push del plan; hay que activar el SW nuevo.
+const CACHE_NAME = 'brainup-v7';
 
 /** Lo que sí se guarda: recursos propios que no cambian de contenido. */
 function isStaticAsset(url) {
@@ -102,4 +103,49 @@ self.addEventListener('fetch', (event) => {
 
   // Lo que queda son recursos propios que no son páginas ni datos: red directa.
   // (Las navegaciones ya han salido arriba sin tocarse.)
+});
+
+/**
+ * Aviso del plan. El payload lo construye el servidor con el bloque concreto
+ * (`title`, `body`, `url`); aquí no se inventa texto ni se consulta la API.
+ */
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: 'BrainUp Academy', body: event.data ? event.data.text() : 'Tienes una sesión pendiente.' };
+  }
+
+  const title = data.title || 'BrainUp Academy';
+  const body = data.body || 'Tienes una sesión pendiente.';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon.png',
+      badge: '/icon.png',
+      tag: data.tag || 'brainup-ahora',
+      renotify: false,
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const existing = clients.find((client) => client.url.startsWith(self.location.origin));
+      if (existing) {
+        await existing.focus();
+        if ('navigate' in existing) await existing.navigate(url).catch(() => null);
+        return;
+      }
+      await self.clients.openWindow(url);
+    })()
+  );
 });

@@ -26,6 +26,8 @@ const PUBLIC_PATHS = new Set([
   '/api/auth/login',
   '/api/auth/logout',
   '/api/salud',
+  // Cron de avisos: se protege con PUSH_CRON_SECRET dentro del handler.
+  '/api/push/send-due',
   '/manifest.json',
   '/sw.js',
   '/favicon.ico',
