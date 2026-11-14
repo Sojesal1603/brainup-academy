@@ -40,6 +40,8 @@ import {
 import { readUpload, readUploadBytes, type StoredUpload } from '@/lib/docStore';
 import { buildDocumentContext, parsePageRequests, type IndexedDoc } from '@/lib/docContext';
 import { startOfDay } from '@/lib/srs';
+import { readTodayPlanConstraints } from '@/lib/planner/constraintStore';
+import { openDocument } from '@/lib/tutorDocuments';
 import {
   syncTutorWithPlanner,
   type TutorPlannerSyncResult,
@@ -321,6 +323,7 @@ export async function POST(request: Request) {
       // La memoria entre días: lo que este catedrático ya habló con él en esta
       // materia. Cadena vacía el primer día (y entonces no se añade nada al prompt).
       memoryBlock,
+      planConstraints,
     ] = await Promise.all([
       tenant.userProfile.findUnique({ where: { id: authUser.id } }),
       tenant.topic.findMany({
@@ -333,7 +336,7 @@ export async function POST(request: Request) {
       tenant.topic.findMany({
         where: { subjectId: agent.subjectId },
         orderBy: { unitNumber: 'asc' },
-        select: { id: true, title: true, unitNumber: true, status: true },
+        select: { id: true, title: true, unitNumber: true, status: true, teacherMethod: true },
       }),
       tenant.exam.findMany({
         where: { subjectId: agent.subjectId, examDate: { gte: new Date() } },
@@ -400,6 +403,11 @@ export async function POST(request: Request) {
         : Promise.resolve([] as NoteRowForTutor[]),
       tenant.note.count({ where: { topic: { subjectId: agent.subjectId } } }),
       loadMemoryBlock(authUser.id, agent.id),
+      // Si las restricciones no se pueden leer, el chat sigue: el contexto es
+      // útil, no una condición para contestar.
+      readTodayPlanConstraints(authUser.id)
+        .then((today) => today.constraints)
+        .catch(() => []),
     ]);
 
     // Unidad que está dando en clase (temario): dato real que sí se puede citar.
@@ -522,8 +530,14 @@ export async function POST(request: Request) {
         // de la unidad que está dando en clase cuando le piden otra.
         syllabus: subjectUnits.map((unit) => ({ unitNumber: unit.unitNumber, title: unit.title })),
         courseUnit: courseUnit
-          ? { title: courseUnit.title, unitNumber: courseUnit.unitNumber, status: courseUnit.status }
+          ? {
+              title: courseUnit.title,
+              unitNumber: courseUnit.unitNumber,
+              status: courseUnit.status,
+              teacherMethod: courseUnit.teacherMethod,
+            }
           : null,
+        constraints: planConstraints,
         upcomingExams,
         pendingErrors,
         todayPlan: todayBlocks.map((block) => ({
@@ -715,15 +729,24 @@ export async function POST(request: Request) {
     if (intentNote && requestedNote) {
       console.log(`[tutor] abriendo apunte guardado por petición explícita: «${requestedNote.title}»`);
     }
-    const openNote = requestedNote
-      ? {
-          id: requestedNote.id,
-          title: requestedNote.title,
-          unitNumber: requestedNote.unitNumber,
-          unitTitle: requestedNote.unitTitle,
-          subjectId: agent.subjectId,
-        }
+    // La apertura se ejecuta en servidor con el userId de la sesión. Aunque el
+    // índice ya está acotado, esta es la comprobación final de que el apunte
+    // existe y es suyo; al modelo nunca se le manda el id ni el dueño.
+    const openedDocument = requestedNote
+      ? await openDocument(authUser.id, 'note', requestedNote.id)
       : null;
+    const openNote =
+      requestedNote && openedDocument?.ok
+        ? {
+            id: requestedNote.id,
+            title: openedDocument.title ?? requestedNote.title,
+            unitNumber: requestedNote.unitNumber,
+            unitTitle: requestedNote.unitTitle,
+            subjectId: agent.subjectId,
+            /** Cita estable: el panel se puede abrir desde esta dirección. */
+            href: `?doc=note:${requestedNote.id}`,
+          }
+        : null;
 
     // Los adjuntos que ya estaban en disco (subida en streaming) no se reescriben:
     // se apunta su ruta y su peso, que es lo que hace falta para reabrirlos.

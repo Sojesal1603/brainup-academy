@@ -108,7 +108,19 @@ export interface TutorContext {
    */
   syllabus?: Array<{ unitNumber: number | null; title: string }>;
   /** Unidad que está dando en clase según su temario (dato real, no medición). */
-  courseUnit: { title: string; unitNumber: number | null; status: string } | null;
+  courseUnit: {
+    title: string;
+    unitNumber: number | null;
+    status: string;
+    /** Cómo la explicó el profesor, contado por el alumno. */
+    teacherMethod?: string | null;
+  } | null;
+  /** Restricciones que el alumno ha confirmado para el plan de hoy. */
+  constraints?: Array<
+    | { kind: 'max_minutes'; minutes: number }
+    | { kind: 'avoid_subject'; subject: string }
+    | { kind: 'only_subject'; subject: string }
+  >;
   upcomingExams: Array<{ title: string; examDate: Date; examType: string }>;
   pendingErrors: number;
   /**
@@ -236,8 +248,30 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     );
   }
 
+  if (ctx.courseUnit?.teacherMethod && ctx.courseUnit.teacherMethod.trim().length > 0) {
+    lines.push(
+      `Método real del profesor para «${ctx.courseUnit.title}» (lo contó el alumno; respétalo: la notación, los pasos y los ejemplos de su examen salen de ahí): ${ctx.courseUnit.teacherMethod.trim().slice(0, 600)}`
+    );
+  }
+
   if (ctx.pendingErrors > 0) {
     lines.push(`Tiene ${ctx.pendingErrors} errores pendientes en el banco de errores de esta materia.`);
+  }
+
+  // Restricciones confirmadas por el alumno. No son una sugerencia: si hoy ha
+  // dicho «sin Filosofía» o «solo 45 minutos», el catedrático no puede proponer
+  // lo contrario sin avisar de que choca con su propia decisión.
+  if (ctx.constraints && ctx.constraints.length > 0) {
+    lines.push('RESTRICCIONES DE HOY (confirmadas por el alumno):');
+    for (const constraint of ctx.constraints) {
+      if (constraint.kind === 'max_minutes') {
+        lines.push(`- Máximo ${constraint.minutes} minutos de estudio hoy.`);
+      } else if (constraint.kind === 'avoid_subject') {
+        lines.push(`- Hoy no quiere trabajar ${constraint.subject}.`);
+      } else {
+        lines.push(`- Hoy solo quiere trabajar ${constraint.subject}.`);
+      }
+    }
   }
 
   // Lo que el Planificador ha decidido para hoy. Se le da como contexto real:

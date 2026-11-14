@@ -16,6 +16,7 @@ import type { NoteProposal } from '@/lib/apuntesIa';
 import { getConfiguredEngines } from '@/lib/aiEngine';
 import { resolveAllAiCredentials, runWithAiCredentials } from '@/lib/ai/credentials';
 import { ArrowLeft, GraduationCap, Sparkles } from 'lucide-react';
+import AiKeyRequiredBanner from '@/components/ia/AiKeyRequiredBanner';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,7 +55,7 @@ export default async function TutorPage({
   const { agentId } = await params;
   // El rótulo del motor se lee con las credenciales de ESTA cuenta: la página no
   // debe anunciar la clave de plataforma si el usuario no tiene la suya.
-  const aiCredentials = await resolveAllAiCredentials(user.id);
+  const aiCredentials = await resolveAllAiCredentials(user.id, { tolerateVaultErrors: true });
   const modelLabel = runWithAiCredentials(aiCredentials, () => getConfiguredModelLabel());
   // Motores que pueden escribir ahora mismo: con ellos se comparan las
   // versiones de un mismo apunte (Gemini, Groq, OpenRouter, local…).
@@ -104,6 +105,7 @@ export default async function TutorPage({
     pendingErrors,
     notesTotal,
     notesPreview,
+    teacherUnit,
   ] = await Promise.all([
     // OJO: el `agentId` de la URL puede ser el slug de la materia
     // («lengua-castellana-y-literatura-i»), no el UUID del agente. Buscar la
@@ -151,6 +153,13 @@ export default async function TutorPage({
       orderBy: [{ isPinned: 'desc' }, { updatedAt: 'desc' }],
       take: 3,
       select: { title: true },
+    }),
+    // Método del profesor: dato real que el alumno contó en el temario. Se usa
+    // en el saludo por reglas, sin gastar ninguna llamada de IA.
+    prisma.topic.findFirst({
+      where: { subjectId: agent.subjectId, teacherMethod: { not: null } },
+      orderBy: [{ seenInClassAt: 'desc' }, { updatedAt: 'desc' }],
+      select: { teacherMethod: true },
     }),
   ]);
 
@@ -224,6 +233,12 @@ export default async function TutorPage({
         </div>
       </div>
 
+      {aiCredentials.length === 0 ? (
+        <div className="shrink-0 px-3 pt-3 sm:px-5">
+          <AiKeyRequiredBanner />
+        </div>
+      ) : null}
+
       <div className="chat-grid flex min-h-0 flex-1 md:grid md:grid-cols-1">
         {/* Chat */}
         <TutorChat
@@ -242,6 +257,7 @@ export default async function TutorPage({
             nextExamLabel: upcomingExams[0]?.title ?? null,
             examDays: upcomingExams[0] ? daysUntil(upcomingExams[0].examDate) : null,
             pendingErrors,
+            teacherMethodLabel: teacherUnit?.teacherMethod?.trim().slice(0, 300) || null,
           }}
           notes={{ total: notesTotal, titles: notesPreview.map((note) => note.title) }}
           engines={engines}

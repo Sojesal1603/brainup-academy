@@ -267,6 +267,8 @@ export interface TutorOpeningContext {
   nextExamLabel: string | null;
   examDays: number | null;
   pendingErrors: number;
+  /** Cómo explicó el profesor la unidad que está en curso (si el alumno lo contó). */
+  teacherMethodLabel: string | null;
 }
 
 interface TutorChatProps {
@@ -481,6 +483,9 @@ function buildOpeningMessage(agent: TutorAgent, opening: TutorOpeningContext): s
           : ''
       }.`
     );
+  }
+  if (opening.teacherMethodLabel) {
+    situation.push(`En clase lo explicó así: ${opening.teacherMethodLabel}`);
   }
   if (opening.pendingErrors > 0) {
     situation.push(
@@ -901,6 +906,8 @@ export default function TutorChat({
               unitNumber: number | null;
               unitTitle: string | null;
               subjectId: string;
+              /** Cita `?doc=note:ID`; el panel es la vista del documento. */
+              href?: string;
             } | null;
             reply?: { id: string; content: string; stage: TutorStage | null };
             error?: string;
@@ -999,6 +1006,10 @@ export default function TutorChat({
             },
           },
         }));
+        if (opened.href) {
+          // La cita queda en la dirección, sin recargar ni usar SSE.
+          window.history.replaceState(null, '', opened.href);
+        }
         void openNoteById(opened.id, replyId);
       }
     } catch (err) {

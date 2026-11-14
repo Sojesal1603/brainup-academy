@@ -27,6 +27,11 @@ import {
   type SessionStage,
 } from './sessionEngine';
 import type { StudyMode } from './types';
+import { parseStoredConstraints } from './planner/constraintStore';
+import {
+  maxMinutesFromConstraints,
+  subjectAllowedByConstraints,
+} from './planner/constraints';
 
 /**
  * El plan del día: todo lo que hace falta para que al abrir la app solo haya que
@@ -204,6 +209,7 @@ export function computeAvailability(input: {
 
 interface PlanningContext {
   now: Date;
+  timezone: string;
   weeklyHoursCap: number;
   mode: StudyMode;
   calibration: Record<string, number>;
@@ -494,6 +500,7 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
 
   return {
     now,
+    timezone,
     weeklyHoursCap: user?.weeklyHoursCap ?? 20,
     mode: ((user?.studyMode as StudyMode) ?? 'athlete') as StudyMode,
     calibration,
@@ -611,7 +618,7 @@ export async function persistDayPlan(
     typeof options.budgetMinutes === 'number' && options.budgetMinutes > 0
       ? Math.round(options.budgetMinutes)
       : null;
-  const effectiveMinutes = Math.max(
+  let effectiveMinutes = Math.max(
     0,
     Math.floor(
       (declaredBudget !== null
@@ -619,6 +626,17 @@ export async function persistDayPlan(
         : availability.availableMinutes) - reservedMinutes
     )
   );
+
+  // Restricciones confirmadas por el alumno para ESTE día. Se leen del plan
+  // guardado y se validan con Zod: una fila rara no puede romper el plan.
+  const constraintDay = planDayFromKey(dayKeyInZone(day, ctx.timezone));
+  const constrainedState = await prisma.planState.findUnique({
+    where: { userId_day: { userId, day: constraintDay } },
+    select: { constraints: { select: { payload: true }, orderBy: { createdAt: 'asc' } } },
+  });
+  const planConstraints = parseStoredConstraints(constrainedState?.constraints ?? []);
+  const constrainedMax = maxMinutesFromConstraints(planConstraints);
+  if (constrainedMax !== null) effectiveMinutes = Math.min(effectiveMinutes, constrainedMax);
 
   // Lo pendiente de días anteriores vuelve, con lo que faltaba, a los dos
   // primeros huecos. Se marca como abandonado el resto: no se acumula deuda.
@@ -654,11 +672,13 @@ export async function persistDayPlan(
   const recovery = recoveryPlan(ctx.daysSinceStudy);
 
   // La prioridad de lo que se quedó a medias sube: ya iba primero ayer.
-  const candidates = ctx.candidates.map((candidate) =>
-    carryTopicIds.has(candidate.topicId)
-      ? { ...candidate, priority: candidate.priority + 15 }
-      : candidate
-  );
+  const candidates = ctx.candidates
+    .filter((candidate) => subjectAllowedByConstraints(planConstraints, candidate.subjectName))
+    .map((candidate) =>
+      carryTopicIds.has(candidate.topicId)
+        ? { ...candidate, priority: candidate.priority + 15 }
+        : candidate
+    );
   candidates.sort((a, b) => b.priority - a.priority);
 
   const sessions = planSessions(candidates, effectiveMinutes, {
@@ -732,7 +752,7 @@ export async function persistDayPlan(
       if (dueGroups.length > 0) {
         const dueTopics = await prisma.topic.findMany({
           where: { id: { in: dueGroups.map((group) => group.topicId) } },
-          select: { id: true, title: true, subject: { select: { isTracked: true } } },
+          select: { id: true, title: true, subject: { select: { isTracked: true, name: true } } },
         });
         const alreadyScheduled = new Set(
           (
@@ -747,6 +767,8 @@ export async function persistDayPlan(
         for (const group of dueGroups) {
           const topic = dueTopics.find((row) => row.id === group.topicId);
           if (!topic || !topic.subject.isTracked || alreadyScheduled.has(topic.id)) continue;
+          // Un repaso de una materia restringida tampoco entra en el plan.
+          if (!subjectAllowedByConstraints(planConstraints, topic.subject.name)) continue;
 
           await prisma.studyBlock.create({
             data: {

@@ -19,6 +19,8 @@ import { safeDb } from '@/lib/dbTimeout';
 import { buildReviewQueue } from '@/lib/srs';
 import { levelFromXp, weekKeyOf } from '@/lib/challenges';
 import { ensureTodayPlan } from '@/lib/dayPlan';
+import { readTodayPlanConstraints } from '@/lib/planner/constraintStore';
+import PlanConstraintsCard from './PlanConstraintsCard';
 import { getTodayClassCheckIn } from '@/lib/temario';
 import { StudyMode } from '@/lib/types';
 import HoyTocaEsto from './HoyTocaEsto';
@@ -558,6 +560,12 @@ export async function DashboardReminder() {
   );
 }
 
+export async function DashboardConstraints() {
+  const { user } = await currentTenant();
+  const today = await readTodayPlanConstraints(user.id).catch(() => ({ constraints: [] }));
+  return <PlanConstraintsCard initial={today.constraints} />;
+}
+
 export async function DashboardToday() {
   const { user } = await currentTenant();
   const dayKey = localDayKey(new Date());
@@ -578,6 +586,7 @@ export async function DashboardToday() {
 
   return (
     <div className="min-w-0 space-y-4">
+      <DashboardConstraints />
       <ClassCheckIn items={checkInItems} />
 
       {plan ? (
