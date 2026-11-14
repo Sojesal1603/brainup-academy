@@ -34,7 +34,7 @@ const outAttempts = compilaTs('ai/keyAttempts', '.tmp-verify-user-attempts');
 const outCheck = compilaTs('ai/geminiKeyCheck', '.tmp-verify-user-check');
 const store = require(path.join(outDir, 'ai', 'userKeyStore.js'));
 const vault = require(path.join(outDir, 'security', 'vault.js'));
-const attempts = require(path.join(outAttempts, 'keyAttempts.js'));
+const attempts = require(path.join(outAttempts, 'ai', 'keyAttempts.js'));
 const check = require(path.join(outCheck, 'geminiKeyCheck.js'));
 
 let checks = 0;
@@ -78,7 +78,7 @@ async function ok(name, fn) {
       }
     });
 
-    await ok('descifra con el mismo userId y falla con otro (AAD)', async () => {
+    await ok('descifra con el mismo userId y falla con otro userId o provider (AAD)', async () => {
       assert.equal(await store.readDecryptedUserKey(TEST_ACCOUNT, 'gemini'), FAKE_KEY);
 
       const { PrismaClient } = require('@prisma/client');
@@ -87,14 +87,38 @@ async function ok(name, fn) {
         const row = await prisma.userAiKey.findUnique({
           where: { userId_provider: { userId: TEST_ACCOUNT, provider: 'gemini' } },
         });
-        let caught = null;
-        try {
-          vault.decryptSecret(row.ciphertext, OWNER);
-        } catch (error) {
-          caught = error;
+        for (const aad of [OWNER, store.userAiKeyAad(TEST_ACCOUNT, 'groq')]) {
+          let caught = null;
+          try {
+            vault.decryptSecret(row.ciphertext, aad);
+          } catch (error) {
+            caught = error;
+          }
+          assert.ok(caught, 'otro AAD no debe descifrar la clave');
+          assert.equal(caught.code, 'vault_decrypt_failed');
         }
-        assert.ok(caught, 'otro userId no debe descifrar la clave');
-        assert.equal(caught.code, 'vault_decrypt_failed');
+      } finally {
+        await prisma.$disconnect();
+      }
+    });
+
+    await ok('una fila antigua (AAD userId) se migra al leerla sin perder la clave', async () => {
+      const { PrismaClient } = require('@prisma/client');
+      const prisma = new PrismaClient();
+      try {
+        const legacy = vault.encryptSecret(FAKE_KEY, TEST_ACCOUNT);
+        await prisma.userAiKey.update({
+          where: { userId_provider: { userId: TEST_ACCOUNT, provider: 'gemini' } },
+          data: { ciphertext: legacy },
+        });
+        assert.equal(await store.readDecryptedUserKey(TEST_ACCOUNT, 'gemini'), FAKE_KEY);
+        const migrated = await prisma.userAiKey.findUnique({
+          where: { userId_provider: { userId: TEST_ACCOUNT, provider: 'gemini' } },
+        });
+        assert.equal(
+          vault.decryptSecret(migrated.ciphertext, store.userAiKeyAad(TEST_ACCOUNT, 'gemini')),
+          FAKE_KEY
+        );
       } finally {
         await prisma.$disconnect();
       }
@@ -132,15 +156,15 @@ async function ok(name, fn) {
     });
 
     await ok('el límite corta al sexto intento y se reinicia al acertar', async () => {
-      attempts.clearAiKeyAttempts();
+      await attempts.resetAiKeyAttempts(TEST_ACCOUNT);
       for (let index = 0; index < 5; index++) {
-        assert.equal(attempts.consumeAiKeyAttempt(TEST_ACCOUNT).ok, true, `intento ${index + 1}`);
+        assert.equal((await attempts.consumeAiKeyAttempt(TEST_ACCOUNT)).ok, true, `intento ${index + 1}`);
       }
-      const blocked = attempts.consumeAiKeyAttempt(TEST_ACCOUNT);
+      const blocked = await attempts.consumeAiKeyAttempt(TEST_ACCOUNT);
       assert.equal(blocked.ok, false);
       assert.ok(blocked.retryAfterSeconds > 0);
-      attempts.resetAiKeyAttempts(TEST_ACCOUNT);
-      assert.equal(attempts.consumeAiKeyAttempt(TEST_ACCOUNT).ok, true);
+      await attempts.resetAiKeyAttempts(TEST_ACCOUNT);
+      assert.equal((await attempts.consumeAiKeyAttempt(TEST_ACCOUNT)).ok, true);
     });
 
     await ok('la validación sanea 401 (ni clave ni URL en el mensaje)', async () => {
@@ -180,19 +204,21 @@ async function ok(name, fn) {
       }
     });
 
-    await ok('UserAiKey tiene RLS y cero grants para anon/authenticated', async () => {
+    await ok('AiKeyAttempt tiene RLS y cero grants para anon/authenticated', async () => {
       const { PrismaClient } = require('@prisma/client');
       const prisma = new PrismaClient();
       try {
-        const [rls] = await prisma.$queryRawUnsafe(
-          `SELECT relrowsecurity FROM pg_class WHERE relname = 'UserAiKey'`
-        );
-        assert.equal(rls.relrowsecurity, true);
-        const [grants] = await prisma.$queryRawUnsafe(
-          `SELECT count(*)::int AS n FROM information_schema.role_table_grants
-           WHERE table_name = 'UserAiKey' AND grantee IN ('anon', 'authenticated')`
-        );
-        assert.equal(grants.n, 0);
+        for (const table of ['UserAiKey', 'AiKeyAttempt']) {
+          const [rls] = await prisma.$queryRawUnsafe(
+            `SELECT relrowsecurity FROM pg_class WHERE relname = '${table}'`
+          );
+          assert.equal(rls.relrowsecurity, true, `${table} sin RLS`);
+          const [grants] = await prisma.$queryRawUnsafe(
+            `SELECT count(*)::int AS n FROM information_schema.role_table_grants
+             WHERE table_name = '${table}' AND grantee IN ('anon', 'authenticated')`
+          );
+          assert.equal(grants.n, 0, `${table} con grants públicos`);
+        }
       } finally {
         await prisma.$disconnect();
       }
@@ -205,6 +231,7 @@ async function ok(name, fn) {
     });
   } finally {
     await store.deleteUserAiKey(TEST_ACCOUNT, 'gemini').catch(() => undefined);
+    await attempts.resetAiKeyAttempts(TEST_ACCOUNT).catch(() => undefined);
   }
 
   console.log(`\n  ✅ ${checks} comprobaciones en verde\n`);

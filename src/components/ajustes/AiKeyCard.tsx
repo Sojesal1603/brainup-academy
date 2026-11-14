@@ -147,6 +147,10 @@ export default function AiKeyCard({
         </span>
       </div>
 
+      <p className="rounded-xl border border-slate-700/70 bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+        Google exige ser mayor de 18 años para crear claves de API de Gemini.
+      </p>
+
       {!vaultReady ? (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
           {vaultError ??

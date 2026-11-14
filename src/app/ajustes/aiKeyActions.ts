@@ -50,7 +50,7 @@ function storeFailure(error: unknown): AiKeyActionResult {
 export async function saveMyAiKey(formData: FormData): Promise<AiKeyActionResult> {
   const user = await requireUser();
 
-  const limit = consumeAiKeyAttempt(user.id);
+  const limit = await consumeAiKeyAttempt(user.id);
   if (!limit.ok) {
     return {
       ok: false,
@@ -84,7 +84,7 @@ export async function saveMyAiKey(formData: FormData): Promise<AiKeyActionResult
       status: check.status,
       lastError: check.error,
     });
-    if (check.status === 'valida') resetAiKeyAttempts(user.id);
+    if (check.status === 'valida') await resetAiKeyAttempts(user.id);
     revalidatePath('/ajustes');
     return {
       ok: true,
@@ -124,7 +124,7 @@ export async function deleteMyAiKey(): Promise<AiKeyActionResult> {
 export async function recheckMyAiKey(): Promise<AiKeyActionResult> {
   const user = await requireUser();
 
-  const limit = consumeAiKeyAttempt(user.id);
+  const limit = await consumeAiKeyAttempt(user.id);
   if (!limit.ok) {
     return {
       ok: false,
@@ -156,7 +156,7 @@ export async function recheckMyAiKey(): Promise<AiKeyActionResult> {
       status: check.status,
       lastError: check.error,
     });
-    if (check.status === 'valida') resetAiKeyAttempts(user.id);
+    if (check.status === 'valida') await resetAiKeyAttempts(user.id);
     revalidatePath('/ajustes');
     return {
       ok: true,

@@ -134,15 +134,16 @@ model UserProfile {
   tutorOutcomes     TutorSessionOutcome[]
   pushSubscriptions PushSubscription[]
   aiKeys            UserAiKey[]
+  aiKeyAttempts     AiKeyAttempt[]
 }
 
 // Clave de IA propia de un usuario, cifrada con AES-256-GCM.
 //
 // Aquí NO se guarda la clave en claro: `ciphertext` es el sobre versionado del
-// vault (`v1.iv.tag.ct`) y el `userId` viaja como AAD, así que una fila copiada
-// a otra cuenta no se puede descifrar. `last4` es lo único que se enseña en la
-// interfaz. El estado lo escribe la comprobación contra Google; nunca se deduce
-// de que la clave «parezca» válida.
+// vault (`v1.iv.tag.ct`) y el AAD es `userId:provider`, así que una fila copiada
+// a otra cuenta o a otro proveedor no se puede descifrar. `last4` es lo único
+// que se enseña en la interfaz. El estado lo escribe la comprobación contra
+// Google; nunca se deduce de que la clave «parezca» válida.
 model UserAiKey {
   id            String      @id @default(cuid())
   userId        String
@@ -160,6 +161,18 @@ model UserAiKey {
 
   @@unique([userId, provider])
   @@index([userId])
+}
+
+// Intentos de pegar/comprobar una clave de IA. Uno por intento, no un contador
+// en memoria: el límite tiene que valer igual en todas las instancias y
+// sobrevivir a un reinicio. El barrido de la ventana lo hace la app.
+model AiKeyAttempt {
+  id          String      @id @default(cuid())
+  userId      String
+  user        UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  attemptedAt DateTime    @default(now())
+
+  @@index([userId, attemptedAt])
 }
 
 // Suscripción Web Push de un dispositivo. El endpoint es único en el mundo;

@@ -71,6 +71,7 @@ const TENANT_MODELS: ReadonlySet<string> = new Set([
   'TutorSessionOutcome',
   'PushSubscription',
   'UserAiKey',
+  'AiKeyAttempt',
 ]);
 
 /** Operaciones de lectura: se les añade el dueño al `where`. */

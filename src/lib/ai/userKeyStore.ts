@@ -29,6 +29,17 @@ export interface UserAiKeySummary {
 }
 
 
+/**
+ * Contexto (AAD) de una clave: cuenta **y** proveedor.
+ *
+ * Antes solo era el userId. Ahora una fila de Gemini copiada a la de Groq
+ * tampoco descifra: el proveedor forma parte del sobre. El formato es estable y
+ * se usa también en el camino de compatibilidad de las claves ya guardadas.
+ */
+export function userAiKeyAad(userId: string, provider: string): string {
+  return `${userId}:${provider}`;
+}
+
 function isStatus(value: string): value is UserAiKeyStatus {
   return ['sin_comprobar', 'valida', 'invalida', 'sin_cuota'].includes(value);
 }
@@ -45,15 +56,28 @@ export async function readDecryptedUserKey(
   if (!row) return null;
 
   try {
-    return decryptSecret(row.ciphertext, userId);
+    return decryptSecret(row.ciphertext, userAiKeyAad(userId, provider));
   } catch (error) {
-    // Solo el código: el mensaje del vault ya está saneado, pero el de OpenSSL
-    // podría nombrar detalles internos. Nunca se registra la fila ni el AAD.
-    console.error(
-      '[ai] no se pudo descifrar la clave guardada:',
-      error instanceof VaultError ? error.code : 'error desconocido'
-    );
-    throw new AiKeyStoreError();
+    // Compatibilidad con las filas creadas antes de que el proveedor entrara en
+    // el AAD. No se pierde ninguna clave: si el sobre viejo abre, se vuelve a
+    // cifrar con el contexto nuevo en la misma lectura.
+    try {
+      const legacy = decryptSecret(row.ciphertext, userId);
+      const ciphertext = encryptSecret(legacy, userAiKeyAad(userId, provider));
+      await db(userId).userAiKey.update({
+        where: { userId_provider: { userId, provider } },
+        data: { ciphertext },
+      });
+      return legacy;
+    } catch {
+      // Solo el código: el mensaje del vault ya está saneado, pero el de OpenSSL
+      // podría nombrar detalles internos. Nunca se registra la fila ni el AAD.
+      console.error(
+        '[ai] no se pudo descifrar la clave guardada:',
+        error instanceof VaultError ? error.code : 'error desconocido'
+      );
+      throw new AiKeyStoreError();
+    }
   }
 }
 
@@ -67,7 +91,7 @@ export async function saveUserAiKey(input: {
 }): Promise<UserAiKeySummary> {
   let ciphertext: string;
   try {
-    ciphertext = encryptSecret(input.key, input.userId);
+    ciphertext = encryptSecret(input.key, userAiKeyAad(input.userId, input.provider));
   } catch (error) {
     console.error(
       '[ai] no se pudo cifrar la clave:',
