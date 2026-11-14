@@ -30,6 +30,7 @@
     "verify:vault": "node scripts/verify-vault.js",
     "verify:user-ai-key": "node scripts/verify-user-ai-key.js",
     "verify:constraints": "node scripts/verify-constraints.js",
+    "verify:attachments": "node scripts/verify-attachments.js",
     "verify:tutor": "node scripts/verify-tutor.js",
     "verify:tutor-contexto": "node scripts/verify-tutor-contexto.js",
     "verify:tutor-documentos": "node scripts/verify-tutor-documentos.js",

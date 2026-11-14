@@ -28,7 +28,7 @@ import { open, readFile, stat } from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { inflateRawSync } from 'zlib';
-import { extensionOf, isTextReadableKind, kindOfMime } from './attachmentLimits';
+import { MAX_PDF_PAGES, extensionOf, isTextReadableKind, kindOfMime } from './attachmentLimits';
 
 /**
  * Tope de texto que se extrae de un archivo: **40 millones de caracteres**, del
@@ -212,6 +212,18 @@ async function readPlainText(fileInput: { path: string; mimeType: string; name: 
 /* 2. PDF: página a página, con su marca                               */
 /* ------------------------------------------------------------------ */
 
+/** Un PDF con más páginas de las que la app acepta. */
+export class DocumentPageLimitError extends Error {
+  readonly code = 'too_many_pages';
+
+  constructor(pages: number) {
+    super(
+      `El PDF tiene ${pages} páginas y el máximo es ${MAX_PDF_PAGES}. Divídelo en partes (por temas o capítulos) y sube cada una.`
+    );
+    this.name = 'DocumentPageLimitError';
+  }
+}
+
 async function readPdf(fileInput: { path: string; name: string }): Promise<DocReadResult> {
   const data = new Uint8Array(await readFile(fileInput.path));
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -234,6 +246,11 @@ async function readPdf(fileInput: { path: string; name: string }): Promise<DocRe
   });
 
   const document = await task.promise;
+
+  if (document.numPages > MAX_PDF_PAGES) {
+    await task.destroy().catch(() => {});
+    throw new DocumentPageLimitError(document.numPages);
+  }
 
   const notes: string[] = [];
   const pieces: string[] = [];

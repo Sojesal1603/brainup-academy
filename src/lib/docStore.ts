@@ -21,7 +21,7 @@
  */
 
 import { createWriteStream } from 'fs';
-import { mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, open, readFile, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { Readable, Transform } from 'stream';
@@ -33,11 +33,18 @@ import {
   resolveMimeType,
   type AttachmentKind,
 } from './attachmentLimits';
-import { readDocument, type DocReadMode } from './docRead';
+import { DocumentPageLimitError, readDocument, type DocReadMode } from './docRead';
 import { buildDocumentIndex, type IndexedDoc } from './docContext';
+import { signatureMatches, signatureMismatchMessage, sniffSignature } from './fileSignature';
 
-/** Carpeta local de las subidas (fuera del control de versiones). */
-export const UPLOADS_DIR = path.join(process.cwd(), 'data', 'uploads');
+/**
+ * Carpeta local de las subidas (fuera del control de versiones).
+ *
+ * `BRAINUP_UPLOADS_DIR` permite a las pruebas usar una carpeta temporal sin
+ * mezclarse con los archivos reales del alumno. En producción no se define.
+ */
+export const UPLOADS_DIR =
+  (process.env.BRAINUP_UPLOADS_DIR ?? '').trim() || path.join(process.cwd(), 'data', 'uploads');
 
 export interface StoredUpload {
   id: string;
@@ -65,7 +72,7 @@ export interface StoredUpload {
  */
 export type UploadResult =
   | { ok: true; upload: StoredUpload; code?: undefined }
-  | { ok: false; error: string; code?: 'too_big' | 'tipo' | 'vacio' | 'disco' };
+  | { ok: false; error: string; code?: 'too_big' | 'tipo' | 'vacio' | 'disco' | 'pages' };
 
 /**
  * Un id solo puede ser un UUID: lo que llega por la barra de direcciones no
@@ -75,17 +82,43 @@ function isSafeId(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id ?? ''));
 }
 
-function binPath(id: string): string {
-  return path.join(UPLOADS_DIR, `${id}.bin`);
+/** Un userId solo puede ser un UUID: nunca forma parte de una ruta arbitraria. */
+function isSafeUserId(userId: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    String(userId ?? '')
+  );
 }
-function textPath(id: string): string {
-  return path.join(UPLOADS_DIR, `${id}.txt`);
+
+/** Cada cuenta tiene su propia carpeta: el id de otro no puede abrirla. */
+function userDir(userId: string): string {
+  // El comentario evita que Turbopack trace todo el proyecto por una ruta
+  // construida en runtime; la carpeta base sigue siendo estática.
+  return path.join(/* turbopackIgnore: true */ UPLOADS_DIR, userId);
 }
-function indexPath(id: string): string {
-  return path.join(UPLOADS_DIR, `${id}.index.json`);
+
+function binPath(userId: string, id: string): string {
+  return path.join(userDir(userId), `${id}.bin`);
 }
-function metaPath(id: string): string {
-  return path.join(UPLOADS_DIR, `${id}.json`);
+function textPath(userId: string, id: string): string {
+  return path.join(userDir(userId), `${id}.txt`);
+}
+function indexPath(userId: string, id: string): string {
+  return path.join(userDir(userId), `${id}.index.json`);
+}
+function metaPath(userId: string, id: string): string {
+  return path.join(userDir(userId), `${id}.json`);
+}
+
+/** Los primeros bytes bastan para la firma; no se carga un archivo enorme. */
+async function readHead(filePath: string, maxBytes = 8192): Promise<Buffer> {
+  const handle = await open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Nombre de archivo seguro, solo para el `Content-Disposition` y los mensajes. */
@@ -151,8 +184,12 @@ async function writeStreamWithLimit(
  */
 export async function saveUploadFromStream(
   stream: ReadableStream<Uint8Array>,
-  params: { name: string; mimeType: string; maxBytes: number }
+  params: { userId: string; name: string; mimeType: string; maxBytes: number }
 ): Promise<UploadResult> {
+  if (!isSafeUserId(params.userId)) {
+    return { ok: false, code: 'tipo', error: 'La cuenta no es válida para guardar el archivo.' };
+  }
+  const userId = params.userId;
   const name = safeUploadName(params.name);
 
   // El tipo real: lo que dice el navegador o, si no dice nada útil, la extensión.
@@ -169,17 +206,32 @@ export async function saveUploadFromStream(
   const id = randomUUID();
 
   try {
-    await mkdir(UPLOADS_DIR, { recursive: true });
+    await mkdir(userDir(userId), { recursive: true });
   } catch {
     return { ok: false, code: 'disco', error: 'No se ha podido preparar la carpeta de subidas.' };
   }
 
-  const written = await writeStreamWithLimit(stream, binPath(id), params.maxBytes);
-  if (!written.ok) return { ok: false, code: written.code, error: written.error };
+  const written = await writeStreamWithLimit(stream, binPath(userId, id), params.maxBytes);
+  if (written.ok === false) {
+    return { ok: false, code: written.code, error: written.error };
+  }
 
   if (written.bytes === 0) {
-    await rm(binPath(id), { force: true }).catch(() => {});
+    await rm(binPath(userId, id), { force: true }).catch(() => {});
     return { ok: false, code: 'vacio', error: `El archivo «${name}» ha llegado vacío.` };
+  }
+
+  // El tipo REAL, no el que dice el navegador ni la extensión. Se comprueba
+  // después de escribir para no tener que cargar el archivo entero en memoria.
+  try {
+    const signature = sniffSignature(await readHead(binPath(userId, id)));
+    if (!signatureMatches(mimeType, signature)) {
+      await rm(binPath(userId, id), { force: true }).catch(() => {});
+      return { ok: false, code: 'tipo', error: signatureMismatchMessage(name, mimeType) };
+    }
+  } catch {
+    await rm(binPath(userId, id), { force: true }).catch(() => {});
+    return { ok: false, code: 'disco', error: 'No se ha podido comprobar el tipo real del archivo.' };
   }
 
   // Lectura del contenido: es lo que convierte «un PDF de 200 MB» en algo que el
@@ -195,13 +247,17 @@ export async function saveUploadFromStream(
     notes.push('Es una imagen: el catedrático la mira directamente.');
   } else {
     try {
-      const read = await readDocument({ path: binPath(id), mimeType, name });
+      const read = await readDocument({ path: binPath(userId, id), mimeType, name });
       mode = read.mode;
       text = read.text;
       pages = read.pages;
       chars = read.chars;
       notes.push(...read.notes);
     } catch (error) {
+      if (error instanceof DocumentPageLimitError) {
+        await rm(binPath(userId, id), { force: true }).catch(() => {});
+        return { ok: false, code: 'pages', error: error.message };
+      }
       mode = 'sin_texto';
       notes.push(
         `No he podido sacarle el texto a este archivo (${
@@ -217,8 +273,8 @@ export async function saveUploadFromStream(
   if (text.trim().length > 0) {
     try {
       index = buildDocumentIndex({ id, name, text, pages, mode });
-      await writeFile(textPath(id), text, 'utf8');
-      await writeFile(indexPath(id), JSON.stringify(index), 'utf8');
+      await writeFile(textPath(userId, id), text, 'utf8');
+      await writeFile(indexPath(userId, id), JSON.stringify(index), 'utf8');
     } catch {
       index = null;
       notes.push('El texto se ha leído, pero no se ha podido preparar su índice: se buscará en el documento entero.');
@@ -231,7 +287,7 @@ export async function saveUploadFromStream(
     mimeType,
     sizeBytes: written.bytes,
     kind,
-    path: binPath(id),
+    path: binPath(userId, id),
     createdAt: new Date().toISOString(),
     mode,
     pages,
@@ -245,6 +301,7 @@ export async function saveUploadFromStream(
     // copiar megas de texto en cada subida).
     const meta = {
       id: upload.id,
+      userId,
       name: upload.name,
       mimeType: upload.mimeType,
       sizeBytes: upload.sizeBytes,
@@ -256,7 +313,7 @@ export async function saveUploadFromStream(
       chars: upload.chars,
       notes: upload.notes,
     };
-    await writeFile(metaPath(id), JSON.stringify(meta), 'utf8');
+    await writeFile(metaPath(userId, id), JSON.stringify(meta), 'utf8');
   } catch {
     return { ok: false, code: 'disco', error: 'El archivo se ha subido, pero no se ha podido anotar en el índice de subidas.' };
   }
@@ -265,19 +322,27 @@ export async function saveUploadFromStream(
 }
 
 /** Los datos de una subida (con su índice), o `null` si ya no está. */
-export async function readUpload(id: string): Promise<StoredUpload | null> {
-  if (!isSafeId(id)) return null;
+export async function readUpload(userId: string, id: string): Promise<StoredUpload | null> {
+  if (!isSafeUserId(userId) || !isSafeId(id)) return null;
 
-  let meta: Omit<StoredUpload, 'index'>;
+  let stored: Omit<StoredUpload, 'index'> & { userId?: string };
   try {
-    meta = JSON.parse(await readFile(metaPath(id), 'utf8')) as Omit<StoredUpload, 'index'>;
+    stored = JSON.parse(await readFile(metaPath(userId, id), 'utf8')) as Omit<
+      StoredUpload,
+      'index'
+    > & { userId?: string };
   } catch {
     return null;
   }
 
+  // El metadato debe pertenecer a ESTA cuenta. La carpeta ya lo impide, pero un
+  // archivo movido a mano tampoco puede colarse.
+  if (stored.userId !== userId) return null;
+  const { userId: _owner, ...meta } = stored;
+
   let index: IndexedDoc | null = null;
   try {
-    index = JSON.parse(await readFile(indexPath(id), 'utf8')) as IndexedDoc;
+    index = JSON.parse(await readFile(indexPath(userId, id), 'utf8')) as IndexedDoc;
   } catch {
     // Sin índice (o ilegible): el documento sigue estando, solo se puede leer
     // peor. Se dice tal cual en vez de fingir que no existe.
@@ -288,10 +353,10 @@ export async function readUpload(id: string): Promise<StoredUpload | null> {
 }
 
 /** El texto extraído de una subida, o `null` si no tiene capa de texto. */
-export async function readUploadText(id: string): Promise<string | null> {
-  if (!isSafeId(id)) return null;
+export async function readUploadText(userId: string, id: string): Promise<string | null> {
+  if (!isSafeUserId(userId) || !isSafeId(id)) return null;
   try {
-    const text = await readFile(textPath(id), 'utf8');
+    const text = await readFile(textPath(userId, id), 'utf8');
     return text.trim().length > 0 ? text : null;
   } catch {
     return null;
@@ -299,32 +364,32 @@ export async function readUploadText(id: string): Promise<string | null> {
 }
 
 /** El binario de una subida (para mirarlo o para servirlo de vuelta). */
-export async function readUploadBytes(id: string): Promise<Buffer | null> {
-  if (!isSafeId(id)) return null;
+export async function readUploadBytes(userId: string, id: string): Promise<Buffer | null> {
+  if (!isSafeUserId(userId) || !isSafeId(id)) return null;
   try {
-    return await readFile(binPath(id));
+    return await readFile(binPath(userId, id));
   } catch {
     return null;
   }
 }
 
 /** Borra una subida y todo lo que trajo consigo. Devuelve si había algo que borrar. */
-export async function deleteUpload(id: string): Promise<boolean> {
-  if (!isSafeId(id)) return false;
+export async function deleteUpload(userId: string, id: string): Promise<boolean> {
+  if (!isSafeUserId(userId) || !isSafeId(id)) return false;
 
   let existed = false;
   try {
-    await readFile(metaPath(id));
+    await readFile(metaPath(userId, id));
     existed = true;
   } catch {
     existed = false;
   }
 
   await Promise.all([
-    rm(binPath(id), { force: true }).catch(() => {}),
-    rm(textPath(id), { force: true }).catch(() => {}),
-    rm(indexPath(id), { force: true }).catch(() => {}),
-    rm(metaPath(id), { force: true }).catch(() => {}),
+    rm(binPath(userId, id), { force: true }).catch(() => {}),
+    rm(textPath(userId, id), { force: true }).catch(() => {}),
+    rm(indexPath(userId, id), { force: true }).catch(() => {}),
+    rm(metaPath(userId, id), { force: true }).catch(() => {}),
   ]);
 
   return existed;

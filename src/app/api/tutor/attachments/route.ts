@@ -1,8 +1,18 @@
 import { createReadStream } from 'fs';
 import { Readable } from 'stream';
 import { NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth';
 import { MAX_ATTACHMENT_BYTES, formatBytes } from '@/lib/attachmentLimits';
 import { deleteUpload, readUpload, saveUploadFromStream } from '@/lib/docStore';
+
+/** La sesión es obligatoria también aquí: el proxy la exige, pero la ruta no se fía. */
+async function sessionUserId(): Promise<string | null> {
+  try {
+    return (await requireUser()).id;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * La puerta de los archivos del catedrático: subir, recuperar y borrar.
@@ -33,6 +43,9 @@ function headerValue(request: Request, name: string): string {
 }
 
 export async function PUT(request: Request) {
+  const userId = await sessionUserId();
+  if (!userId) return NextResponse.json({ error: 'Sesión no iniciada.' }, { status: 401 });
+
   const name = headerValue(request, 'x-file-name').trim();
   const mimeType = headerValue(request, 'x-file-type').trim();
 
@@ -61,13 +74,19 @@ export async function PUT(request: Request) {
   }
 
   const result = await saveUploadFromStream(request.body, {
+    userId,
     name,
     mimeType,
     maxBytes: MAX_ATTACHMENT_BYTES,
   });
 
   if (!result.ok) {
-    const status = result.code === 'too_big' ? 413 : result.code === 'disco' ? 500 : 400;
+    const status =
+      result.code === 'too_big' || result.code === 'pages'
+        ? 413
+        : result.code === 'disco'
+          ? 500
+          : 400;
     return NextResponse.json({ error: result.error, code: result.code ?? 'invalid' }, { status });
   }
 
@@ -92,8 +111,10 @@ export async function PUT(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const userId = await sessionUserId();
+  if (!userId) return NextResponse.json({ error: 'Sesión no iniciada.' }, { status: 401 });
   const id = new URL(request.url).searchParams.get('id') ?? '';
-  const upload = await readUpload(id);
+  const upload = await readUpload(userId, id);
   if (!upload) {
     return NextResponse.json({ error: 'Ese archivo ya no está.' }, { status: 404 });
   }
@@ -117,7 +138,9 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const userId = await sessionUserId();
+  if (!userId) return NextResponse.json({ error: 'Sesión no iniciada.' }, { status: 401 });
   const id = new URL(request.url).searchParams.get('id') ?? '';
-  const deleted = await deleteUpload(id);
+  const deleted = await deleteUpload(userId, id);
   return NextResponse.json({ ok: true, deleted });
 }

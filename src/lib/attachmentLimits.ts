@@ -47,6 +47,13 @@ export const MAX_INLINE_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 export const ATTACHMENT_LIVE_TURNS = 3;
 
 /**
+ * Tope de páginas de un PDF. No es un límite del modelo: es una defensa para no
+ * aceptar un libro de 2.000 páginas y bloquear el extractor. Por encima, se
+ * rechaza con un mensaje claro y se pide partirlo.
+ */
+export const MAX_PDF_PAGES = 300;
+
+/**
  * Cómo hay que leer un archivo:
  *   - `imagen`: solo se puede mirar (visión del modelo).
  *   - `pdf`: se intenta sacar su texto y, si no tiene, se mira.

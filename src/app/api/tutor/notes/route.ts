@@ -522,7 +522,7 @@ export async function POST(request: Request) {
     // La fuente real del examen: los documentos que el alumno acaba de subir.
     // Se extrae su texto y se le pasa al redactor como material prioritario.
     const uploads = (
-      await Promise.all(uploadIds.map((id) => readUpload(id).catch(() => null)))
+      await Promise.all(uploadIds.map((id) => readUpload(authUser.id, id).catch(() => null)))
     ).filter((upload): upload is StoredUpload => upload !== null);
     const documentIndexes: IndexedDoc[] = uploads
       .map((upload) => upload.index)
@@ -554,7 +554,7 @@ export async function POST(request: Request) {
       ) {
         continue;
       }
-      const bytes = await readUploadBytes(upload.id).catch(() => null);
+      const bytes = await readUploadBytes(authUser.id, upload.id).catch(() => null);
       if (!bytes || inlineBytes + bytes.byteLength > MAX_INLINE_ATTACHMENT_BYTES) continue;
       inlineBytes += bytes.byteLength;
       noteAttachments.push({

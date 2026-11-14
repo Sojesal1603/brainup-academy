@@ -30,6 +30,7 @@ import {
   isAllowedMime,
   isImageMime,
 } from './attachmentLimits';
+import { signatureMatches, signatureMismatchMessage, sniffSignature } from './fileSignature';
 
 // Los límites viven en `attachmentLimits.ts` (puro) para que el navegador use
 // exactamente los mismos; aquí solo se reexportan por comodidad del servidor.
@@ -118,6 +119,11 @@ export function validateAttachments(raw: unknown): AttachmentValidation {
           MAX_ATTACHMENT_BYTES / (1024 * 1024)
         } MB. Recórtalo o comprímelo.`,
       };
+    }
+
+    const signature = sniffSignature(Buffer.from(data, 'base64'));
+    if (!signatureMatches(mimeType, signature)) {
+      return { ok: false, error: signatureMismatchMessage(name, mimeType) };
     }
 
     attachments.push({ name, mimeType, sizeBytes, base64: data });

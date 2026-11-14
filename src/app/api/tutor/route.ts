@@ -231,7 +231,7 @@ export async function POST(request: Request) {
         .slice(0, MAX_TUTOR_ATTACHMENTS)
     : [];
   const uploads = (
-    await Promise.all(uploadIds.map((id) => readUpload(id).catch(() => null)))
+    await Promise.all(uploadIds.map((id) => readUpload(authUser.id, id).catch(() => null)))
   ).filter((upload): upload is StoredUpload => upload !== null);
 
   if (!agentId || (!message && validAttachments.length === 0 && uploads.length === 0)) {
@@ -504,7 +504,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const systemInstruction = buildTutorSystemPrompt(
+    let systemInstruction = buildTutorSystemPrompt(
       {
         name: agent.name,
         specialty: agent.specialty,
@@ -586,7 +586,7 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const bytes = await readUploadBytes(upload.id);
+      const bytes = await readUploadBytes(authUser.id, upload.id);
       if (!bytes) continue;
       inlineBytes += bytes.byteLength;
       attachmentParts.push({
@@ -609,6 +609,18 @@ export async function POST(request: Request) {
       console.warn(
         `[tutor] no se pueden mirar (demasiado grandes para una petición): ${tooBigToSee.join(', ')}`
       );
+    }
+
+    // Si el turno traía archivos pero no ha quedado nada legible, el modelo
+    // tiene que saberlo. Sin esto podía inventarse el contenido o disculparse
+    // por algo que nadie le había dicho.
+    if (
+      uploads.length + validAttachments.length > 0 &&
+      attachmentParts.length === 0 &&
+      documentIndexes.length === 0
+    ) {
+      const names = [...uploads, ...validAttachments].map((item) => `«${item.name}»`).join(', ');
+      systemInstruction += `\n\nMATERIAL DEL ALUMNO NO LEGIBLE: el alumno ha adjuntado ${names}, pero la app no ha podido extraer ni enviar su contenido (demasiado grande o sin texto legible). Dilo con claridad y pídele que lo suba por partes, como captura o en PDF con texto; NO inventes lo que dice el archivo.`;
     }
 
     /**
@@ -639,6 +651,10 @@ export async function POST(request: Request) {
         messages: toChatMessages(modelHistory),
         message: questionForModel,
         attachments: attachmentParts,
+        // Los PDF/Word con texto ya viajan en `documentsBlock`. Sin declararlo,
+        // Groq/OpenRouter se disculpaban por «no poder leer archivos» aunque
+        // tuvieran el texto delante.
+        readableTextAttachments: documentIndexes.map((doc) => doc.name),
         history,
       });
       reply = parseTutorResult(result);
@@ -663,24 +679,29 @@ export async function POST(request: Request) {
         error.message
       );
 
-      reply = {
-        text: buildLocalTutorReply({
-          agentName: agent.name,
-          subjectName: agent.subject.name,
-          studentName: student?.name ?? 'Estudiante',
-          message,
-          weakTopic: measuredTopics[0]
-            ? { title: measuredTopics[0].title, masteryLevel: measuredTopics[0].masteryLevel }
+      const attachmentCount = uploads.length + validAttachments.length;
+      const localText = buildLocalTutorReply({
+        agentName: agent.name,
+        subjectName: agent.subject.name,
+        studentName: student?.name ?? 'Estudiante',
+        message,
+        weakTopic: measuredTopics[0]
+          ? { title: measuredTopics[0].title, masteryLevel: measuredTopics[0].masteryLevel }
+          : null,
+        nextExam:
+          recentExam && daysToExam !== null
+            ? { title: recentExam.title, days: daysToExam }
             : null,
-          nextExam:
-            recentExam && daysToExam !== null
-              ? { title: recentExam.title, days: daysToExam }
-              : null,
-          unmeasuredCount,
-          pendingErrors,
-          courseUnit: courseUnit?.title ?? null,
-          noteTitles: sharedNotes.map((note) => note.title),
-        }),
+        unmeasuredCount,
+        pendingErrors,
+        courseUnit: courseUnit?.title ?? null,
+        noteTitles: sharedNotes.map((note) => note.title),
+      });
+      reply = {
+        text:
+          attachmentCount > 0
+            ? `${localText}\n\n⚠️ No he podido leer el archivo adjunto en este turno. No voy a inventar su contenido: vuelve a subirlo (mejor en PDF con texto o como captura) cuando la IA esté disponible.`
+            : localText,
         stage: null,
         level: null,
         proposal: null,
@@ -777,6 +798,7 @@ export async function POST(request: Request) {
       if (stored.length > 0) {
         await tx.aiAttachment.createMany({
           data: stored.map((attachment) => ({
+            userId: authUser.id,
             messageId: user.id,
             name: attachment.name,
             mimeType: attachment.mimeType,

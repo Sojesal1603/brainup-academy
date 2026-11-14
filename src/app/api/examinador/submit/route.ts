@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
 
   const uploadedTexts: string[] = [];
   for (const id of uploadIds) {
-    const text = await readUploadText(id).catch(() => null);
+    const text = await readUploadText(user.id, id).catch(() => null);
     if (text) uploadedTexts.push(text.slice(0, 12_000));
   }
   if (uploadedTexts.length > 0) {
