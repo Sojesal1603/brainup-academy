@@ -30,6 +30,11 @@
  *   GROQ_MODEL          fuerza un modelo concreto de Groq (por defecto "auto").
  *   OPENROUTER_MODEL    fuerza un modelo concreto de OpenRouter (por defecto "auto").
  *   AI_PROVIDER         "auto" (Gemini primero), "gemini", "groq", "openrouter" u "ollama".
+ *   ALLOW_PREVIEW_MODELS  1 permite elegir modelos preview sin forzar proveedor
+ *                       (por defecto 0; en producción debe quedarse a 0).
+ *   AI_<PROVEEDOR>_MODELS  cadena de modelos separada por comas; manda sobre
+ *                       `src/lib/ai/models.json`, que es el sitio normal donde
+ *                       se cambia el orden sin tocar código.
  */
 
 import {
@@ -40,6 +45,13 @@ import {
   platformCredentialsForTests,
   type AiCredential,
 } from './ai/credentials';
+import {
+  allowPreviewModels,
+  configuredModelChain,
+  excludedModels,
+  isPreviewModel,
+  modelHasVision,
+} from './ai/modelCatalog';
 
 export type AiProvider = 'gemini' | 'groq' | 'openrouter' | 'nvidia' | 'ollama' | 'local';
 
@@ -503,10 +515,14 @@ async function callNvidia(params: TransportParams): Promise<{ text: string }> {
       signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
     });
   } catch (error) {
+    const timedOut = isTimeoutError(error);
     throw new TutorError(
-      'No se pudo contactar con el servicio de IA de NVIDIA. Comprueba tu conexión e inténtalo de nuevo.',
-      502,
-      error instanceof Error ? error.message : String(error)
+      timedOut
+        ? 'NVIDIA ha tardado demasiado en contestar. Se prueba el siguiente modelo.'
+        : 'No se pudo contactar con el servicio de IA de NVIDIA. Comprueba tu conexión e inténtalo de nuevo.',
+      timedOut ? 504 : 502,
+      error instanceof Error ? error.message : String(error),
+      timedOut ? 'timeout' : undefined
     );
   }
   const payload = (await res.json().catch(() => null)) as NvidiaPayload | null;
@@ -689,8 +705,7 @@ function candidateKey(provider: AiProvider, model: string): string {
  * multimodales conocidos: decir que sí de más acaba en una disculpa inventada.
  */
 export function modelSupportsVision(provider: AiProvider, model: string): boolean {
-  if (provider === 'gemini') return true;
-  return /vision|llava|moondream|pixtral|qwen[\d.]*-?vl|gemma3|gpt-4o|claude-3/i.test(model);
+  return modelHasVision(provider, model);
 }
 
 /* ------------------------------------------------------------------ */
@@ -728,8 +743,11 @@ function scoreGeminiModel(name: string): number | null {
 }
 
 /** Modelos de Gemini vetados: pago, multimodal no textual o experimental. */
+// Los `preview`/`experimental` NO se vetan aquí: su permiso lo decide
+// `ALLOW_PREVIEW_MODELS` en `modelCatalog` (así se pueden probar sin tocar el
+// código, y en producción siguen fuera por defecto).
 const GEMINI_VETO =
-  /pro|image|tts|live|audio|omni|lyria|nano|banana|robotics|computer-use|deep-research|embedding|preview|experimental|antigravity/i;
+  /pro|image|tts|live|audio|omni|lyria|nano|banana|robotics|computer-use|deep-research|embedding|antigravity/i;
 
 /**
  * Puntuación de idoneidad de un modelo de Groq (endpoint OpenAI-compatible).
@@ -938,32 +956,66 @@ export async function rankModels(provider: AiProvider): Promise<ModelCandidate[]
     ranked.sort((a, b) => b.score - a.score);
     return ranked;
   }
+  if (
+    provider !== 'gemini' &&
+    provider !== 'groq' &&
+    provider !== 'openrouter' &&
+    provider !== 'nvidia'
+  ) {
+    return [];
+  }
   const keyEntry = getProviderKeys(provider)[0];
   if (!keyEntry) return [];
-  const apiKey = keyEntry.key;
-  const listed =
-    provider === 'gemini'
-      ? await listGeminiModels(apiKey, keyEntry.envVar)
-      : provider === 'groq'
-        ? await listGroqModels(apiKey, keyEntry.envVar)
-        : await listOpenRouterModels(apiKey, keyEntry.envVar);
-  const scorer =
-    provider === 'gemini'
-      ? scoreGeminiModel
-      : provider === 'groq'
-        ? scoreGroqModel
-        : scoreOpenRouterModel;
-  const veto = provider === 'gemini' ? GEMINI_VETO : null;
-  const seen = new Set<string>();
   const ranked: ModelCandidate[] = [];
-  for (const model of listed) {
-    if (seen.has(model)) continue;
-    seen.add(model);
-    if (veto && veto.test(model)) continue;
-    const score = scorer(model);
-    if (score === null) continue;
-    ranked.push({ provider, model, score, key: candidateKey(provider, model) });
+  const seen = new Set<string>();
+  const vetoed = new Set(excludedModels(provider));
+  const allowPreview = allowPreviewModels();
+
+  // 1) La cadena CONFIGURADA manda. Es la que sabe qué modelos responden hoy:
+  //    el catálogo de Google anunciaba `3.8-flash` y `3.7-flash` mientras los
+  //    dos se quedaban colgados hasta el timeout; como puntuaban más alto, el
+  //    turno entero se gastaba en ellos y el alumno veía «Sin IA» teniendo
+  //    `3.6-flash` y `3.5-flash` sanos. El orden sale de `models.json` o de
+  //    `AI_<PROVEEDOR>_MODELS`, no de este archivo.
+  configuredModelChain(provider).forEach((entry, index) => {
+    seen.add(entry.id);
+    ranked.push({
+      provider,
+      model: entry.id,
+      score: 100_000 - index,
+      key: candidateKey(provider, entry.id),
+    });
+  });
+
+  // 2) El catálogo real completa por detrás: un modelo nuevo entra solo, pero
+  //    nunca por delante de los que ya sabemos que contestan. NVIDIA no publica
+  //    catálogo compatible, así que se queda con su cadena configurada.
+  if (provider !== 'nvidia') {
+    const apiKey = keyEntry.key;
+    const listed =
+      provider === 'gemini'
+        ? await listGeminiModels(apiKey, keyEntry.envVar)
+        : provider === 'groq'
+          ? await listGroqModels(apiKey, keyEntry.envVar)
+          : await listOpenRouterModels(apiKey, keyEntry.envVar);
+    const scorer =
+      provider === 'gemini'
+        ? scoreGeminiModel
+        : provider === 'groq'
+          ? scoreGroqModel
+          : scoreOpenRouterModel;
+    const veto = provider === 'gemini' ? GEMINI_VETO : null;
+    for (const model of listed) {
+      if (seen.has(model) || vetoed.has(model)) continue;
+      if (isPreviewModel(model) && !allowPreview) continue;
+      seen.add(model);
+      if (veto && veto.test(model)) continue;
+      const score = scorer(model);
+      if (score === null) continue;
+      ranked.push({ provider, model, score, key: candidateKey(provider, model) });
+    }
   }
+
   ranked.sort((a, b) => b.score - a.score);
   return ranked;
 }
@@ -1394,6 +1446,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** ¿El fallo ha sido el reloj (timeout) y no el proveedor? */
+function isTimeoutError(error: unknown): boolean {
+  const name = (error as { name?: string } | null)?.name ?? '';
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
 function classifyStatus(status: number, providerMessage: string): string {
   if (status === 429) return /per day|daily|RPD|TPD/i.test(providerMessage) ? 'quota_daily' : 'quota';
   if (status === 401 || status === 403) return 'auth';
@@ -1406,6 +1464,7 @@ function providerLabel(provider: AiProvider): string {
   if (provider === 'gemini') return 'Gemini';
   if (provider === 'groq') return 'Groq';
   if (provider === 'openrouter') return 'OpenRouter';
+  if (provider === 'nvidia') return 'NVIDIA';
   return 'el modelo local (Ollama)';
 }
 
@@ -1573,10 +1632,16 @@ async function callGemini(params: TransportParams): Promise<{ text: string; step
       signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
     });
   } catch (error) {
+    // Un modelo lento NO se reintenta: el reintento vuelve a esperar los mismos
+    // segundos por el mismo modelo y se come el turno de los que sí contestan.
+    const timedOut = isTimeoutError(error);
     throw new TutorError(
-      'No se pudo contactar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo.',
-      502,
-      error instanceof Error ? error.message : String(error)
+      timedOut
+        ? 'Gemini ha tardado demasiado en contestar. Se prueba el siguiente modelo.'
+        : 'No se pudo contactar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo.',
+      timedOut ? 504 : 502,
+      error instanceof Error ? error.message : String(error),
+      timedOut ? 'timeout' : undefined
     );
   }
   const payload = (await res.json().catch(() => null)) as GeminiPayload | null;
@@ -1674,11 +1739,19 @@ async function callOpenAiCompatible(
       signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
     });
   } catch (error) {
+    const timedOut = isTimeoutError(error);
     const message =
       provider === 'ollama'
         ? 'No se pudo contactar con Ollama local. Comprueba que el servicio esté iniciado en el puerto 11434.'
-        : 'No se pudo contactar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo.';
-    throw new TutorError(message, 502, error instanceof Error ? error.message : String(error));
+        : timedOut
+          ? `${providerLabel(provider)} ha tardado demasiado en contestar. Se prueba el siguiente modelo.`
+          : 'No se pudo contactar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo.';
+    throw new TutorError(
+      message,
+      timedOut ? 504 : 502,
+      error instanceof Error ? error.message : String(error),
+      timedOut ? 'timeout' : undefined
+    );
   }
 
   const payload = (await res.json().catch(() => null)) as OpenAiChatPayload | null;
@@ -1786,12 +1859,35 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
     );
   }
   const chain = await getCandidateChain(params.provider);
+  /**
+   * ENRUTADO POR CAPACIDAD.
+   *
+   * Si el turno trae una imagen o un PDF (algo que hay que MIRAR, no solo
+   * leer), solo lo pueden atender modelos con visión. Esos bytes no se le
+   * enseñan a un modelo de texto ni se reenvían a otro proveedor «por si
+   * acaso»: si no hay ninguno disponible, se avisa y no se manda nada.
+   */
+  const requiresVision = (params.attachments ?? []).length > 0;
+  if (requiresVision) {
+    for (let index = chain.length - 1; index >= 0; index--) {
+      const candidate = chain[index];
+      if (!modelSupportsVision(candidate.provider, candidate.model)) chain.splice(index, 1);
+    }
+  }
   const attempts: Array<{ key: string; outcome: string; note?: string }> = [];
   // El reloj del turno: la cadena entera comparte un solo presupuesto.
   const budgetMs = Math.max(1_000, params.budgetMs ?? AI_TEXT_BUDGET_MS);
   const deadline = Date.now() + budgetMs;
 
   if (chain.length === 0) {
+    if (requiresVision) {
+      lastDecision = { at: Date.now(), provider: null, model: null, ranked: [], attempts };
+      throw new TutorError(
+        'El mensaje lleva un archivo (captura o PDF) y ahora mismo no hay ningún modelo con visión disponible. No se manda a un modelo que no puede leerlo: espera un minuto e inténtalo otra vez, o pégalo como texto.',
+        503,
+        'sin modelos con visión disponibles'
+      );
+    }
     const configured = getConfiguredProviders();
     const hasCloudKeys = Boolean(getApiKey('gemini') || getApiKey('groq') || getApiKey('openrouter'));
     const forcedNote = params.provider

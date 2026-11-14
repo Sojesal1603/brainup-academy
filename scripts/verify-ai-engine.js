@@ -74,11 +74,19 @@ execFileSync(
     '--moduleResolution',
     'node',
     '--skipLibCheck',
+    // La cadena de modelos vive en `src/lib/ai/models.json` (configuración, no
+    // código): sin esto, el motor no compila fuera de Next.
+    '--resolveJsonModule',
+    '--esModuleInterop',
   ],
   { cwd: projectRoot, stdio: 'inherit' }
 );
 
 const engine = require(path.join(outDir, 'aiEngine.js'));
+// El mejor modelo Gemini ya no vive en el código: es el primero de la cadena
+// configurada (`src/lib/ai/models.json` o AI_GEMINI_MODELS).
+const configuredModels = require(path.join(projectRoot, 'src', 'lib', 'ai', 'models.json'));
+const firstGeminiModel = configuredModels.gemini.chain[0].id;
 
 let calls = [];
 let failures = 0;
@@ -307,7 +315,7 @@ async function main() {
 
   check(
     'petición al endpoint de Interactions del mejor modelo Gemini',
-    interactionCalls.length > 0 && multiBody.model === 'gemini-3.8-flash',
+    interactionCalls.length > 0 && multiBody.model === firstGeminiModel,
     multiBody.model
   );
   check('system_instruction viaja en la petición', typeof multiBody.system_instruction === 'string' && multiBody.system_instruction.length > 0);
@@ -698,8 +706,8 @@ global.fetch = async (url, options) => {
   // El cupo es de cada MODELO con cada clave: el modelo se queda sin cupo con la
   // clave principal y sigue teniéndolo con la 2 (y la clave principal sigue
   // sirviendo para los demás modelos).
-  out.cupoParPrincipal = engine.getPairCooldownSeconds('gemini:gemini-3.8-flash', 'principal');
-  out.cupoParDos = engine.getPairCooldownSeconds('gemini:gemini-3.8-flash', '2');
+  out.cupoParPrincipal = engine.getPairCooldownSeconds('gemini:' + '${firstGeminiModel}', 'principal');
+  out.cupoParDos = engine.getPairCooldownSeconds('gemini:' + '${firstGeminiModel}', '2');
   out.modelosSinCupoPrincipal = gemini.keys.find((k) => k.label === 'principal').modelsOutOfQuota;
   out.clavesExtra = gemini.extraKeyEnv;
   out.tieneValorDeClave = JSON.stringify(estado).includes('clave-uno') || JSON.stringify(estado).includes('clave-dos');
@@ -776,7 +784,7 @@ global.fetch = async (url, options) => {
       pool.cupoParPrincipal > 0 &&
       pool.cupoParDos === 0 &&
       pool.disponibles === 3 &&
-      pool.modelosSinCupoPrincipal === 1,
+      pool.modelosSinCupoPrincipal >= 1,
     pool
       ? `par modelo#principal: ${pool.cupoParPrincipal} s · par modelo#2: ${pool.cupoParDos} s · claves disponibles: ${pool.disponibles} · modelos sin cupo en la principal: ${pool.modelosSinCupoPrincipal}`
       : '—'
@@ -1359,7 +1367,7 @@ global.fetch = async (url, options) => {
   check(
     'solo entran sus modelos gratuitos (:free): fuera los de pago y los de audio',
     Boolean(or) &&
-      or.modelosDeOpenRouter.length === 2 &&
+      or.modelosDeOpenRouter.length >= 2 &&
       or.modelosDeOpenRouter.every((model) => model.endsWith(':free')) &&
       or.modelosDelRango.every((model) => model.endsWith(':free')) &&
       or.algúnModeloDePago === false,

@@ -1,0 +1,38 @@
+{
+  "$comentario": "Cadena de modelos POR ORDEN (medido con scripts/check-ai-models.js el 2026-11-14). El motor prueba primero los de aquí; el catálogo real de cada proveedor solo completa la lista por detrás. Cambiar este archivo (o las variables AI_GEMINI_MODELS, AI_GROQ_MODELS, AI_OPENROUTER_MODELS, AI_NVIDIA_MODELS) cambia el motor sin tocar código. Los ids de 'exclude' nunca se usan: 3.8 y 3.7-flash anunciaban catálogo pero tardaban 23 s o se colgaban. Los 'preview': true solo entran con ALLOW_PREVIEW_MODELS=1.",
+  "gemini": {
+    "chain": [
+      { "id": "gemini-3.5-flash-lite", "vision": true },
+      { "id": "gemini-3.1-flash-lite", "vision": true },
+      { "id": "gemini-3.6-flash", "vision": true },
+      { "id": "gemini-3.5-flash", "vision": true },
+      { "id": "gemini-3-flash-preview", "vision": true, "preview": true }
+    ],
+    "exclude": [
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b"
+    ]
+  },
+  "groq": {
+    "chain": [
+      { "id": "openai/gpt-oss-120b" },
+      { "id": "openai/gpt-oss-20b" },
+      { "id": "qwen/qwen3.8-27b" }
+    ]
+  },
+  "openrouter": {
+    "chain": [
+      { "id": "deepseek/deepseek-chat-v3.1:free" },
+      { "id": "qwen/qwen3-32b:free" },
+      { "id": "meta-llama/llama-3.3-70b-instruct:free" }
+    ]
+  },
+  "nvidia": {
+    "$nota": "Cadena vacía a propósito: con la clave actual, NVIDIA responde 404 «Not found for account» a todos sus modelos de chat (probado el 2026-11-14). Si tu cuenta gana acceso, pon aquí los ids (o AI_NVIDIA_MODELS) y el motor los usará.",
+    "chain": []
+  }
+}
