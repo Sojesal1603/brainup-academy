@@ -13,6 +13,7 @@ import {
   saveUserAiKey,
 } from '@/lib/ai/userKeyStore';
 import type { AiKeyActionResult } from '@/lib/ai/keyStatus';
+import { AI_KEY_FORMAT, AI_KEY_FORMAT_MESSAGE } from '@/lib/ai/keyFormat';
 
 /**
  * Acciones de la clave de IA del alumno.
@@ -31,10 +32,7 @@ const saveSchema = z.object({
     .trim()
     .min(20, 'La clave es demasiado corta para ser una clave de Google.')
     .max(200, 'La clave es demasiado larga.')
-    .regex(
-      /^[A-Za-z0-9_-]+$/,
-      'La clave solo puede tener letras, números, guiones y guiones bajos (sin espacios).'
-    ),
+    .regex(AI_KEY_FORMAT, AI_KEY_FORMAT_MESSAGE),
 });
 
 function storeFailure(error: unknown): AiKeyActionResult {

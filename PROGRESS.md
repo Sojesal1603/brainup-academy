@@ -137,3 +137,12 @@ Pendientes: pasos **1 a 3 de claves de IA** (bloqueado: falta `SECRETS_KEY_V1`) 
 - `node scripts/verify-constraints.js`: 8/8 (validación, rechazo entero, esquema sin userId, comparación de materias, intérprete con responseSchema, apertura server-side sin SSE y saludo por reglas).
 - `npx tsc --noEmit`, `npx eslint src scripts`, `npm run build`: 0. `node scripts/verify-ai-engine.js`: TODO EN VERDE.
 - Límite: no hay sesión de navegador para confirmar una restricción de extremo a extremo; el filtrado del plan no se ha probado contra datos reales del alumno, solo el contrato y el código compilado.
+
+## Formato de clave de IA con punto (2026-11-14)
+
+- `src/lib/ai/keyFormat.ts`: regla única `^[A-Za-z0-9._-]+$` y mensaje compartido. Acepta el prefijo `AQ.` que Google empezó a emitir y sigue rechazando espacios, saltos de línea y controles. Se importa en el cliente, así que no arrastra nada de servidor.
+- `src/app/ajustes/aiKeyActions.ts`: el esquema Zod usa esa regla en vez de la antigua `^[A-Za-z0-9_-]+$`; el servidor sigue siendo la puerta real (20–200 caracteres).
+- `src/components/ajustes/AiKeyCard.tsx`: validación previa al envío con la misma función, `pattern` y `title` en el input y placeholder `AIza… o AQ.…`. Un espacio pegado al copiar se recorta antes de validar.
+- `node scripts/verify-user-ai-key.js`: 12/12. Las dos comprobaciones nuevas cubren la aceptación de `AQ.…` y que formulario y acción ya no conservan la regla antigua.
+- `npx tsc --noEmit`: 0. `npm run lint`: 0.
+- Límite: no se ha pegado una clave `AQ.` real desde el navegador; la comprobación es de contrato y de código.

@@ -32,10 +32,12 @@ if (!process.env.SECRETS_KEY_V1) {
 const outDir = compilaTs('ai/userKeyStore', '.tmp-verify-user-ai-key');
 const outAttempts = compilaTs('ai/keyAttempts', '.tmp-verify-user-attempts');
 const outCheck = compilaTs('ai/geminiKeyCheck', '.tmp-verify-user-check');
+const outFormat = compilaTs('ai/keyFormat', '.tmp-verify-user-format');
 const store = require(path.join(outDir, 'ai', 'userKeyStore.js'));
 const vault = require(path.join(outDir, 'security', 'vault.js'));
 const attempts = require(path.join(outAttempts, 'ai', 'keyAttempts.js'));
 const check = require(path.join(outCheck, 'geminiKeyCheck.js'));
+const keyFormat = require(path.join(outFormat, 'keyFormat.js'));
 
 let checks = 0;
 async function ok(name, fn) {
@@ -49,6 +51,25 @@ async function ok(name, fn) {
 
   try {
     await store.deleteUserAiKey(TEST_ACCOUNT, 'gemini').catch(() => undefined);
+
+    await ok('acepta claves de Google con punto (AQ.) y rechaza espacios o controles', () => {
+      assert.equal(keyFormat.aiKeyFormatError('AQ.Ab8RN6Example_Key-123'), null);
+      assert.equal(keyFormat.aiKeyFormatError('AIzaSy-Example_Key.123'), null);
+      assert.match(keyFormat.aiKeyFormatError('AIza clave con espacio'), /sin espacios/i);
+      assert.match(keyFormat.aiKeyFormatError('AIza\nclave'), /sin espacios/i);
+      assert.match(keyFormat.aiKeyFormatError('AIza/clave'), /puntos/i);
+    });
+
+    await ok('el formulario y el servidor comparten la misma regla de formato', () => {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const { projectRoot } = require('./lib/compilaTs');
+      for (const relative of ['src/app/ajustes/aiKeyActions.ts', 'src/components/ajustes/AiKeyCard.tsx']) {
+        const source = fs.readFileSync(path.join(projectRoot, relative), 'utf8');
+        assert.ok(source.includes('keyFormat'), `${relative} no usa la regla compartida`);
+        assert.ok(!/A-Za-z0-9_-\]/.test(source), `${relative} conserva la regla antigua sin punto`);
+      }
+    });
 
     await ok('guardar cifra la clave y no la deja en claro', async () => {
       const summary = await store.saveUserAiKey({

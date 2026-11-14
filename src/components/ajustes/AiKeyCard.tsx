@@ -18,6 +18,7 @@ import {
   type AiKeySummaryView,
   type UserAiKeyStatus,
 } from '@/lib/ai/keyStatus';
+import { aiKeyFormatError } from '@/lib/ai/keyFormat';
 
 const STATUS_STYLE: Record<UserAiKeyStatus, string> = {
   valida: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
@@ -60,7 +61,13 @@ export default function AiKeyCard({
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    const rawKey = String(formData.get('key') ?? '').trim();
+    const formatError = aiKeyFormatError(rawKey);
     setResult(null);
+    if (formatError) {
+      setResult({ ok: false, message: formatError });
+      return;
+    }
     startTransition(async () => {
       const next = await saveMyAiKey(formData);
       setResult(next);
@@ -207,7 +214,9 @@ export default function AiKeyCard({
             onChange={(event) => setValue(event.target.value)}
             autoComplete="off"
             spellCheck={false}
-            placeholder="AIza… (se guarda cifrada)"
+            pattern="[A-Za-z0-9._-]+"
+            title="Letras, números, puntos, guiones y guiones bajos. Sin espacios."
+            placeholder="AIza… o AQ.… (se guarda cifrada)"
             className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-[#080d18] px-3 py-2 font-mono text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-emerald-500/60"
             disabled={!vaultReady || busy}
           />
