@@ -70,6 +70,7 @@ const TENANT_MODELS: ReadonlySet<string> = new Set([
   'PlanConstraint',
   'TutorSessionOutcome',
   'PushSubscription',
+  'UserAiKey',
 ]);
 
 /** Operaciones de lectura: se les añade el dueño al `where`. */

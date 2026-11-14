@@ -105,34 +105,61 @@ model UserProfile {
   updatedAt            DateTime  @updatedAt
 
   // Relaciones inversas: borrar la cuenta borra en cascada todo lo suyo.
-  subjects         Subject[]
-  topics           Topic[]
-  exams            Exam[]
-  studyBlocks      StudyBlock[]
-  studySessions    StudySession[]
-  errorLogs        ErrorLog[]
-  habits           Habit[]
-  habitLogs        HabitLog[]
-  aiAgents         AiAgent[]
-  aiConversations  AiConversation[]
-  aiMessages       AiMessage[]
-  aiAttachments    AiAttachment[]
-  pauExamSessions  PauExamSession[]
-  notes            Note[]
-  classPeriods     ClassPeriod[]
-  moodleTasks      MoodleTask[]
-  moodleCourses    MoodleCourse[]
-  moodleMaterials  MoodleMaterial[]
-  srsReviews       SrsReview[]
-  weeklyChallenges WeeklyChallenge[]
-  systemIssues     SystemIssue[]
-  agentMemories    AgentMemory[]
-  reviewCards      ReviewCard[]
-  focusSessions    FocusSession[]
-  plans            PlanState[]
-  planConstraints  PlanConstraint[]
-  tutorOutcomes    TutorSessionOutcome[]
+  subjects          Subject[]
+  topics            Topic[]
+  exams             Exam[]
+  studyBlocks       StudyBlock[]
+  studySessions     StudySession[]
+  errorLogs         ErrorLog[]
+  habits            Habit[]
+  habitLogs         HabitLog[]
+  aiAgents          AiAgent[]
+  aiConversations   AiConversation[]
+  aiMessages        AiMessage[]
+  aiAttachments     AiAttachment[]
+  pauExamSessions   PauExamSession[]
+  notes             Note[]
+  classPeriods      ClassPeriod[]
+  moodleTasks       MoodleTask[]
+  moodleCourses     MoodleCourse[]
+  moodleMaterials   MoodleMaterial[]
+  srsReviews        SrsReview[]
+  weeklyChallenges  WeeklyChallenge[]
+  systemIssues      SystemIssue[]
+  agentMemories     AgentMemory[]
+  reviewCards       ReviewCard[]
+  focusSessions     FocusSession[]
+  plans             PlanState[]
+  planConstraints   PlanConstraint[]
+  tutorOutcomes     TutorSessionOutcome[]
   pushSubscriptions PushSubscription[]
+  aiKeys            UserAiKey[]
+}
+
+// Clave de IA propia de un usuario, cifrada con AES-256-GCM.
+//
+// Aquí NO se guarda la clave en claro: `ciphertext` es el sobre versionado del
+// vault (`v1.iv.tag.ct`) y el `userId` viaja como AAD, así que una fila copiada
+// a otra cuenta no se puede descifrar. `last4` es lo único que se enseña en la
+// interfaz. El estado lo escribe la comprobación contra Google; nunca se deduce
+// de que la clave «parezca» válida.
+model UserAiKey {
+  id            String      @id @default(cuid())
+  userId        String
+  user          UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  provider      String      @default("gemini") // gemini | groq | openrouter | nvidia
+  ciphertext    String
+  last4         String
+  // sin_comprobar | valida | invalida | sin_cuota
+  status        String      @default("sin_comprobar")
+  lastCheckedAt DateTime?
+  // Motivo corto y ya saneado (sin URL, sin cabeceras y sin la clave).
+  lastError     String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([userId, provider])
+  @@index([userId])
 }
 
 // Suscripción Web Push de un dispositivo. El endpoint es único en el mundo;

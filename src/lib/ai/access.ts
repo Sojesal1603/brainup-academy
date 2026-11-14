@@ -6,6 +6,7 @@ import {
   runWithAiCredentials,
   type AiCredential,
 } from './credentials';
+import { AiKeyStoreError } from './userKeyErrors';
 
 /**
  * La puerta de las rutas de IA.
@@ -31,6 +32,7 @@ export async function ensureAiAccess(userId: string): Promise<NextResponse | nul
   } catch (error) {
     const denied = aiKeyRequiredResponse(error);
     if (denied) return denied;
+    if (error instanceof AiKeyStoreError) return aiKeyStoreErrorResponse(error);
     throw error;
   }
 }
@@ -57,7 +59,20 @@ export function aiKeyRequiredResponse(error: unknown): NextResponse | null {
   );
 }
 
+/** Fallo del almacén cifrado: se explica y no se finge que falta la clave. */
+export function aiKeyStoreErrorResponse(error: AiKeyStoreError): NextResponse {
+  return NextResponse.json(
+    {
+      ok: false,
+      code: error.code,
+      error: error.message,
+      action: 'settings_ai_key',
+    },
+    { status: error.status, headers: { 'Cache-Control': 'no-store' } }
+  );
+}
+
 /** Credenciales del usuario, sin lanzar (para pantallas de estado). */
 export async function aiCredentialsForStatus(userId: string): Promise<AiCredential[]> {
-  return resolveAllAiCredentials(userId);
+  return resolveAllAiCredentials(userId, { tolerateVaultErrors: true });
 }

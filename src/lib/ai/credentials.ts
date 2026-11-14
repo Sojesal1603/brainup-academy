@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { AiKeyStoreError } from './userKeyErrors';
 
 /**
  * De dónde sale la clave de IA de una petición.
@@ -159,15 +160,17 @@ function platformCredentialsFor(provider: AiKeyProvider): AiCredential[] {
 }
 
 /**
- * La clave propia del usuario.
+ * La clave propia del usuario, descifrada para esta petición.
  *
- * El almacenamiento cifrado (`UserAiKey`) llega en el paso 1; hasta entonces no
- * hay clave propia que leer y esta función devuelve `null` (nunca inventa una ni
- * cae a la de plataforma). La política de arriba ya está completa: en cuanto el
- * paso 1 conecte la lectura, el resto de la app no cambia.
+ * Devuelve `null` si no tiene ninguna guardada. Si la tiene pero el vault no
+ * puede descifrarla, lanza `AiKeyStoreError`: es un fallo de configuración del
+ * servidor, no una excusa para caer a la clave de plataforma.
  */
-async function readOwnKey(_userId: string, _provider: AiKeyProvider): Promise<string | null> {
-  return null;
+async function readOwnKey(userId: string, provider: AiKeyProvider): Promise<string | null> {
+  // Carga diferida a propósito: importar el motor no debe abrir Prisma (ni
+  // recargar `.env`) hasta que de verdad haya que leer una clave guardada.
+  const { readDecryptedUserKey } = await import('./userKeyStore');
+  return readDecryptedUserKey(userId, provider);
 }
 
 /**
@@ -206,12 +209,25 @@ export async function resolveAiCredentials(
  * 402. Es a propósito: así el estado de Ajustes puede decir «te falta la clave»
  * sin tratar el caso como una excepción.
  */
-export async function resolveAllAiCredentials(userId: string): Promise<AiCredential[]> {
+export async function resolveAllAiCredentials(
+  userId: string,
+  options: { tolerateVaultErrors?: boolean } = {}
+): Promise<AiCredential[]> {
   const credentials: AiCredential[] = [];
   const platformAllowed = isPlatformAiUser(userId);
 
   for (const provider of AI_KEY_PROVIDERS) {
-    const ownKey = (await readOwnKey(userId, provider))?.trim() ?? '';
+    let ownKey = '';
+    try {
+      ownKey = (await readOwnKey(userId, provider))?.trim() ?? '';
+    } catch (error) {
+      // Las páginas de estado y los rótulos no pueden caerse porque el hosting
+      // no tenga la clave maestra: se omite la propia y, si el usuario está en
+      // la lista, todavía puede usar la de plataforma. Las rutas de IA NO usan
+      // este modo tolerante: allí el fallo se convierte en un 503 claro.
+      if (options.tolerateVaultErrors && error instanceof AiKeyStoreError) continue;
+      throw error;
+    }
     if (ownKey.length > 0) {
       credentials.push({
         provider,

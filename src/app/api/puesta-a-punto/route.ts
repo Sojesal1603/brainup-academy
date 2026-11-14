@@ -227,7 +227,7 @@ export async function POST(request: Request) {
       }
     } else {
       replyText = [
-        '**Falta la clave de IA**, así que te contesto en modo local. Con GEMINI_API_KEY (o GROQ_API_KEY) en el archivo .env tendrías la entrevista completa y podría anotarlo todo al vuelo.',
+        '**Falta tu clave de IA**, así que te contesto en modo local. Añádela en Ajustes (Google AI Studio es gratis) y tendrás la entrevista completa, con todo anotado al vuelo.',
         '',
         buildLocalSetupReply({ snapshot: state.snapshot, checklist: state.checklist, message }),
       ].join('\n');

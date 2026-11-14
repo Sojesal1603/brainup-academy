@@ -29,7 +29,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            'No hay proveedor de IA disponible: ni GEMINI_API_KEY/GROQ_API_KEY en el entorno ni un modelo local levantado.',
+            'No hay proveedor de IA disponible: añade tu clave en Ajustes o arranca un modelo local.',
         },
         { status: 503 }
       );

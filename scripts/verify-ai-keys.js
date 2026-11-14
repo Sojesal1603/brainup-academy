@@ -18,8 +18,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { compilaTs, projectRoot } = require('./lib/compilaTs');
+const { loadEnv } = require('./lib/loadEnv');
 
-const OWNER = '16bb4958-5288-493b-8c65-379dd31782f5';
+// Prisma se usa para comprobar que la cuenta de prueba no tiene clave propia;
+// el script necesita la misma conexión que la app.
+loadEnv();
+
+// Dueño sintético: las pruebas no deben depender de que la cuenta real tenga o
+// no una clave guardada (cambiaría el resultado de «usa la de plataforma»).
+const OWNER = '11111111-1111-4111-8111-111111111111';
 const STRANGER = '3af632ee-22dc-4e75-85a8-139aa70600bf';
 
 // Entorno de plataforma simulado. Las claves son señuelos: si alguna llega a una
@@ -35,7 +42,7 @@ const engine = require(path.join(engineOut, 'aiEngine.js'));
 const credentials = require(path.join(engineOut, 'ai', 'credentials.js'));
 
 const accessOut = compilaTs('ai/access', '.tmp-verify-ai-access');
-const access = require(path.join(accessOut, 'access.js'));
+const access = require(path.join(accessOut, 'ai', 'access.js'));
 
 let checks = 0;
 async function ok(name, fn) {

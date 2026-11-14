@@ -449,7 +449,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            'El motor de IA no está configurado: falta GEMINI_API_KEY (o GROQ_API_KEY) en el archivo .env, y no hay ningún modelo local levantado, así que no puedo redactar los apuntes.',
+            'No hay ningún motor de IA disponible: añade tu clave en Ajustes o arranca un modelo local, y podré redactar los apuntes.',
         },
         { status: 503 }
       );

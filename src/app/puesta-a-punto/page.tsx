@@ -12,6 +12,7 @@ import { currentTenant } from '@/lib/tenantContext';
 import { getSetupState } from '@/lib/setupApply';
 import { getConfiguredModelLabel } from '@/lib/aiEngine';
 import { resolveAllAiCredentials, runWithAiCredentials } from '@/lib/ai/credentials';
+import AiKeyRequiredBanner from '@/components/ia/AiKeyRequiredBanner';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ export default async function SetupPage() {
   const { user, tenant: prisma } = await currentTenant();
   // El rótulo del coordinador usa las credenciales de esta cuenta, nunca la
   // clave de plataforma si el usuario no está autorizado a ella.
-  const aiCredentials = await resolveAllAiCredentials(user.id);
+  const aiCredentials = await resolveAllAiCredentials(user.id, { tolerateVaultErrors: true });
   const modelLabel = runWithAiCredentials(aiCredentials, () => getConfiguredModelLabel());
   const [{ snapshot, checklist }, conversation] = await Promise.all([
     getSetupState(user.id),
@@ -64,6 +65,8 @@ export default async function SetupPage() {
           </span>
         </div>
       </div>
+
+      {aiCredentials.length === 0 ? <AiKeyRequiredBanner /> : null}
 
       <SetupChat
         conversationId={conversation?.id ?? null}

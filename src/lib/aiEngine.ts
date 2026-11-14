@@ -1449,9 +1449,8 @@ function describeHttpError(provider: AiProvider, status: number, providerMessage
     );
   }
   if (status === 400 || status === 401 || status === 403) {
-    const envVar = mainKeyEnv(provider);
     return new TutorError(
-      `La clave de ${providerLabel(provider)} no es válida o no tiene permisos. Revisa ${envVar} en el archivo .env.`,
+      `La clave de ${providerLabel(provider)} no es válida o no tiene permisos. Revísala en Ajustes.`,
       502,
       providerMessage,
       kind
@@ -2025,7 +2024,7 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
             if (statusKind === 'auth') {
               markKeyHealth(candidate.provider, keyEntry.envVar, statusKind, detail);
               lastError = new TutorError(
-                `La clave «${keyEntry.label}» de ${providerLabel(candidate.provider)} no es válida o no tiene permisos. Revisa ${keyEntry.envVar} en el archivo .env.`,
+                `La clave de ${providerLabel(candidate.provider)} no es válida o no tiene permisos. Revísala en Ajustes.`,
                 502,
                 detail
               );

@@ -6,6 +6,9 @@ import { readMoodleHealth } from '@/lib/moodleSelfHeal';
 import AccesoMovil from '@/components/ajustes/AccesoMovil';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
 import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
+import { isPlatformAiUser } from '@/lib/ai/credentials';
+import { readUserAiKeySummary } from '@/lib/ai/userKeyStore';
+import { vaultStatus } from '@/lib/security/vault';
 
 // Ajustes es un panel de paneles: cada uno baja cuando se va a ver, no todos
 // de golpe al abrir la sección.
@@ -16,6 +19,9 @@ const MoodleConnector = nextDynamic(() => import('@/components/ajustes/MoodleCon
   loading: () => <PanelSkeleton lines={2} />,
 });
 const AiEngineCard = nextDynamic(() => import('@/components/ajustes/AiEngineCard'), {
+  loading: () => <PanelSkeleton lines={3} />,
+});
+const AiKeyCard = nextDynamic(() => import('@/components/ajustes/AiKeyCard'), {
   loading: () => <PanelSkeleton lines={3} />,
 });
 const GradesPanel = nextDynamic(() => import('@/components/ajustes/GradesPanel'), {
@@ -47,6 +53,12 @@ export default async function SettingsPage() {
 
   const notionConfigured = Boolean(process.env.NOTION_API_KEY);
   const notebookLmConfigured = Boolean(process.env.NOTEBOOKLM_MCP_PORT);
+  // Clave propia: el estado se lee sin descifrarla (solo estado y últimos 4).
+  // Si el vault no está configurado, `vaultStatus` lo dice y la tarjeta
+  // deshabilita el formulario; la página sigue funcionando.
+  const aiKeySummary = await readUserAiKeySummary(authUser.id, 'gemini');
+  const vault = vaultStatus();
+  const platformAiUser = isPlatformAiUser(authUser.id);
 
   // Estado real de cada asignatura: nota declarada (o no) y cuántas unidades
   // tienen el nivel medido, que es lo único que se puede usar para juzgar.
@@ -121,8 +133,16 @@ export default async function SettingsPage() {
         }))}
       />
 
-      {/* Motor de IA: selección automática del mejor modelo gratuito */}
-      <AiEngineCard />
+      {/* Clave propia: cada cuenta usa la suya, guardada cifrada */}
+      <AiKeyCard
+        initialSummary={aiKeySummary}
+        vaultReady={vault.ready}
+        vaultError={vault.reason}
+        isPlatformUser={platformAiUser}
+      />
+
+      {/* Motor de IA de plataforma: solo lo gestiona la cuenta autorizada */}
+      {platformAiUser ? <AiEngineCard /> : null}
 
       {/* La dirección para abrirlo desde el móvil (cambia con la red) */}
       <AccesoMovil />
