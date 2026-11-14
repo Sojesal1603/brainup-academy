@@ -429,7 +429,7 @@ Todo lo que se une a la hora de decidir vive en un solo sitio (`maintenanceScan.
 | **Apuntes con restos de código: detección y arreglo** | `verify:mantenimiento` + el taller en `/mantenimiento` | TODO EN VERDE (1 apunte limpiado de verdad) |
 | Contexto del catedrático (apuntes y presupuesto) | `npm run verify:tutor-contexto` | TODO EN VERDE |
 | **Documentos del catedrático (troceado, páginas y recuperación, 37 comprobaciones sin gastar IA)** | `npm run verify:tutor-documentos` | TODO EN VERDE |
-| **Adjuntos, incluida la subida en streaming de un documento de 11 MB** | `npm run verify:tutor-adjuntos` | TODO EN VERDE |
+| **Adjuntos: tipos, tamaño, copia local, extracción y aislamiento (11 comprobaciones, sin gastar IA)** | `npm run verify:attachments` | TODO EN VERDE |
 | **Puesta a punto (protocolo, integridad, horario y curso entero: materias sin seguimiento, temario confirmado y horario cerrado)** | `npm run verify:puesta-a-punto` (+ `--live`) | TODO EN VERDE (con la app: 3 clases dictadas, apuntadas y retiradas; Religión marcada como «solo horario» y revertida; 14 unidades confirmadas y revertido) |
 | **Rutas de los catedráticos: slug estable, UUID vivo y UUID obsoleto** | `curl` con la app en marcha | `200` en los tres slugs · `200` con UUID vivo · **`307 → /brainup`** con el UUID que falló |
 | **Errores del navegador registrados en el mismo log que lee el taller** | `POST /api/errores` | `{ok:true}` y línea escrita en `data/logs/errores-app.log` |
@@ -668,7 +668,7 @@ El parte de las 18:00 tenía tres síntomas que parecían tres averías y eran d
    no se ha podido leer y ya no dice «(Groq)» a todo.
 
 Verificado con `npm run verify` (lint + TypeScript), `verify:ai` (incluye dos pruebas nuevas:
-recorte con reintento y visión fuera de Gemini), `verify:tutor-adjuntos`, `verify:tutor-documentos`,
+recorte con reintento y visión fuera de Gemini), `verify:attachments`, `verify:tutor-documentos`,
 `verify:tutor-contexto`, `verify:tutor` y `verify:memoria`. En vivo: la página por slug carga los
 mensajes anteriores, un POST sin `conversationId` reutiliza la misma conversación y contesta Groq
 sin degradar, y el documento de prueba se lee con el dato correcto. Lo que sigue pendiente es el

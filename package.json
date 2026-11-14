@@ -32,7 +32,6 @@
     "verify:constraints": "node scripts/verify-constraints.js",
     "verify:attachments": "node scripts/verify-attachments.js",
     "verify:tutor": "node scripts/verify-tutor.js",
-    "verify:tutor-adjuntos": "node scripts/verify-tutor-adjuntos.js",
     "verify:tutor-contexto": "node scripts/verify-tutor-contexto.js",
     "verify:tutor-documentos": "node scripts/verify-tutor-documentos.js",
     "verify:apuntes-ia": "node scripts/verify-apuntes-ia.js",
