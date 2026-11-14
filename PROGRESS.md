@@ -146,3 +146,15 @@ Pendientes: pasos **1 a 3 de claves de IA** (bloqueado: falta `SECRETS_KEY_V1`) 
 - `node scripts/verify-user-ai-key.js`: 12/12. Las dos comprobaciones nuevas cubren la aceptación de `AQ.…` y que formulario y acción ya no conservan la regla antigua.
 - `npx tsc --noEmit`: 0. `npm run lint`: 0.
 - Límite: no se ha pegado una clave `AQ.` real desde el navegador; la comprobación es de contrato y de código.
+
+## /ajustes seguía rechazando AQ. (2026-11-14)
+
+El síntoma no era de validación: el código en disco ya aceptaba el punto. En `:3000` convivían **dos** servidores Next, y el que respondía (PID 19832) era de antes del arreglo, con el build antiguo cargado en memoria. Además retenía `query_engine-windows.dll.node`, así que `npm run build` moría en `prisma generate` con EPERM y nunca llegaba a sustituir `.next`.
+
+- Parados el supervisor (`npm run sirve -- --stop`, PIDs 17776/18792/15032) y el servidor huérfano 19832; puerto 3000 libre y `prisma generate` volvió a funcionar.
+- `npm run build` completo: exit 0, `BUILD_ID=MX8HceCDcAJ8moSrQ_64j`.
+- `next start` servicio desde el supervisor: `/api/salud` devuelve `build: MX8HceCDcAJ8moSrQ_64j`, el HTML de `/login` incluye ese mismo id, `/ajustes` 307 sin sesión y `/login` 200.
+- Bundle servido (`/_next/static/chunks/24888fa97-9uy.js`): el mensaje es el nuevo («puntos, guiones y guiones bajos») y el literal viejo aparece **0** veces.
+- Recorrido cliente + acción verificado con la acción real compilada y sesión simulada (12 comprobaciones): `AQ.` con punto se acepta y guarda; espacios/saltos pegados al copiar se recortan; espacio interior y `U+200B` se rechazan con el mensaje nuevo; clave corta mantiene su mensaje; el proveedor no se llama cuando el formato falla.
+- `POST /ajustes` con `Next-Action` real y sin sesión: 307 a `/login` (la puerta de auth va antes), y el mensaje viejo no aparece en la respuesta.
+- Límite: no hay credenciales de la cuenta de prueba en este entorno, así que el clic real desde el navegador con sesión sigue siendo prueba manual; lo anterior cubre el código servido y la acción real.
