@@ -16,6 +16,11 @@ import {
   type ClassUnitRef,
 } from './classCheckIn';
 import { runAiText } from './aiEngine';
+import {
+  AiKeyRequiredError,
+  resolveAllAiCredentials,
+  runWithAiCredentials,
+} from './ai/credentials';
 import { isTemarioSource, normalizeTopicTitle, parseTemarioText, TemarioSource } from './temarioImport';
 
 /** Todo lo que depende del temario se refresca con cada cambio de estado. */
@@ -983,17 +988,23 @@ export async function registrarAvanceDeClase(subjectId: string, answer: string) 
   // La IA lee la frase. Si no hay cupo o todas las claves están saturadas, la
   // lectura local ya ha sacado el número o el título y el flujo sigue igual.
   try {
-    const result = await runAiText({
-      systemInstruction: buildClassProgressPrompt({
-        subjectName: subject.name,
-        units,
-        answer: text,
-      }),
-      message: text,
-      maxTokens: 260,
-      budgetMs: 12_000,
-      attemptMs: 8_000,
-    });
+    // El avance de clase se puede leer sin IA (reglas locales), pero si se le
+    // pide al modelo, la clave es la del usuario y no la de plataforma.
+    const aiCredentials = await resolveAllAiCredentials(userId);
+    if (aiCredentials.length === 0) throw new AiKeyRequiredError();
+    const result = await runWithAiCredentials(aiCredentials, () =>
+      runAiText({
+        systemInstruction: buildClassProgressPrompt({
+          subjectName: subject.name,
+          units,
+          answer: text,
+        }),
+        message: text,
+        maxTokens: 260,
+        budgetMs: 12_000,
+        attemptMs: 8_000,
+      })
+    );
     const parsed = parseClassProgressReply(result.text, units);
     if (parsed && (parsed.vistos.length > 0 || parsed.enCurso !== null || parsed.sinTemario)) {
       progress = parsed;

@@ -14,6 +14,7 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 | 6. `invalidatePlan` y disparadores | hecho | este commit | `invalidatePlan(userId, reason)` guarda `status=invalidated`, fecha, motivo y versión en `PlanState` (columna nueva `invalidationReason`). Disparadores conectados: completar/abandonar/reabrir bloque y sesión, crear/editar/borrar/completar examen, avance de clase, recalcular y sincronización de Moodle con cambios. La siguiente apertura reconstruye una sola vez y conserva lo empezado. Ensayo local: motivo conservado, versión +1, un solo `PlanState`. `tsc`/`eslint` limpios. | Los disparadores de UI no se han recorrido uno a uno en navegador; sí compilan y comparten la misma función. |
 | 7. Entradas reales (`loadInputs`/`buildCandidates`/`toRow`) | hecho | este commit | `loadPlanningContext` usa FSRS/ReviewCard/ErrorLog/MoodleTask/Exam/ClassPeriod y ahora agrega `FocusSession` (`focusedSeconds`) y `SrsReview` (`minutesSpent`) por unidad. `calibrateUnitEstimate` solo ajusta con ≥3 sesiones, ≥45 min y unidad avanzada; hasta entonces `source='estimado'`. La UI muestra «X h · estimado» o «X h · ajustado (N)». Producción: 102 unidades, 0 FocusSession y 0 SrsReview → todas «estimado». `verify-sesiones.js`: 115 comprobaciones en verde. `dayPlan.ts` no importa IA. | La calibración real se verá cuando haya sesiones medidas; los tests cubren el cálculo, no datos de producción (no existen todavía). |
 | 8. UX del Cuartel | hecho | este commit | Un único «Ahora» (el bloque pausado o el primero) con Empezar/material; el resto en un `<details>` «Después» reordenable por arrastre limitado (solo pendientes, no toca lo empezado). Selector de energía que escribe `PlanState.energy` y reconstruye (0.5/1/1.2); microacción de 2 min. Aviso Web Push: VAPID, tabla `PushSubscription` (RLS activo, 0 privilegios anon), suscripción desde el navegador, cron `/api/push/send-due` protegido y `push`/`notificationclick` en `sw.js`. Prueba real contra endpoint HTTPS local: `due=1`, `sent=1`, 361 B `aes128gcm`, `lastNotifiedDay=2026-11-13`; perfil y suscripción restaurados. Plan real: 1 sesión de 50 min en 55 disponibles, `estimado`; sin IA. | El envío al navegador real requiere instalar la PWA y dar permiso (no hay sesión de navegador en este entorno); el camino de servidor está probado. |
+| 0. Claves de IA por usuario (prioridad previa al 9) | hecho (paso 0); pasos 1–3 bloqueados | este commit | `src/lib/ai/credentials.ts`: clave propia → `PLATFORM_AI_USER_IDS` → `AiKeyRequiredError` (402 `ai_key_required`); el motor ya no lee claves del entorno y exige un ámbito por petición (AsyncLocalStorage, sin clientes de módulo). Las 7 rutas de IA pasan por `ensureAiAccess`; `/api/ia/test-key` no cae al `.env`; `/api/ia/save-keys` solo para la lista; vigilante, triage y auditoría resuelven por usuario y se saltan con registro. Regla de lint + `verify-ai-keys` (9 comprobaciones). | Paso 1 bloqueado a propósito: falta `SECRETS_KEY_V1` en `.env`. Genérala con `openssl rand -base64 32` y pégala; no se inventa ni se versiona. |
 | 9. Restricciones y contexto del tutor | pendiente | — | — | — |
 | 10. Cierre de sesión, corrector, foto y banco | pendiente | — | — | — |
 | 11. B3 pedagogía activa | pendiente | — | — | — |
@@ -59,7 +60,7 @@ Hechos y verificados: pasos **1 a 8**. El plan diario se decide con reglas
 empezado, calibra horas con sesiones reales y el Cuartel tiene un solo «Ahora»,
 selector de energía y aviso push.
 
-Pendientes: pasos **9 a 14**. No se han empezado. Bloqueos concretos conocidos:
+Pendientes: pasos **1 a 3 de claves de IA** (bloqueado: falta `SECRETS_KEY_V1`) y pasos **9 a 14**. No se han empezado. Bloqueos concretos conocidos:
 
 - 9: no existen `responseSchema`, `open_document` ni la confirmación Zod de
   restricciones.
@@ -85,3 +86,13 @@ Pendientes: pasos **9 a 14**. No se han empezado. Bloqueos concretos conocidos:
 - Dump previo a 1e ignorado por git (`.gitignore:18`).
 - TLS: sin `NODE_TLS_REJECT_UNAUTHORIZED` en `.env`, `next.config.js` ni scripts. Prisma conecta con `sslmode=verify-full&sslaccept=strict` y la CA pública de Supabase (`prisma/certs/supabase-prod-ca-2021.crt`, huella SHA-256 `807025AD…`); Gemini responde 200 con verificación normal. `pg_dump` usa `sslrootcert`.
 - Supabase informa `disable_signup: false` en `/auth/v1/settings`; la app no expone registro, pero el toggle del proyecto no está desactivado.
+
+## Paso 0 de claves de IA (2026-11-14)
+
+- `npx tsc --noEmit`: exit 0.
+- `npx eslint src scripts --ext .ts,.tsx,.js`: exit 0.
+- `node scripts/verify-ai-keys.js`: 9/9 en verde. Cubre: 402 `ai_key_required` real para un usuario fuera de la lista; ámbito vacío y sin ámbito → 0 llamadas al proveedor; clave de usuario usada y clave de plataforma ausente de todas las peticiones; la clave no aparece en el estado; `src/` solo lee claves en `credentials.ts`; las 7 rutas de IA pasan por `ensureAiAccess`.
+- `node scripts/verify-ai-engine.js`: TODO EN VERDE. Se actualizaron expectativas caducadas: los avisos ya no nombran variables del `.env` (ahora mandan a Ajustes), el proveedor se da por caído tras 3 fallos y un 413 se reintenta hasta 3 veces recortando el prompt. El script activa `BRAINUP_AI_TEST_MODE` y limpia el entorno para ser hermético.
+- `npm run build`: exit 0 (antes hubo que liberar el DLL de Prisma: un proceso tenía bloqueado `query_engine-windows.dll.node`; tras borrarlo se regeneró).
+- `next start` en `:3000`: `/api/salud` 200; `/` 307 a `/login`; `POST /api/tutor` 401 y `/api/ia/status` 401 sin sesión (la puerta de auth va antes que la de IA).
+- Paso 1 bloqueado a propósito: `SECRETS_KEY_V1` no existe en `.env`. Se genera con `openssl rand -base64 32`; no se ha inventado ni se versiona. Sin esa clave no se implementa el cifrado de `UserAiKey`.

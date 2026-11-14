@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
+import { ensureAiAccess } from '@/lib/ai/access';
 import {
   gradeWithRubric,
   type BlockResult,
@@ -97,6 +98,10 @@ async function adjustMastery(
  */
 export async function POST(request: NextRequest) {
   const user = await requireUser();
+  // Corregir con rúbrica es IA. Sin clave propia se pide antes de leer nada; la
+  // autoevaluación sigue disponible desde la interfaz si el alumno la elige.
+  const aiDenied = await ensureAiAccess(user.id);
+  if (aiDenied) return aiDenied;
   const prisma = db(user.id);
   const body = (await request.json().catch(() => null)) as SubmitBody | null;
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';

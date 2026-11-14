@@ -14,6 +14,7 @@ const TutorChat = nextDynamic(() => import('@/components/brainup/TutorChat'), {
 import { getConfiguredModelLabel, parseTutorReply, type TutorStage } from '@/lib/tutor';
 import type { NoteProposal } from '@/lib/apuntesIa';
 import { getConfiguredEngines } from '@/lib/aiEngine';
+import { resolveAllAiCredentials, runWithAiCredentials } from '@/lib/ai/credentials';
 import { ArrowLeft, GraduationCap, Sparkles } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -49,12 +50,15 @@ export default async function TutorPage({
 }: {
   params: Promise<{ agentId: string }>;
 }) {
-  const { tenant: prisma } = await currentTenant();
+  const { user, tenant: prisma } = await currentTenant();
   const { agentId } = await params;
-  const modelLabel = getConfiguredModelLabel();
+  // El rótulo del motor se lee con las credenciales de ESTA cuenta: la página no
+  // debe anunciar la clave de plataforma si el usuario no tiene la suya.
+  const aiCredentials = await resolveAllAiCredentials(user.id);
+  const modelLabel = runWithAiCredentials(aiCredentials, () => getConfiguredModelLabel());
   // Motores que pueden escribir ahora mismo: con ellos se comparan las
   // versiones de un mismo apunte (Gemini, Groq, OpenRouter, local…).
-  const engines = getConfiguredEngines();
+  const engines = runWithAiCredentials(aiCredentials, () => getConfiguredEngines());
   // Proveedor que toca ahora mismo: Gemini es el primario y Groq el respaldo,
   // así que el rótulo sale del modelo configurado, no de una suposición.
   const engineLabel = /groq/i.test(modelLabel)

@@ -1,5 +1,6 @@
 import { db } from './db';
-import { runAiText, hasAiProvider, TutorError } from './aiEngine';
+import { runAiText, TutorError } from './aiEngine';
+import { resolveAllAiCredentials, runWithAiCredentials } from './ai/credentials';
 import { loadMaintenanceInput } from './maintenanceData';
 import { applyFixPlan } from './maintenanceApply';
 import { allFixes, scanAll } from './maintenanceScan';
@@ -323,11 +324,15 @@ export async function triageReportedIssues(
     return { ...empty, model: 'sin IA (nada que arreglar)', reviewed: issues.length, outcomes, problems };
   }
 
-  if (!hasAiProvider()) {
+  // La clave la pone el usuario. Este proceso corre sin sesión (el vigilante),
+  // así que se resuelve para su id y nunca se cae a la de plataforma.
+  const aiCredentials = await resolveAllAiCredentials(userId);
+  if (aiCredentials.length === 0) {
     return {
       ...empty,
       success: false,
-      error: 'Para diagnosticar tus reportes hace falta una clave de IA (GEMINI_API_KEY o GROQ_API_KEY).',
+      error:
+        'Para diagnosticar tus reportes hace falta tu clave de IA. Añádela en Ajustes: se guarda cifrada y las comprobaciones normales del taller siguen funcionando sin ella.',
     };
   }
 
@@ -336,19 +341,21 @@ export async function triageReportedIssues(
 
   try {
     const memory = await loadMemoryBlock(userId, MEMORY_SCOPE_MAINTENANCE);
-    const reply = await runAiText({
-      systemInstruction: buildTriageSystemInstruction(),
-      message: buildTriageMessage({
-        issues,
-        findings,
-        fixes,
-        memory,
-      }),
-      maxTokens: TRIAGE_MAX_TOKENS,
-      // Atender los reportes puede esperar a la próxima ronda: si el cupo está
-      // justo, no se le quita el turno al alumno que está escribiendo.
-      priority: 'fondo',
-    });
+    const reply = await runWithAiCredentials(aiCredentials, () =>
+      runAiText({
+        systemInstruction: buildTriageSystemInstruction(),
+        message: buildTriageMessage({
+          issues,
+          findings,
+          fixes,
+          memory,
+        }),
+        maxTokens: TRIAGE_MAX_TOKENS,
+        // Atender los reportes puede esperar a la próxima ronda: si el cupo está
+        // justo, no se le quita el turno al alumno que está escribiendo.
+        priority: 'fondo',
+      })
+    );
 
     model = `${reply.provider}/${reply.model}`;
     decisions = parseTriageReply(reply.text, issues, fixes);

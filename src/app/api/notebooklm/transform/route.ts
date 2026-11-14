@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
+import { ensureAiAccess } from '@/lib/ai/access';
 import { runAiText, hasAiProviderAsync, hasAnyFreeKey, type ChatMessage } from '@/lib/aiEngine';
 import { formatNotebookLmContent } from '@/lib/notebooklm';
 import { sanitizeNoteContent, NOTE_WRITER_INSTRUCTIONS } from '@/lib/apuntesIa';
@@ -8,6 +9,8 @@ import { sanitizeNoteContent, NOTE_WRITER_INSTRUCTIONS } from '@/lib/apuntesIa';
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
+    const aiDenied = await ensureAiAccess(user.id);
+    if (aiDenied) return aiDenied;
     const prisma = db(user.id);
     const body = await req.json();
     const { topicId, rawContent, flowName } = body;

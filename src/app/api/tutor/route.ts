@@ -15,6 +15,7 @@ import {
   type TutorReply,
 } from '@/lib/tutor';
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
+import { ensureAiAccess } from '@/lib/ai/access';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
 import { isLocalModeReply } from '@/lib/setupFallback';
 import {
@@ -192,6 +193,10 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const { user: authUser, tenant } = await currentTenant();
+  // Sin clave propia (y sin estar en PLATFORM_AI_USER_IDS) no se llama al
+  // motor: 402 `ai_key_required` antes de gastar ni un token.
+  const aiDenied = await ensureAiAccess(authUser.id);
+  if (aiDenied) return aiDenied;
   let body: TutorRequestBody;
   try {
     body = (await request.json()) as TutorRequestBody;

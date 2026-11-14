@@ -26,6 +26,7 @@
     "db:studio": "prisma studio",
     "ollama:doctor": "node scripts/ollama-doctor.js",
     "verify:ai": "node scripts/verify-ai-engine.js",
+    "verify:ai-keys": "node scripts/verify-ai-keys.js",
     "verify:tutor": "node scripts/verify-tutor.js",
     "verify:tutor-contexto": "node scripts/verify-tutor-contexto.js",
     "verify:tutor-documentos": "node scripts/verify-tutor-documentos.js",

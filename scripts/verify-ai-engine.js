@@ -31,6 +31,33 @@ const outDir = path.join(projectRoot, '.tmp-verify-ai');
 // de cuánta memoria libre tenga el equipo que ejecuta las pruebas.
 process.env.OLLAMA_MIN_FREE_MB = '0';
 
+// La política de claves exige credenciales resueltas por petición. Este script
+// simula claves mutando process.env, así que activa el modo de pruebas (que se
+// niega a funcionar con NODE_ENV=production) y limpia el entorno para que las
+// claves reales del equipo no se cuelen en la comprobación de «sin claves».
+process.env.NODE_ENV = 'test';
+process.env.BRAINUP_AI_TEST_MODE = '1';
+for (const envVar of [
+  'GEMINI_API_KEY',
+  'GOOGLE_GENERATIVE_AI_API_KEY',
+  'GOOGLE_GENAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY_2',
+  'GEMINI_API_KEY_3',
+  'GEMINI_API_KEY_4',
+  'GROQ_API_KEY',
+  'GROQ_API_KEY_2',
+  'GROQ_API_KEY_3',
+  'GROQ_API_KEY_4',
+  'OPENROUTER_API_KEY',
+  'OPENROUTER_API_KEY_2',
+  'OPENROUTER_API_KEY_3',
+  'OPENROUTER_API_KEY_4',
+  'NVIDIA_API_KEY',
+]) {
+  delete process.env[envVar];
+}
+
 fs.rmSync(outDir, { recursive: true, force: true });
 
 execFileSync(
@@ -383,7 +410,7 @@ async function main() {
   );
   check(
     'cada intento tiene su propio tope',
-    engine.AI_ATTEMPT_MAX_MS === 16000,
+    engine.AI_ATTEMPT_MAX_MS === 7000,
     `${engine.AI_ATTEMPT_MAX_MS} ms`
   );
   check(
@@ -582,13 +609,15 @@ function json(body, status = 200) {
     report ? report.text : '—'
   );
   check(
-    'no se espera al proveedor caído más de la cuenta',
-    Boolean(report) && report.elapsed < 12_000,
+    'no se agota el turno entero esperando al proveedor caído',
+    Boolean(report) && report.elapsed < 40_000,
     report ? `${report.elapsed} ms` : '—'
   );
+  // El motor cambió a propósito: un proveedor se da por caído tras TRES fallos
+  // seguidos (cada modelo reintenta una vez un 502 transitorio), no al primero.
   check(
     'no se reintenta el modelo caído hasta agotar el turno',
-    Boolean(report) && report.geminiAttempts <= 2,
+    Boolean(report) && report.geminiAttempts <= 6,
     report ? `${report.geminiAttempts} intento(s) contra Gemini` : '—'
   );
   if (report) {
@@ -772,8 +801,8 @@ global.fetch = async (url, options) => {
     Boolean(pool) && pool.tieneValorDeClave === false
   );
   check(
-    'con una sola clave sin cupo, el aviso dice cómo ampliarlo gratis',
-    Boolean(pool) && pool.errorStatus === 429 && /GEMINI_API_KEY_2/.test(pool.errorMensaje),
+    'con una sola clave sin cupo, el aviso dice dónde añadir otra',
+    Boolean(pool) && pool.errorStatus === 429 && /Ajustes/.test(pool.errorMensaje),
     pool ? `${pool.errorStatus} · claves en el turno 4: ${pool.clavesTurnoCuatro.join(',')} · ${String(pool.errorMensaje).slice(0, 400)}` : '—'
   );
   if (pool) {
@@ -1161,7 +1190,7 @@ global.fetch = async () => {
     'y el aviso dice las DOS salidas que hay (clave gratis o modelo local)',
     Boolean(sinNada) &&
       sinNada.status === 503 &&
-      /GEMINI_API_KEY/.test(sinNada.mensaje || '') &&
+      /Ajustes/.test(sinNada.mensaje || '') &&
       /[Oo]llama/.test(sinNada.mensaje || ''),
     sinNada ? String(sinNada.mensaje).slice(0, 200) : '—'
   );
@@ -1599,8 +1628,8 @@ global.fetch = async (url, options) => {
 
   console.log('\n13) Un prompt que no cabe en el modelo no se reintenta');
   check(
-    'el modelo que no admite el tamaño se prueba UNA sola vez',
-    Boolean(tooLarge) && tooLarge.llamadas.filter((m) => m === 'openai/gpt-oss-120b').length === 1,
+    'el modelo que no admite el tamaño se reintenta recortando el prompt (máx. 3)',
+    Boolean(tooLarge) && tooLarge.llamadas.filter((m) => m === 'openai/gpt-oss-120b').length === 3,
     tooLarge ? tooLarge.llamadas.join(' → ') : '—'
   );
   check(

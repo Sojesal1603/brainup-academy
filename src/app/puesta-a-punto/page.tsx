@@ -11,6 +11,7 @@ const SetupChat = nextDynamic(() => import('@/components/setup/SetupChat'), {
 import { currentTenant } from '@/lib/tenantContext';
 import { getSetupState } from '@/lib/setupApply';
 import { getConfiguredModelLabel } from '@/lib/aiEngine';
+import { resolveAllAiCredentials, runWithAiCredentials } from '@/lib/ai/credentials';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,10 @@ const SETUP_TITLE = 'Puesta a punto';
 
 export default async function SetupPage() {
   const { user, tenant: prisma } = await currentTenant();
+  // El rótulo del coordinador usa las credenciales de esta cuenta, nunca la
+  // clave de plataforma si el usuario no está autorizado a ella.
+  const aiCredentials = await resolveAllAiCredentials(user.id);
+  const modelLabel = runWithAiCredentials(aiCredentials, () => getConfiguredModelLabel());
   const [{ snapshot, checklist }, conversation] = await Promise.all([
     getSetupState(user.id),
     prisma.aiConversation.findFirst({
@@ -65,7 +70,7 @@ export default async function SetupPage() {
         initialMessages={messages}
         initialChecklist={checklist}
         initialSnapshot={snapshot}
-        modelLabel={getConfiguredModelLabel()}
+        modelLabel={modelLabel}
       />
 
       <p className="text-[11px] text-slate-500">

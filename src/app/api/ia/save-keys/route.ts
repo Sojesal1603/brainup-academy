@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { isPlatformAiUser, AI_KEY_REQUIRED_MESSAGE } from '@/lib/ai/credentials';
+import { requireUser } from '@/lib/auth';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -52,6 +54,16 @@ function isReadOnlyHost(): boolean {
 }
 
 export async function POST(request: Request) {
+  // Estas son las claves DE PLATAFORMA (las del .env). Solo las gestiona el
+  // dueño de la lista; el resto de usuarios guarda la suya cifrada en Ajustes.
+  const user = await requireUser();
+  if (!isPlatformAiUser(user.id)) {
+    return NextResponse.json(
+      { ok: false, code: 'ai_key_required', error: AI_KEY_REQUIRED_MESSAGE },
+      { status: 403 }
+    );
+  }
+
   let body: { keys?: Record<string, string> };
   try {
     body = (await request.json()) as { keys?: Record<string, string> };

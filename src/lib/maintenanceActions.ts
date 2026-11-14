@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { currentTenant } from './tenantContext';
-import { runAiText, hasAiProvider, TutorError } from './aiEngine';
+import { runAiText, TutorError } from './aiEngine';
+import { resolveAllAiCredentials, runWithAiCredentials } from './ai/credentials';
 import { loadMaintenanceInput } from './maintenanceData';
 import { applyMaintenanceFixes as runApplyFixes, type ApplyFixesResult } from './maintenanceApply';
 import {
@@ -216,19 +217,21 @@ export async function auditSyllabusWithAi(subjectId: string): Promise<SyllabusAu
   const id = String(subjectId ?? '');
   if (!id) return { success: false, error: 'Falta la asignatura.', proposals: [], fix: null, summary: '' };
 
-  if (!hasAiProvider()) {
-    return {
-      success: false,
-      error:
-        'La auditoría con IA necesita una clave (GEMINI_API_KEY o GROQ_API_KEY). Las comprobaciones normales del taller funcionan sin ella.',
-      proposals: [],
-      fix: null,
-      summary: '',
-    };
-  }
-
   try {
     const { user, tenant: prisma } = await currentTenant();
+    // La auditoría usa la clave del usuario (o la de plataforma solo si su id
+    // está autorizado). Nunca una clave compartida por defecto.
+    const aiCredentials = await resolveAllAiCredentials(user.id);
+    if (aiCredentials.length === 0) {
+      return {
+        success: false,
+        error:
+          'La auditoría con IA necesita tu clave. Añádela en Ajustes; las comprobaciones normales del taller funcionan sin ella.',
+        proposals: [],
+        fix: null,
+        summary: '',
+      };
+    }
     const subject = await prisma.subject.findUnique({
       where: { id },
       select: {
@@ -285,15 +288,17 @@ export async function auditSyllabusWithAi(subjectId: string): Promise<SyllabusAu
       'Revisa la lista y responde solo con las líneas ACCION | UNIDAD | MOTIVO.',
     ].join('\n');
 
-    const reply = await runAiText({
-      systemInstruction: auditInstruction,
-      message,
-      maxTokens: AUDIT_MAX_TOKENS,
-      // La auditoría del temario es mantenimiento, no una respuesta que alguien
-      // esté esperando: con el cupo justo se aparta (y la asignatura se queda
-      // como está hasta la próxima ronda).
-      priority: 'fondo',
-    });
+    const reply = await runWithAiCredentials(aiCredentials, () =>
+      runAiText({
+        systemInstruction: auditInstruction,
+        message,
+        maxTokens: AUDIT_MAX_TOKENS,
+        // La auditoría del temario es mantenimiento, no una respuesta que alguien
+        // esté esperando: con el cupo justo se aparta (y la asignatura se queda
+        // como está hasta la próxima ronda).
+        priority: 'fondo',
+      })
+    );
 
     const proposals = parseAuditReply(reply.text);
     const fix = buildAuditFix(subject.id, subject.name, subject.topics, proposals);

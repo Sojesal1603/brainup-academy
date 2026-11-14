@@ -22,10 +22,10 @@ import {
   getConfiguredProviders,
   getCooldownSeconds,
   getCandidateChain,
-  hasAiProvider,
   isQuotaTight,
   runAiText,
 } from './aiEngine';
+import { resolveAllAiCredentials, runWithAiCredentials } from './ai/credentials';
 import { MEMORY_SCOPE_MAINTENANCE, loadMemoryBlock, saveDayMemory } from './agentMemory';
 import { triageReportedIssues as runIssueTriage } from './issueTriage';
 import { healMoodleConnection } from './moodleSelfHeal';
@@ -573,6 +573,9 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
     problems.push(`no se ha podido revisar la base: ${message}`);
     log(`ERROR al cargar los datos: ${message}`);
 
+    // El informe de error también dice la verdad sobre las credenciales: la
+    // clave de plataforma no se usa para usuarios fuera de la lista.
+    const aiCredentials = await resolveAllAiCredentials(userId);
     const base = {
       startedAt: startedAt.toISOString(),
       finishedAt: new Date().toISOString(),
@@ -582,8 +585,8 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
       applied,
       problems,
       ai: {
-        configured: hasAiProvider(),
-        providers: getConfiguredProviders(),
+        configured: aiCredentials.length > 0,
+        providers: runWithAiCredentials(aiCredentials, () => getConfiguredProviders()),
         asked: false,
         model: null,
         proposals: [],
@@ -625,9 +628,14 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
   }
 
   // 2. Lo que no cubren las reglas: se le pide un plan a la IA.
+  //
+  // La clave se resuelve para el usuario de ESTA ronda. Si no tiene la suya y no
+  // está en PLATFORM_AI_USER_IDS, la tarea de IA se salta y queda en el informe;
+  // el proceso de fondo no puede gastar la clave de plataforma por su cuenta.
+  const aiCredentials = await resolveAllAiCredentials(userId);
   const ai: VigilanteReport['ai'] = {
-    configured: hasAiProvider(),
-    providers: getConfiguredProviders(),
+    configured: aiCredentials.length > 0,
+    providers: runWithAiCredentials(aiCredentials, () => getConfiguredProviders()),
     asked: false,
     model: null,
     proposals: [],
@@ -649,13 +657,14 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
   } else if (findingsAfter.length === 0) {
     log('el sistema está limpio: no hay nada que preguntarle a la IA');
   } else if (!ai.configured) {
-    ai.error = 'Sin claves de IA configuradas: el vigilante arregla lo que puede con las reglas.';
+    ai.error =
+      'Este usuario no tiene clave de IA propia y no está autorizado a usar la de plataforma: la ronda sigue solo con las reglas.';
     log(ai.error);
   } else if (relevantFindings.length === 0) {
     log('solo hay avisos informativos: no hace falta la IA');
   } else if (!involvedResult || !involvedResult.recognized) {
     log('los hallazgos no señalan ninguna unidad concreta: la IA no tiene nada que decidir');
-  } else if (isQuotaTight()) {
+  } else if (runWithAiCredentials(aiCredentials, () => isQuotaTight())) {
     // La ronda es mantenimiento: si el cupo gratuito está en las últimas, se
     // aparta para no quitarle la respuesta al alumno. No es un fallo y no se
     // apunta como incidencia: la ronda sigue con sus reglas y la IA volverá.
@@ -687,14 +696,16 @@ export async function runVigilanteCycle(options: VigilanteOptions = {}): Promise
       // qué se decidió no tocar. Sin esto, cada vuelta vuelve a proponer lo mismo
       // sobre los mismos hallazgos y no se avanza.
       const memoryBlock = await loadMemoryBlock(userId, MEMORY_SCOPE_MAINTENANCE);
-      const reply = await runAiText({
-        systemInstruction: memoryBlock
-          ? `${AI_SYSTEM_INSTRUCTION}\n\n${memoryBlock}`
-          : AI_SYSTEM_INSTRUCTION,
-        message,
-        maxTokens: 1200,
-        priority: 'fondo',
-      });
+      const reply = await runWithAiCredentials(aiCredentials, () =>
+        runAiText({
+          systemInstruction: memoryBlock
+            ? `${AI_SYSTEM_INSTRUCTION}\n\n${memoryBlock}`
+            : AI_SYSTEM_INSTRUCTION,
+          message,
+          maxTokens: 1200,
+          priority: 'fondo',
+        })
+      );
       ai.model = `${reply.provider}/${reply.model}`;
 
       const plan = buildAiFix(reply.text, involved);

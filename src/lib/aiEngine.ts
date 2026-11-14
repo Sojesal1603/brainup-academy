@@ -32,6 +32,15 @@
  *   AI_PROVIDER         "auto" (Gemini primero), "gemini", "groq", "openrouter" u "ollama".
  */
 
+import {
+  AiKeyRequiredError,
+  currentAiCredentials,
+  keyEnvNames,
+  mainKeyEnv,
+  platformCredentialsForTests,
+  type AiCredential,
+} from './ai/credentials';
+
 export type AiProvider = 'gemini' | 'groq' | 'openrouter' | 'nvidia' | 'ollama' | 'local';
 
 /** Un turno de conversación tal y como lo entienden los proveedores OpenAI. */
@@ -531,43 +540,6 @@ export const MAX_KEYS_PER_PROVIDER = 4;
 export const BACKGROUND_YIELD_MESSAGE =
   'Cupo de IA justo en este momento: este trabajo de fondo cede el turno para no quitarle el cupo al alumno. Se reanuda solo en la próxima ronda.';
 
-/** Los nombres de las variables de un proveedor, en orden de preferencia. */
-function keyEnvNames(provider: AiProvider): string[] {
-  if (provider === 'gemini') {
-    return [
-      'GEMINI_API_KEY',
-      // Las dos formas que usan los SDK de Google. El `.env` de este proyecto
-      // tenía la clave guardada como `GOOGLE_GENERATIVE_AI_API_KEY` y el motor
-      // solo miraba `GEMINI_API_KEY`: si esa faltara, la clave existiría en el
-      // entorno y la app seguiría diciendo «sin IA».
-      'GOOGLE_GENERATIVE_AI_API_KEY',
-      'GOOGLE_GENAI_API_KEY',
-      'GOOGLE_API_KEY',
-      'GEMINI_API_KEY_2',
-      'GEMINI_API_KEY_3',
-      'GEMINI_API_KEY_4',
-    ];
-  }
-  if (provider === 'groq') {
-    return ['GROQ_API_KEY', 'GROQ_API_KEY_2', 'GROQ_API_KEY_3', 'GROQ_API_KEY_4'];
-  }
-  if (provider === 'openrouter') {
-    return [
-      'OPENROUTER_API_KEY',
-      'OPENROUTER_API_KEY_2',
-      'OPENROUTER_API_KEY_3',
-      'OPENROUTER_API_KEY_4',
-    ];
-  }
-  return ['OLLAMA_BASE_URL'];
-}
-
-/** La etiqueta de una variable: «principal» para la de siempre, «2», «3»… para el resto. */
-function keyLabel(envVar: string): string {
-  const numbered = envVar.match(/_KEY_(\d)$/);
-  return numbered ? numbered[1] : 'principal';
-}
-
 export interface ProviderKey {
   label: string;
   envVar: string;
@@ -579,17 +551,42 @@ export interface ProviderKey {
  * extra. Se saltan las vacías y las repetidas (dos variables con la misma clave
  * serían dos intentos contra el mismo cupo).
  */
+/**
+ * Las credenciales de IA de ESTE contexto.
+ *
+ * Sin ámbito (una ruta que se olvidó de resolverlas, un cron sin usuario) no hay
+ * ninguna: el motor no lee el `.env` por su cuenta. `BRAINUP_AI_TEST_MODE` es la
+ * única excepción y está apagada en producción.
+ */
+function scopedCredentials(): readonly AiCredential[] {
+  const scoped = currentAiCredentials();
+  if (scoped !== null) return scoped;
+  return platformCredentialsForTests() ?? [];
+}
+
+/** ¿Puede usarse el motor local? Solo si la petición trae credenciales válidas. */
+function localEngineAllowed(): boolean {
+  const scoped = currentAiCredentials();
+  if (scoped !== null) return scoped.length > 0;
+  return platformCredentialsForTests() !== null;
+}
+
+/**
+ * Las claves de un proveedor, ya resueltas para la petición: la del usuario o, si
+ * está autorizado, las de plataforma. Nunca se leen variables de entorno aquí.
+ */
 export function getProviderKeys(provider: AiProvider): ProviderKey[] {
   if (provider === 'ollama') {
+    if (!localEngineAllowed()) return [];
     return [{ label: 'local', envVar: 'OLLAMA_BASE_URL', key: OLLAMA_BASE }];
   }
   const keys: ProviderKey[] = [];
   const seen = new Set<string>();
-  for (const envVar of keyEnvNames(provider)) {
-    const key = (process.env[envVar] || '').trim();
-    if (key.length === 0 || seen.has(key)) continue;
-    seen.add(key);
-    keys.push({ label: keyLabel(envVar), envVar, key });
+  for (const credential of scopedCredentials()) {
+    if (credential.provider !== provider) continue;
+    if (credential.key.length === 0 || seen.has(credential.key)) continue;
+    seen.add(credential.key);
+    keys.push({ label: credential.label, envVar: credential.envVar, key: credential.key });
   }
   return keys.slice(0, MAX_KEYS_PER_PROVIDER);
 }
@@ -817,8 +814,11 @@ interface NvidiaPayload {
 
 const catalogCache = new Map<string, { at: number; list: string[] }>();
 
-async function listGeminiModels(apiKey: string): Promise<string[]> {
-  const cached = catalogCache.get('gemini');
+async function listGeminiModels(apiKey: string, cacheId: string): Promise<string[]> {
+  // El catálogo se cachea por CREDENCIAL, no por proveedor: la lista que ve el
+  // usuario A no se reutiliza para la clave del usuario B.
+  const cacheKey = `gemini#${cacheId}`;
+  const cached = catalogCache.get(cacheKey);
   if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.list;
   try {
     const res = await fetch(`${GEMINI_MODELS_ENDPOINT}?pageSize=200`, {
@@ -831,7 +831,7 @@ async function listGeminiModels(apiKey: string): Promise<string[]> {
       .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
       .map((m) => String(m.name || '').replace(/^models\//, ''))
       .filter((name) => name.length > 0);
-    catalogCache.set('gemini', { at: Date.now(), list });
+    catalogCache.set(cacheKey, { at: Date.now(), list });
     return list;
   } catch (error) {
     console.warn(
@@ -842,8 +842,9 @@ async function listGeminiModels(apiKey: string): Promise<string[]> {
   }
 }
 
-async function listGroqModels(apiKey: string): Promise<string[]> {
-  const cached = catalogCache.get('groq');
+async function listGroqModels(apiKey: string, cacheId: string): Promise<string[]> {
+  const cacheKey = `groq#${cacheId}`;
+  const cached = catalogCache.get(cacheKey);
   if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.list;
   try {
     const res = await fetch(GROQ_MODELS_ENDPOINT, {
@@ -856,7 +857,7 @@ async function listGroqModels(apiKey: string): Promise<string[]> {
       .map((m) => String(m.id || '').trim())
       .filter((id) => id.length > 0);
     if (list.length === 0) throw new Error('Catálogo vacío');
-    catalogCache.set('groq', { at: Date.now(), list });
+    catalogCache.set(cacheKey, { at: Date.now(), list });
     return list;
   } catch (error) {
     console.warn(
@@ -867,8 +868,9 @@ async function listGroqModels(apiKey: string): Promise<string[]> {
   }
 }
 
-async function listOpenRouterModels(apiKey: string): Promise<string[]> {
-  const cached = catalogCache.get('openrouter');
+async function listOpenRouterModels(apiKey: string, cacheId: string): Promise<string[]> {
+  const cacheKey = `openrouter#${cacheId}`;
+  const cached = catalogCache.get(cacheKey);
   if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.list;
   try {
     const res = await fetch(OPENROUTER_MODELS_ENDPOINT, {
@@ -881,7 +883,7 @@ async function listOpenRouterModels(apiKey: string): Promise<string[]> {
       .map((m) => String(m.id || '').trim())
       .filter((id) => id.endsWith(':free'));
     if (list.length === 0) throw new Error('Catálogo gratuito vacío');
-    catalogCache.set('openrouter', { at: Date.now(), list });
+    catalogCache.set(cacheKey, { at: Date.now(), list });
     return list;
   } catch (error) {
     console.warn(
@@ -936,14 +938,15 @@ export async function rankModels(provider: AiProvider): Promise<ModelCandidate[]
     ranked.sort((a, b) => b.score - a.score);
     return ranked;
   }
-  const apiKey = getApiKey(provider);
-  if (!apiKey) return [];
+  const keyEntry = getProviderKeys(provider)[0];
+  if (!keyEntry) return [];
+  const apiKey = keyEntry.key;
   const listed =
     provider === 'gemini'
-      ? await listGeminiModels(apiKey)
+      ? await listGeminiModels(apiKey, keyEntry.envVar)
       : provider === 'groq'
-        ? await listGroqModels(apiKey)
-        : await listOpenRouterModels(apiKey);
+        ? await listGroqModels(apiKey, keyEntry.envVar)
+        : await listOpenRouterModels(apiKey, keyEntry.envVar);
   const scorer =
     provider === 'gemini'
       ? scoreGeminiModel
@@ -1406,14 +1409,6 @@ function providerLabel(provider: AiProvider): string {
   return 'el modelo local (Ollama)';
 }
 
-/** La variable de entorno con la clave principal de un proveedor de nube. */
-function mainKeyEnv(provider: AiProvider): string {
-  if (provider === 'gemini') return 'GEMINI_API_KEY';
-  if (provider === 'groq') return 'GROQ_API_KEY';
-  if (provider === 'openrouter') return 'OPENROUTER_API_KEY';
-  return 'OLLAMA_BASE_URL';
-}
-
 function describeHttpError(provider: AiProvider, status: number, providerMessage: string): TutorError {
   // «Request too large … (ITPM): Limit 7000, Requested 9000» NO es una caída del
   // proveedor: es que la petición no cabe. Reintentarla igual es perder el turno
@@ -1770,6 +1765,17 @@ type KeyOutcome = AiTextResult | 'next-key' | 'stop';
 /* ------------------------------------------------------------------ */
 
 export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
+  // Sin credenciales resueltas para ESTA petición no se llama a nadie. Es la
+  // última red: aunque una ruta se olvidara de la puerta, el motor no lee el
+  // `.env` ni gasta la clave de plataforma por su cuenta.
+  const scoped = currentAiCredentials();
+  if (scoped === null && platformCredentialsForTests() === null) {
+    throw new AiKeyRequiredError(
+      'Esta petición no trae credenciales de IA de ningún usuario. No se usa la clave de plataforma por defecto.'
+    );
+  }
+  if (scoped !== null && scoped.length === 0) throw new AiKeyRequiredError();
+
   // El trabajo de fondo cede el turno cuando el cupo está justo: ni se consulta
   // el catálogo ni se gasta un intento.
   if (params.priority === 'fondo' && isQuotaTight()) {
@@ -1794,7 +1800,7 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
       : '';
     const message =
       (!hasCloudKeys
-        ? 'El motor de IA no tiene por dónde funcionar: no hay ninguna clave en el .env (GEMINI_API_KEY, GROQ_API_KEY u OPENROUTER_API_KEY) y tampoco un modelo local levantado. Pon una clave gratuita o arranca Ollama (`npm run ollama:doctor`).'
+        ? 'El motor de IA no tiene por dónde funcionar: esta cuenta no tiene ninguna clave de IA disponible y tampoco hay un modelo local levantado. Añade tu clave en Ajustes o arranca Ollama (`npm run ollama:doctor`).'
         : 'Todos los modelos gratuitos están saturados ahora mismo. Espera un minuto y reinténtalo.') +
       forcedNote;
     lastDecision = { at: Date.now(), provider: null, model: null, ranked: [], attempts };
@@ -2080,7 +2086,7 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
     const totalKeys = keysInPlay.reduce((total, count) => total + count, 0);
     const advice =
       totalKeys <= 1
-        ? ' Si añades una clave extra gratis en .env (GEMINI_API_KEY_2), una de otro proveedor (GROQ_API_KEY) o una de OpenRouter (OPENROUTER_API_KEY, modelos gratis), la app reparte la carga entre ellas y esto deja de pasar.'
+        ? ' Puedes añadir otra clave de IA en Ajustes (o una de otro proveedor) para repartir la carga; mientras tanto, se reanuda sola cuando termine el enfriamiento.'
         : ` Tienes ${totalKeys} claves configuradas y todas están sin cupo: se reanudan solas cuando su enfriamiento termine.`;
     throw new TutorError(
       `Todos los modelos gratuitos disponibles tienen el cupo saturado en este momento. Espera un par de minutos y reinténtalo.${advice}`,

@@ -3,6 +3,36 @@
   "extends": "next/core-web-vitals",
   "overrides": [
     {
+      "files": ["src/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "MemberExpression[object.object.name='process'][object.property.name='env'][property.name=/^(GEMINI|GROQ|OPENROUTER|NVIDIA)_API_KEY(_[2-4])?$/]",
+            "message": "Las claves de IA solo se leen en src/lib/ai/credentials.ts. Usa resolveAiCredentials(userId, provider) y no un fallback a la clave de plataforma."
+          },
+          {
+            "selector": "MemberExpression[object.object.name='process'][object.property.name='env'][computed=true][property.value=/^(GEMINI|GROQ|OPENROUTER|NVIDIA)_API_KEY(_[2-4])?$/]",
+            "message": "Las claves de IA solo se leen en src/lib/ai/credentials.ts. Usa resolveAiCredentials(userId, provider) y no un fallback a la clave de plataforma."
+          },
+          {
+            "selector": "MemberExpression[object.object.name='process'][object.property.name='env'][property.name=/^GOOGLE_(GENERATIVE_AI|GENAI|API)_KEY$/]",
+            "message": "Las claves de IA solo se leen en src/lib/ai/credentials.ts. Usa resolveAiCredentials(userId, provider) y no un fallback a la clave de plataforma."
+          },
+          {
+            "selector": "MemberExpression[object.object.name='process'][object.property.name='env'][computed=true][property.value=/^GOOGLE_(GENERATIVE_AI|GENAI|API)_KEY$/]",
+            "message": "Las claves de IA solo se leen en src/lib/ai/credentials.ts. Usa resolveAiCredentials(userId, provider) y no un fallback a la clave de plataforma."
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/lib/ai/credentials.ts"],
+      "rules": {
+        "no-restricted-syntax": "off"
+      }
+    },
+    {
       "files": ["scripts/**/*.js"],
       "env": { "node": true, "es2022": true },
       "parserOptions": {
@@ -10,7 +40,8 @@
         "ecmaFeatures": { "globalReturn": true }
       },
       "rules": {
-        "@next/next/no-assign-module-variable": "off"
+        "@next/next/no-assign-module-variable": "off",
+        "no-restricted-syntax": "off"
       }
     }
   ]

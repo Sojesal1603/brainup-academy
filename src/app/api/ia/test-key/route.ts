@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  // Probar una clave es una acción con sesión. Y la clave que se prueba es
+  // SIEMPRE la que llega en el cuerpo: aquí no se cae a la de plataforma.
+  await requireUser();
+
   let body: { provider?: string; key?: string };
   try {
     body = await request.json();
@@ -14,7 +19,7 @@ export async function POST(request: Request) {
   const startTime = Date.now();
 
   if (provider === 'gemini') {
-    const apiKey = (key || process.env.GEMINI_API_KEY || '').trim();
+    const apiKey = (key || '').trim();
     if (!apiKey) {
       return NextResponse.json({ ok: false, error: 'Falta la clave de Gemini' }, { status: 400 });
     }
@@ -50,7 +55,7 @@ export async function POST(request: Request) {
   }
 
   if (provider === 'groq') {
-    const apiKey = (key || process.env.GROQ_API_KEY || '').trim();
+    const apiKey = (key || '').trim();
     if (!apiKey) {
       return NextResponse.json({ ok: false, error: 'Falta la clave de Groq' }, { status: 400 });
     }
@@ -86,7 +91,7 @@ export async function POST(request: Request) {
   }
 
   if (provider === 'openrouter') {
-    const apiKey = (key || process.env.OPENROUTER_API_KEY || '').trim();
+    const apiKey = (key || '').trim();
     if (!apiKey) {
       return NextResponse.json({ ok: false, error: 'Falta la clave de OpenRouter' }, { status: 400 });
     }
