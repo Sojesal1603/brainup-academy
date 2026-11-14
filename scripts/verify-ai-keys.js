@@ -196,6 +196,68 @@ function spyFetch() {
     }
   });
 
+  await ok(
+    'con clave propia de Gemini y Gemini caído no se toca ningún proveedor de plataforma',
+    async () => {
+      /** Toda petición queda apuntada: ninguna debe salir hacia otro proveedor. */
+      const seen = [];
+      const original = global.fetch;
+      global.fetch = async (url) => {
+        const target = String(url);
+        seen.push(target);
+        if (target.includes('/models')) {
+          return {
+            ok: true,
+            json: async () => ({
+              models: [
+                { name: 'models/gemini-3.5-flash', supportedGenerationMethods: ['generateContent'] },
+              ],
+            }),
+          };
+        }
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({ error: { message: 'high demand' } }),
+        };
+      };
+      const ownGemini = [
+        {
+          provider: 'gemini',
+          key: 'USER-GEMINI-ONLY-KEY',
+          source: 'usuario',
+          label: 'principal',
+          envVar: 'usuario',
+        },
+      ];
+      let caught = null;
+      try {
+        await credentials.runWithAiCredentials(ownGemini, () =>
+          engine.runAiText({ systemInstruction: 'x', message: 'hola' })
+        );
+      } catch (error) {
+        caught = error;
+      } finally {
+        global.fetch = original;
+      }
+      assert.ok(caught, 'Gemini caído debía terminar en error, no en respuesta inventada');
+      assert.notEqual(caught.code, 'ai_key_required', 'la clave propia existe: no es un 402');
+      assert.ok(
+        /Gemini|IA/i.test(caught.message) && !/PLATFORM-/.test(caught.message),
+        `mensaje poco claro: ${caught.message}`
+      );
+      const foreign = seen.filter((url) =>
+        /api\.groq\.com|integrate\.api\.nvidia\.com|openrouter\.ai/i.test(url)
+      );
+      assert.deepEqual(foreign, [], `se llamó a otro proveedor: ${foreign.join(', ')}`);
+      assert.ok(seen.length > 0, 'la prueba no ejercitó ninguna petición');
+      assert.ok(
+        seen.every((url) => /generativelanguage\.googleapis\.com/.test(url)),
+        `salió una petición que no era de Gemini: ${seen.join(', ')}`
+      );
+    }
+  );
+
   await ok('src/ solo lee claves de IA en credentials.ts', () => {
     const keyRead =
       /process\.env(?:\.|\s*\[\s*['"])(?:GEMINI|GROQ|OPENROUTER|NVIDIA)_API_KEY(?:_[2-4])?|process\.env(?:\.|\s*\[\s*['"])GOOGLE_(?:GENERATIVE_AI|GENAI|API)_KEY/;
