@@ -20,17 +20,49 @@
 export const MAX_TUTOR_ATTACHMENTS = 12;
 
 /**
- * Tamaño máximo por archivo: **512 MB**.
+ * Lee un tope en megabytes de una variable de entorno, con cordura.
+ *
+ * El cliente recibe el valor por `NEXT_PUBLIC_…` (Next solo inlina esas); el
+ * servidor acepta también la variable sin prefijo. Por debajo de 1 MB o por
+ * encima de 512 MB se ignora: un tope absurdo deja la app inservible y el
+ * límite de verdad lo pone el hosting (una función serverless no traga un
+ * cuerpo de cientos de megas).
+ */
+function envMegabytes(publicName: string, serverName: string, fallbackMb: number): number {
+  // Se miran las DOS: una `NEXT_PUBLIC_…` vacía tapaba la del servidor y el tope
+  // se quedaba en 25 MB aunque se hubiera pedido 512.
+  const candidates = [process.env[publicName], process.env[serverName]];
+  for (const raw of candidates) {
+    const value = Number(String(raw ?? '').trim());
+    if (Number.isFinite(value) && value >= 1) return Math.min(512, Math.round(value));
+  }
+  return fallbackMb;
+}
+
+/**
+ * Tamaño máximo por archivo: **25 MB por defecto**.
+ *
+ * Antes eran 512 MB fijos y una subida grande se comía la memoria del proceso
+ * (y en Netlify el cuerpo de la función tiene un tope mucho más bajo). Ahora el
+ * valor sale de `AI_MAX_ATTACHMENT_MB` (servidor) y
+ * `NEXT_PUBLIC_AI_MAX_ATTACHMENT_MB` (navegador); en local se sube a 512 MB.
  *
  * No es una promesa de que un archivo de ese tamaño vaya a caber en el modelo:
  * es el tope de lo que la app acepta, guarda y sabe leer. Lo que de verdad se le
  * enseña al catedrático es el **texto** extraído del documento (troceado y
  * buscado por relevancia), y eso no depende de los megas.
  */
-export const MAX_ATTACHMENT_BYTES = 512 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES =
+  envMegabytes('NEXT_PUBLIC_AI_MAX_ATTACHMENT_MB', 'AI_MAX_ATTACHMENT_MB', 25) * 1024 * 1024;
 
-/** Tope del conjunto de archivos de un mismo mensaje: 1 GB. */
-export const MAX_TURN_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
+/**
+ * Tope del conjunto de archivos de un mismo mensaje: 300 MB por defecto
+ * (12 archivos de 25 MB). Configurable con `AI_MAX_TURN_ATTACHMENT_MB`.
+ */
+export const MAX_TURN_ATTACHMENT_BYTES =
+  envMegabytes('NEXT_PUBLIC_AI_MAX_TURN_ATTACHMENT_MB', 'AI_MAX_TURN_ATTACHMENT_MB', 300) *
+  1024 *
+  1024;
 
 /**
  * Lo que cabe **en la misma petición** al modelo multimodal (una captura o un

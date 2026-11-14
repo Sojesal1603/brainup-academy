@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { ReadableStream } = require('node:stream/web');
+const { execFileSync } = require('node:child_process');
 const { compilaTs } = require('./lib/compilaTs');
 
 const OWNER = '16bb4958-5288-493b-8c65-379dd31782f5';
@@ -27,6 +28,7 @@ process.env.BRAINUP_UPLOADS_DIR = tmpDir;
 
 const outSignature = compilaTs('fileSignature', '.tmp-verify-signature');
 const outStore = compilaTs('docStore', '.tmp-verify-doc-store');
+const outLimits = compilaTs('attachmentLimits', '.tmp-verify-limits');
 const signature = require(path.join(outSignature, 'fileSignature.js'));
 const store = require(path.join(outStore, 'docStore.js'));
 
@@ -88,6 +90,29 @@ async function ok(name, fn) {
 
 (async () => {
   console.log('\n  Adjuntos del catedrático\n');
+
+  await ok('el tope por archivo es 25 MB por defecto y se puede subir a 512 por entorno', () => {
+    const byEnv = (vars) => {
+      const env = { ...process.env, AI_MAX_ATTACHMENT_MB: '', NEXT_PUBLIC_AI_MAX_ATTACHMENT_MB: '' };
+      for (const [name, value] of Object.entries(vars)) env[name] = value;
+      const code = `console.log(require(${JSON.stringify(
+        path.join(outLimits, 'attachmentLimits.js')
+      )}).MAX_ATTACHMENT_BYTES)`;
+      return Number(execFileSync(process.execPath, ['-e', code], { env, encoding: 'utf8' }).trim());
+    };
+    assert.equal(byEnv({}), 25 * 1024 * 1024, 'el valor por defecto no es 25 MB');
+    assert.equal(byEnv({ AI_MAX_ATTACHMENT_MB: '512' }), 512 * 1024 * 1024, 'no obedece a AI_MAX_ATTACHMENT_MB');
+    assert.equal(
+      byEnv({ NEXT_PUBLIC_AI_MAX_ATTACHMENT_MB: '40' }),
+      40 * 1024 * 1024,
+      'el navegador no obedece a NEXT_PUBLIC_AI_MAX_ATTACHMENT_MB'
+    );
+    assert.equal(
+      byEnv({ AI_MAX_ATTACHMENT_MB: '99999' }),
+      512 * 1024 * 1024,
+      'un tope absurdo debería quedar en el máximo de 512 MB'
+    );
+  });
 
   await ok('una imagen PNG se detecta por su firma, no por el nombre', () => {
     assert.deepEqual(signature.sniffSignature(PNG).kind, 'png');
