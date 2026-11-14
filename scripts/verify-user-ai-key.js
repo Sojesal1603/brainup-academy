@@ -225,6 +225,37 @@ async function ok(name, fn) {
       }
     });
 
+    await ok('los intentos de más de 24 h se borran y los recientes se quedan', async () => {
+      const { PrismaClient } = require('@prisma/client');
+      const prisma = new PrismaClient();
+      try {
+        await prisma.aiKeyAttempt.deleteMany({ where: { userId: TEST_ACCOUNT } });
+        const old = await prisma.aiKeyAttempt.create({
+          data: { userId: TEST_ACCOUNT, attemptedAt: new Date(Date.now() - 25 * 60 * 60_000) },
+        });
+        const recent = await prisma.aiKeyAttempt.create({
+          data: { userId: TEST_ACCOUNT, attemptedAt: new Date(Date.now() - 60_000) },
+        });
+        // El barrido se hace como mucho una vez por hora: se le pasa un reloj
+        // dos horas por delante para que esta comprobación no dependa de si ya
+        // había barrido antes en este proceso.
+        const borrados = await attempts.pruneOldAiKeyAttempts(new Date(Date.now() + 2 * 60 * 60_000));
+        assert.ok(borrados >= 1, `no borró nada (${borrados})`);
+        const quedan = await prisma.aiKeyAttempt.findMany({
+          where: { id: { in: [old.id, recent.id] } },
+          select: { id: true },
+        });
+        assert.deepEqual(
+          quedan.map((row) => row.id),
+          [recent.id],
+          'el barrido debía quitar el de 25 h y dejar el de hace un minuto'
+        );
+        await prisma.aiKeyAttempt.deleteMany({ where: { userId: TEST_ACCOUNT } });
+      } finally {
+        await prisma.$disconnect();
+      }
+    });
+
     await ok('AiKeyAttempt tiene RLS y cero grants para anon/authenticated', async () => {
       const { PrismaClient } = require('@prisma/client');
       const prisma = new PrismaClient();

@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { prisma } from '../prisma';
 
 /**
  * Límite de intentos al pegar o comprobar una clave de IA.
@@ -15,6 +16,35 @@ import { db } from '../db';
 
 export const AI_KEY_ATTEMPT_WINDOW_MS = 10 * 60_000;
 export const AI_KEY_ATTEMPT_MAX = 5;
+
+/**
+ * Cuánto se guardan los intentos: 24 h.
+ *
+ * La ventana de 10 minutos ya los cuenta, así que un intento más viejo no sirve
+ * para nada. Sin este barrido, la tabla solo se limpiaba cuando el MISMO usuario
+ * volvía a intentarlo: las cuentas que probaron una vez y no volvieron dejaban
+ * sus filas para siempre, y la tabla crecía sin fin.
+ */
+export const AI_KEY_ATTEMPT_RETENTION_MS = 24 * 60 * 60_000;
+
+/** No se barre en cada intento: una vez por hora basta. */
+const SWEEP_EVERY_MS = 60 * 60_000;
+let lastSweepAt = 0;
+
+/**
+ * Borra los intentos de más de 24 h de TODAS las cuentas.
+ *
+ * Usa el cliente crudo a propósito: `db(userId)` añadiría el dueño de la
+ * petición y dejaría fuera justo a las cuentas dormidas, que son las que
+ * acumulan. No lee ni devuelve datos de nadie: solo borra filas caducadas.
+ */
+export async function pruneOldAiKeyAttempts(now: Date = new Date()): Promise<number> {
+  if (now.getTime() - lastSweepAt < SWEEP_EVERY_MS) return 0;
+  lastSweepAt = now.getTime();
+  const cutoff = new Date(now.getTime() - AI_KEY_ATTEMPT_RETENTION_MS);
+  const result = await prisma.aiKeyAttempt.deleteMany({ where: { attemptedAt: { lt: cutoff } } });
+  return result.count;
+}
 
 export interface AttemptResult {
   ok: boolean;
@@ -33,6 +63,14 @@ export async function consumeAiKeyAttempt(
   userId: string,
   now: Date = new Date()
 ): Promise<AttemptResult> {
+  // Limpieza de fondo: si falla (permisos, base caída), el intento sigue su
+  // curso; no se convierte un problema de mantenimiento en un 500 para el alumno.
+  await pruneOldAiKeyAttempts(now).catch((error) => {
+    console.warn(
+      '[ia] no se han podido borrar los intentos de más de 24 h:',
+      error instanceof Error ? error.message : String(error)
+    );
+  });
   const cutoff = new Date(now.getTime() - AI_KEY_ATTEMPT_WINDOW_MS);
 
   return db(userId).$transaction(async (tx) => {

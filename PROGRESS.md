@@ -158,3 +158,37 @@ El síntoma no era de validación: el código en disco ya aceptaba el punto. En 
 - Recorrido cliente + acción verificado con la acción real compilada y sesión simulada (12 comprobaciones): `AQ.` con punto se acepta y guarda; espacios/saltos pegados al copiar se recortan; espacio interior y `U+200B` se rechazan con el mensaje nuevo; clave corta mantiene su mensaje; el proveedor no se llama cuando el formato falla.
 - `POST /ajustes` con `Next-Action` real y sin sesión: 307 a `/login` (la puerta de auth va antes), y el mensaje viejo no aparece en la respuesta.
 - Límite: no hay credenciales de la cuenta de prueba en este entorno, así que el clic real desde el navegador con sesión sigue siendo prueba manual; lo anterior cubre el código servido y la acción real.
+
+## Catedrático «sin IA» con clave válida: causa y arreglo (2026-11-14)
+
+No era la clave ni el formato. El catálogo real de Google anunciaba `gemini-3.8-flash` y `gemini-3.7-flash` con más puntuación que el resto, y esos dos no responden: `3.8` tardaba 23 s y devolvía 503 «high demand»; `3.7` no contestaba en 12 s. Con un intento de 7 s por modelo y un turno de 30 s, la cadena se gastaba entero en ellos y moría por presupuesto antes de llegar a `3.6-flash` (2,2 s) o `3.5-flash-lite` (1,0 s), que sí respondían. El catedrático degradaba a `tutorFallback` y el alumno leía «⚠️ Sin IA ahora mismo».
+
+La otra mitad del síntoma: «Guardar y comprobar» hacía `GET /models?pageSize=1`, que solo demuestra que la clave está activa. Por eso la tarjeta decía VÁLIDA mientras el motor fallaba. Ahora la comprobación **genera** con el primer modelo de la cadena del motor.
+
+Medido con `node scripts/check-ai-models.js` y llamadas directas (sin imprimir claves):
+
+- `gemini-3.8-flash` → 503 a los 23 326 ms; `gemini-3.7-flash` → sin respuesta en 12 s.
+- `gemini-3.6-flash` → 2 263 ms · `gemini-3.5-flash` → 1 144 ms · `gemini-3.5-flash-lite` → 961 ms · `gemini-3.1-flash-lite` → 513 ms · `gemini-3-flash-preview` → 825 ms.
+- `gemini-2.5-flash`, `2.5-flash-lite` y `1.5-flash` → 404 «no longer available to new users».
+- `llama-3.3-70b-versatile` (Groq) → 404; `nemotron` (NVIDIA) → 404 «Not found for account» en todos sus modelos de chat.
+- Llamada real del motor con la cadena nueva: `gemini-3.5-flash-lite`, **1 086 ms**, respuesta correcta, un solo intento.
+
+## Enrutado por capacidad y modelos en configuración (2026-11-14)
+
+- `src/lib/ai/models.json` es ahora la cadena prioritaria por proveedor (orden, `vision`, `preview`, `exclude`). `AI_GEMINI_MODELS`, `AI_GROQ_MODELS`, `AI_OPENROUTER_MODELS` y `AI_NVIDIA_MODELS` la sobrescriben sin tocar código. El catálogo real solo completa por detrás.
+- `ALLOW_PREVIEW_MODELS` (0 por defecto; 1 en este `.env` local) decide si entran los preview, sin forzar `AI_PROVIDER`. En producción debe quedarse a 0.
+- Un turno con imagen o PDF solo se ofrece a modelos con visión: la cadena se filtra antes de elegir y, si no queda ninguno, se avisa con un mensaje claro. Esos bytes no se reenvían a Groq ni a otro proveedor como plan B.
+- Un timeout ya no se reintenta contra el mismo modelo: se clasifica `timeout`, se aparta y el turno sigue. Antes gastaba 7 s + 0,6 s + 7 s en el modelo colgado.
+- `scripts/check-ai-models.js` sondea cada modelo configurado y enseña estado, milisegundos y política (excluido, preview, sin clave), sin imprimir claves.
+
+## Fallback, adjuntos y límites (2026-11-14)
+
+- `node scripts/verify-ai-keys.js`: 10/10. La comprobación nueva pone a Gemini caído con un alumno que solo tiene su clave propia y verifica **cero** peticiones a Groq, NVIDIA y OpenRouter, y un mensaje claro.
+- `docs/PROVEEDORES-IA.md`: qué proveedor puede recibir texto, texto extraído de documentos, imágenes y PDF, y en qué casos.
+- `scripts/verify-tutor-adjuntos.js` retirado: exigía una sesión real de Supabase (siempre 401) y sus filtros de relación Prisma eran inválidos. Su cobertura la dan `verify:attachments` (12/12) y `verify:ai`.
+- Tope por archivo: **25 MB** por defecto, `AI_MAX_ATTACHMENT_MB` / `NEXT_PUBLIC_AI_MAX_ATTACHMENT_MB` para subirlo (512 en este `.env` local, máximo 512). El conjunto por mensaje, 300 MB por defecto (`AI_MAX_TURN_ATTACHMENT_MB`).
+- `AiKeyAttempt`: barrido de filas de más de 24 h al contar un intento, como mucho una vez por hora, con el cliente crudo porque `db(userId)` dejaría fuera a las cuentas dormidas. Cubierto en `verify-user-ai-key.js` (13/13).
+
+## Deuda técnica anotada (2026-11-14)
+
+- **Subida directa a Supabase Storage con URL firmada**: hoy el archivo viaja en el cuerpo de la petición a la función serverless, y ahí el tope es mucho más bajo que los 25–512 MB del formulario (Netlify corta el cuerpo antes). Para archivos grandes hay que pedir una URL firmada al servidor, subir el binario del navegador a Storage y guardar solo la ruta en `AiAttachment`.
