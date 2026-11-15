@@ -8,7 +8,10 @@ import {
   type ExamBlock,
 } from '@/lib/examinador';
 import { auditEbauErrors, gradeEbauWithRubric } from '@/lib/ebauSimulator';
-import { readUploadText } from '@/lib/docStore';
+import { readUpload, readUploadBytes, readUploadText } from '@/lib/docStore';
+import { MAX_INLINE_ATTACHMENT_BYTES, isImageMime } from '@/lib/attachmentLimits';
+import { confidenceLabel, transcribeHandwriting } from '@/lib/corrector';
+import type { AiAttachmentPart } from '@/lib/aiEngine';
 import type { ExamGrade, ExamPackage } from '@/lib/examenTypes';
 
 export const dynamic = 'force-dynamic';
@@ -133,24 +136,10 @@ export async function POST(request: NextRequest) {
     typeof rawAnswers[index] === 'string' ? (rawAnswers[index] as string).slice(0, 20000) : ''
   );
 
-  // Resolución adjunta: se lee el texto extraído al subirla y se cruza con los
-  // bloques. Un PDF escaneado sin texto no se inventa: se ignora y se corrige
-  // lo que el alumno haya escrito.
   const rawUploadIds = Array.isArray(body?.uploadIds) ? (body!.uploadIds as unknown[]) : [];
   const uploadIds = rawUploadIds
     .filter((id): id is string => typeof id === 'string' && id.length > 0)
     .slice(0, 4);
-
-  const uploadedTexts: string[] = [];
-  for (const id of uploadIds) {
-    const text = await readUploadText(user.id, id).catch(() => null);
-    if (text) uploadedTexts.push(text.slice(0, 12_000));
-  }
-  if (uploadedTexts.length > 0) {
-    const combined = uploadedTexts.join('\n\n---\n\n').slice(0, 30_000);
-    const base = answers[0]?.trim() ? `${answers[0]}\n\n` : '';
-    answers[0] = `${base}RESOLUCIÓN ADJUNTA (puede cubrir varios bloques):\n${combined}`;
-  }
 
   const elapsedMinutes = Math.round(
     clampNumber(body?.elapsedMinutes, 0, session.timedMinutes * 2)
@@ -159,6 +148,82 @@ export async function POST(request: NextRequest) {
   // Autoevaluación guiada: el alumno puntúa cada bloque.
   const rawSelf = Array.isArray(body?.selfScores) ? (body!.selfScores as unknown[]) : null;
   const hasSelf = rawSelf !== null && rawSelf.some((value) => Number(value) > 0);
+
+  // Resolución adjunta: los PDFs y documentos ya traen el texto extraído al
+  // subirlos. Las fotos manuscritas no: se transcriben aquí con un modelo con
+  // visión y se corrige **la transcripción**, no la imagen. Si la letra no se
+  // lee, se dice en el informe; no se corrige un texto inventado.
+  const uploadedTexts: string[] = [];
+  const photoNotes: string[] = [];
+
+  for (const id of uploadIds) {
+    const upload = await readUpload(user.id, id).catch(() => null);
+    if (!upload) continue;
+
+    if (isImageMime(upload.mimeType)) {
+      // En autoevaluación no hay corrección que alimentar con la foto.
+      if (hasSelf) continue;
+
+      if (upload.sizeBytes > MAX_INLINE_ATTACHMENT_BYTES) {
+        photoNotes.push(
+          `«${upload.name}» pesa demasiado para leerla con visión: no ha entrado en la corrección.`
+        );
+        continue;
+      }
+
+      const bytes = await readUploadBytes(user.id, id).catch(() => null);
+      if (!bytes) {
+        photoNotes.push(`«${upload.name}» no se ha podido abrir: no ha entrado en la corrección.`);
+        continue;
+      }
+
+      const attachment: AiAttachmentPart = {
+        name: upload.name,
+        mimeType: upload.mimeType,
+        data: bytes.toString('base64'),
+      };
+      const transcription = await transcribeHandwriting({
+        subjectName: session.subjectName,
+        blockPrompt: blocks
+          .map((block, index) => `Bloque ${index + 1}: ${block.prompt}`)
+          .join('\n\n')
+          .slice(0, 8_000),
+        attachments: [attachment],
+      });
+
+      if (!transcription || !transcription.text.trim()) {
+        photoNotes.push(
+          `No se ha podido leer «${upload.name}»: su resolución no entra en la corrección. Escribe el desarrollo arriba si quieres que cuente.`
+        );
+        continue;
+      }
+
+      uploadedTexts.push(
+        `FOTO MANUSCRITA «${upload.name}» · ${confidenceLabel(
+          transcription.confidence
+        ).toLowerCase()}\n${transcription.text}`
+      );
+
+      if (transcription.confidence !== 'alta') {
+        const missing = transcription.missingParts.length
+          ? ` Partes dudosas: ${transcription.missingParts.join('; ')}.`
+          : '';
+        photoNotes.push(
+          `«${upload.name}»: ${confidenceLabel(transcription.confidence).toLowerCase()}.${missing}`
+        );
+      }
+      continue;
+    }
+
+    const text = await readUploadText(user.id, id).catch(() => null);
+    if (text) uploadedTexts.push(text.slice(0, 12_000));
+  }
+
+  if (uploadedTexts.length > 0) {
+    const combined = uploadedTexts.join('\n\n---\n\n').slice(0, 30_000);
+    const base = answers[0]?.trim() ? `${answers[0]}\n\n` : '';
+    answers[0] = `${base}RESOLUCIÓN ADJUNTA (puede cubrir varios bloques):\n${combined}`;
+  }
 
   let grade: ExamGrade | null = null;
 
@@ -236,7 +301,8 @@ export async function POST(request: NextRequest) {
   }
 
   const masteryNotes = await adjustMastery(user.id, blocks, grade.blocks);
-  const feedback = [grade.globalFeedback, masteryNotes.join('\n'), auditNote]
+  const photoNote = photoNotes.length > 0 ? `Foto manuscrita: ${photoNotes.join(' ')}` : '';
+  const feedback = [grade.globalFeedback, masteryNotes.join('\n'), photoNote, auditNote]
     .filter((part) => part.trim().length > 0)
     .join('\n\n');
 

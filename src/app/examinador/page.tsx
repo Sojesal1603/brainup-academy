@@ -4,6 +4,8 @@ import { ensureUserProfile } from '@/lib/userProfile';
 import { getEbauCommunity, communityStructureLabel } from '@/lib/ebauCommunities';
 import { FileCheck2, Clock, BookOpen, Sparkles, History, AlertTriangle } from 'lucide-react';
 import StartSimulacroButton from '@/components/examen/StartSimulacroButton';
+import CorrectorQualityCard from '@/components/examen/CorrectorQualityCard';
+import { latestEvalRun } from '@/lib/evalBank';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +48,10 @@ export default async function ExaminerPage() {
     orderBy: { createdAt: 'desc' },
     take: 6,
   });
+
+  // La última medición del banco es del servidor, no de la cuenta: se lee del
+  // disco y se muestra tal cual (si no hay, la tarjeta lo dice).
+  const quality = await latestEvalRun();
 
   return (
     <div className="space-y-8">
@@ -213,6 +219,8 @@ export default async function ExaminerPage() {
           </div>
         </div>
       )}
+
+      <CorrectorQualityCard initial={quality} />
     </div>
   );
 }

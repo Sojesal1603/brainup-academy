@@ -11,6 +11,7 @@
 
 import { db } from './db';
 import { hasAiProviderAsync, runAiText } from './tutor';
+import { gradeWithRubricMedian } from './corrector';
 import type { BlockResult, ExamBlock, ExamGrade, ExamPackage } from './examenTypes';
 
 export type { BlockResult, ExamBlock, ExamGrade, ExamPackage } from './examenTypes';
@@ -314,6 +315,10 @@ export async function buildExamPackage(userId: string, subjectId: string): Promi
  * Corrige las respuestas con una rúbrica PAU: rigor conceptual, desarrollo
  * justificado, resultado y notación/unidades. Devuelve null si la IA no está
  * disponible (el llamante pasa a modo autoevaluación).
+ *
+ * La corrección real vive en `corrector.ts`: dos pasadas independientes,
+ * validación Zod de cada JSON y mediana por bloque. Aquí solo queda la puerta
+ * de «¿hay IA?» y el tipo que espera el Examinador.
  */
 export async function gradeWithRubric(params: {
   subjectName: string;
@@ -321,80 +326,6 @@ export async function gradeWithRubric(params: {
   answers: string[];
 }): Promise<AiGrading | null> {
   if (!(await hasAiProviderAsync())) return null;
-
-  const examText = params.blocks
-    .map(
-      (block, index) =>
-        `BLOQUE ${index + 1} (máx ${block.points} pts) — tema «${block.topicTitle}»:\n${
-          block.prompt
-        }\nRESPUESTA DEL ALUMNO: ${
-          params.answers[index]?.trim() ? params.answers[index].trim() : '(en blanco)'
-        }`
-    )
-    .join('\n\n');
-
-  const systemInstruction = [
-    `Eres corrector oficial de la PAU española de «${params.subjectName}».`,
-    `Corrige cada bloque sobre un máximo de ${BLOCK_POINTS} puntos con esta rúbrica: rigor conceptual (40%), desarrollo justificado paso a paso (30%), resultado correcto (20%), notación y unidades (10%).`,
-    'Sé exigente y justo como un corrector real: penaliza resultados sin justificar, unidades ausentes y errores de notación. Una respuesta en blanco puntúa 0.',
-    'En "feedback" escribe una crítica breve (2-3 frases) en español que diga exactamente qué falló y cómo se habría asegurado el punto.',
-    'En "weakTopicTitles" lista solo los temas con puntuación por debajo del 60% del máximo.',
-    'Devuelve EXCLUSIVAMENTE un JSON con este esquema exacto:',
-    '{"blocks":[{"index":0,"score":1.5,"feedback":"..."}],"weakTopicTitles":["tema"],"globalFeedback":"valoración global de 2-3 frases con nota final sobre 10"}',
-    'Nada de texto fuera del JSON.',
-  ].join('\n');
-
-  try {
-    // Corregir es correr todas las rúbricas de golpe: mismo margen largo que al
-    // generar el examen.
-    const result = await runAiText({
-      systemInstruction,
-      message: `Corrige este simulacro:\n\n${examText}`,
-      budgetMs: 75_000,
-      attemptMs: 45_000,
-    });
-
-    const parsed = parseJsonLoose(result.text);
-    if (!parsed) return null;
-
-    const rawBlocks = Array.isArray(parsed.blocks) ? (parsed.blocks as unknown[]) : [];
-    if (rawBlocks.length === 0) return null;
-
-    const blockResults: BlockResult[] = params.blocks.map((block, index) => {
-      const found = rawBlocks
-        .map((b) => b as Record<string, unknown>)
-        .find((b) => Number(b.index) === index);
-      const score = clamp(found?.score, 0, block.points) ?? 0;
-      return {
-        score: Math.round(score * 4) / 4, // cuartos de punto, como la PAU
-        max: block.points,
-        feedback: asString(found?.feedback) || 'Sin comentario del corrector para este bloque.',
-      };
-    });
-
-    const total = Math.round(blockResults.reduce((acc, b) => acc + b.score, 0) * 100) / 100;
-
-    const weakTopicTitles = Array.isArray(parsed.weakTopicTitles)
-      ? (parsed.weakTopicTitles as unknown[]).map(asString).filter((t) => t.length > 0)
-      : blockResults
-          .map((b, i) => (b.score < b.max * 0.6 ? params.blocks[i].topicTitle : ''))
-          .filter((t) => t.length > 0);
-
-    return {
-      mode: 'ai',
-      total,
-      blocks: blockResults,
-      weakTopicTitles,
-      globalFeedback:
-        asString(parsed.globalFeedback) ||
-        `Nota final del simulacro: ${total.toFixed(1)} / 10.`,
-      model: result.model,
-    };
-  } catch (error) {
-    console.warn(
-      '[examinador] Corrección con IA no disponible; paso a autoevaluación:',
-      error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-    );
-    return null;
-  }
+  return gradeWithRubricMedian(params);
 }
+

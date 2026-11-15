@@ -9,6 +9,7 @@ import {
   FileText,
   Loader2,
   Paperclip,
+  ScanText,
   Send,
   ShieldAlert,
   Timer,
@@ -16,7 +17,18 @@ import {
 } from 'lucide-react';
 import MathText from './MathText';
 import ExamResults from './ExamResults';
-import type { ExamBlock, ExamGrade } from '@/lib/examenTypes';
+import {
+  TRANSCRIPTION_CONFIDENCE_LABELS,
+  type ExamBlock,
+  type ExamGrade,
+} from '@/lib/examenTypes';
+
+interface PhotoTranscript {
+  text: string;
+  confidence: keyof typeof TRANSCRIPTION_CONFIDENCE_LABELS;
+  missingParts: string[];
+  note: string;
+}
 
 function fmt(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',');
@@ -71,6 +83,9 @@ export default function PauExamRunner({
   /** Resoluciones escaneadas: se suben aparte y viajan como ids al corregir. */
   const [uploadIds, setUploadIds] = useState<string[]>([]);
   const [uploadNames, setUploadNames] = useState<Record<string, string>>({});
+  const [imageIds, setImageIds] = useState<string[]>([]);
+  const [transcripts, setTranscripts] = useState<Record<string, PhotoTranscript>>({});
+  const [transcribingId, setTranscribingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -207,8 +222,12 @@ export default function PauExamRunner({
         throw new Error(data?.error || 'No se ha podido subir la resolución.');
       }
 
-      setUploadIds((prev) => [...prev, data.upload!.id]);
-      setUploadNames((prev) => ({ ...prev, [data.upload!.id]: data.upload!.name }));
+      const uploadedId = data.upload.id;
+      setUploadIds((prev) => [...prev, uploadedId]);
+      setUploadNames((prev) => ({ ...prev, [uploadedId]: data.upload!.name }));
+      if (file.type.startsWith('image/')) {
+        setImageIds((prev) => [...prev, uploadedId]);
+      }
     } catch (caught) {
       setUploadError(
         caught instanceof Error ? caught.message : 'No se ha podido subir la resolución.'
@@ -216,6 +235,60 @@ export default function PauExamRunner({
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  /**
+   * Transcribe una foto antes de entregar para que el alumno vea lo que el
+   * corrector va a leer y con cuánta confianza. Si la letra no se lee, se dice
+   * aquí y en el informe; nunca se corrige un texto inventado.
+   */
+  const transcribePhoto = async (id: string) => {
+    setTranscribingId(id);
+    setUploadError('');
+    try {
+      const res = await fetch('/api/examinador/foto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadId: id,
+          subjectName,
+          blockPrompt: blocks
+            .map((block) => block.prompt)
+            .join('\n\n')
+            .slice(0, 2_000),
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            text?: string;
+            confidence?: keyof typeof TRANSCRIPTION_CONFIDENCE_LABELS;
+            missingParts?: string[];
+            note?: string;
+            error?: string;
+          }
+        | null;
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || 'No se ha podido transcribir la foto.');
+      }
+
+      setTranscripts((prev) => ({
+        ...prev,
+        [id]: {
+          text: data.text ?? '',
+          confidence: data.confidence ?? 'baja',
+          missingParts: data.missingParts ?? [],
+          note: data.note ?? '',
+        },
+      }));
+    } catch (caught) {
+      setUploadError(
+        caught instanceof Error ? caught.message : 'No se ha podido transcribir la foto.'
+      );
+    } finally {
+      setTranscribingId(null);
     }
   };
 
@@ -386,7 +459,8 @@ export default function PauExamRunner({
         </div>
         <p className="text-[10px] leading-relaxed text-slate-500">
           Si has hecho el examen en papel, súbelo aquí: el corrector lee el documento y lo cruza con
-          los bloques. También puedes escribirlo arriba.
+          los bloques. Las fotos manuscritas se transcriben con su confianza antes de corregir;
+          también puedes escribirlo arriba.
         </p>
 
         <input
@@ -416,28 +490,76 @@ export default function PauExamRunner({
 
         {uploadIds.length > 0 && (
           <ul className="space-y-1">
-            {uploadIds.map((id) => (
-              <li
-                key={id}
-                className="flex items-center justify-between gap-2 rounded border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-[10px] text-slate-300"
-              >
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <FileText className="h-3 w-3 shrink-0 text-emerald-400" />
-                  <span className="truncate">{uploadNames[id] ?? 'resolución'}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUploadIds((prev) => prev.filter((value) => value !== id));
-                    void fetch(`/api/tutor/attachments?id=${id}`, { method: 'DELETE' });
-                  }}
-                  className="text-slate-500 hover:text-rose-300"
-                  title="Quitar"
+            {uploadIds.map((id) => {
+              const transcript = transcripts[id];
+              return (
+                <li
+                  key={id}
+                  className="rounded border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-[10px] text-slate-300"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </li>
-            ))}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <FileText className="h-3 w-3 shrink-0 text-emerald-400" />
+                      <span className="truncate">{uploadNames[id] ?? 'resolución'}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {imageIds.includes(id) && (
+                        <button
+                          type="button"
+                          onClick={() => void transcribePhoto(id)}
+                          disabled={transcribingId === id || selfMode.active}
+                          className="flex items-center gap-1 text-emerald-300 hover:text-emerald-200 disabled:opacity-50"
+                          title="Ver lo que el corrector va a leer"
+                        >
+                          {transcribingId === id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <ScanText className="h-3 w-3" />
+                          )}
+                          {transcribingId === id ? 'Leyendo…' : 'Ver transcripción'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUploadIds((prev) => prev.filter((value) => value !== id));
+                          setImageIds((prev) => prev.filter((value) => value !== id));
+                          setTranscripts((prev) => {
+                            const next = { ...prev };
+                            delete next[id];
+                            return next;
+                          });
+                          void fetch(`/api/tutor/attachments?id=${id}`, { method: 'DELETE' });
+                        }}
+                        className="text-slate-500 hover:text-rose-300"
+                        title="Quitar"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  </div>
+
+                  {transcript && (
+                    <div className="mt-1.5 space-y-1 rounded bg-black/30 p-1.5">
+                      <p className="text-[9px] font-mono uppercase tracking-wider text-slate-500">
+                        {TRANSCRIPTION_CONFIDENCE_LABELS[transcript.confidence]}
+                      </p>
+                      <p className="max-h-24 overflow-auto whitespace-pre-wrap text-[10px] leading-relaxed text-slate-300">
+                        {transcript.text.trim() || 'No se ha podido leer la letra.'}
+                      </p>
+                      {transcript.missingParts.length > 0 && (
+                        <p className="text-[9px] text-amber-300">
+                          Dudoso: {transcript.missingParts.join('; ')}
+                        </p>
+                      )}
+                      {transcript.note && (
+                        <p className="text-[9px] text-amber-300/80">{transcript.note}</p>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
 

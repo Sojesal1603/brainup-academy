@@ -16,6 +16,8 @@ prisma/dev.db
 prisma/dev.db-journal
 data/logs/
 data/backups/
+# Mediciones del banco de evaluación: son de este servidor, no del proyecto.
+data/eval-runs/
 
 # Basura del sistema
 *.log

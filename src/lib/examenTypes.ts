@@ -29,10 +29,19 @@ export interface ExamApartadoResult {
   max: number;
 }
 
+/** Etiquetas de confianza de una transcripción manuscrita (cliente y servidor). */
+export const TRANSCRIPTION_CONFIDENCE_LABELS = {
+  alta: 'Lectura clara',
+  media: 'Lectura con dudas',
+  baja: 'Lectura poco fiable',
+} as const;
+
 export interface BlockResult {
   score: number;
   max: number;
   feedback: string;
+  /** Nota de cada pasada del corrector (la nota final es su mediana). */
+  scores?: number[];
   /** Fallos formales detectados: unidades, signos, notación… */
   notationIssues?: string[];
   /** Nota apartado a apartado, si el corrector la ha devuelto. */
@@ -54,6 +63,8 @@ export interface ExamGrade {
   community?: string;
   /** Puntos descontados por notación (sobre 10). */
   notationPenalty?: number;
+  /** Pasadas válidas del corrector que entraron en la mediana. */
+  passes?: number;
   /** Qué se ha inyectado en el Banco de Errores y en el plan. */
   audit?: ExamAudit;
 }

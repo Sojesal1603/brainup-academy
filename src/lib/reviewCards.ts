@@ -8,6 +8,7 @@
  */
 
 import { db } from './db';
+import { frontHash as hashFront } from './frontHash';
 import type {
   Flashcard,
   FlashcardsTool,
@@ -56,6 +57,9 @@ async function upsertCard(
       topicId,
       kind,
       front,
+      // La huella viaja con la tarjeta para reconocerla aunque el enunciado
+      // llegue con otro maquetado (mayúsculas, espacios, acentos).
+      frontHash: hashFront(front),
       back,
       source: seed.source,
       dueAt: new Date(),
@@ -63,6 +67,7 @@ async function upsertCard(
     update: {
       kind,
       back,
+      frontHash: hashFront(front),
       source: seed.source,
     },
     select: { id: true, front: true },

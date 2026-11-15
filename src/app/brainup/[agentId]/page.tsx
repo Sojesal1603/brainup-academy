@@ -11,6 +11,7 @@ import { ChatSkeleton } from '@/components/ui/Skeletons';
 const TutorChat = nextDynamic(() => import('@/components/brainup/TutorChat'), {
   loading: () => <ChatSkeleton />,
 });
+import SessionClosePanel from '@/components/brainup/SessionClosePanel';
 import { getConfiguredModelLabel, parseTutorReply, type TutorStage } from '@/lib/tutor';
 import type { NoteProposal } from '@/lib/apuntesIa';
 import { getConfiguredEngines } from '@/lib/aiEngine';
@@ -106,6 +107,7 @@ export default async function TutorPage({
     notesTotal,
     notesPreview,
     teacherUnit,
+    sessionTopics,
   ] = await Promise.all([
     // OJO: el `agentId` de la URL puede ser el slug de la materia
     // («lengua-castellana-y-literatura-i»), no el UUID del agente. Buscar la
@@ -160,6 +162,13 @@ export default async function TutorPage({
       where: { subjectId: agent.subjectId, teacherMethod: { not: null } },
       orderBy: [{ seenInClassAt: 'desc' }, { updatedAt: 'desc' }],
       select: { teacherMethod: true },
+    }),
+    // Temas de la materia para el cierre de sesión: solo se puede apuntar un
+    // fallo contra una unidad que existe de verdad.
+    prisma.topic.findMany({
+      where: { subjectId: agent.subjectId },
+      orderBy: [{ unitNumber: 'asc' }, { title: 'asc' }],
+      select: { id: true, title: true },
     }),
   ]);
 
@@ -264,6 +273,8 @@ export default async function TutorPage({
         />
 
       </div>
+
+      <SessionClosePanel agentId={agent.id} topics={sessionTopics} />
     </div>
   );
 }

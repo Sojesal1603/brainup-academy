@@ -722,6 +722,8 @@ model ReviewCard {
   // "flashcard" | "test" | "concepto" | "mapa"
   kind           String      @default("flashcard")
   front          String
+  // Huella del enunciado normalizado: la misma tarjeta con otro maquetado.
+  frontHash      String?
   back           String
   source         String?
   // SM-2: repeticiones seguidas con acierto, intervalo actual y facilidad.
@@ -739,6 +741,7 @@ model ReviewCard {
   @@unique([userId, topicId, front])
   @@index([userId, dueAt])
   @@index([userId, topicId])
+  @@index([userId, topicId, frontHash])
 }
 
 // 25. Focus & Lock: cada bloque de enfoque, con el tiempo real de estudio y el
@@ -817,6 +820,8 @@ model PlanConstraint {
 model TutorSessionOutcome {
   id                  String    @id @default(cuid())
   userId              String
+  // Clave estable del cierre: repetir la misma sesión reutiliza la fila.
+  sessionKey          String?
   planId              String?
   subjectId           String?
   topicId             String?
@@ -833,6 +838,7 @@ model TutorSessionOutcome {
   user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   plan PlanState?  @relation(fields: [planId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
+  @@unique([userId, sessionKey])
   @@index([userId, createdAt])
   @@index([userId, topicId])
   @@index([planId])
