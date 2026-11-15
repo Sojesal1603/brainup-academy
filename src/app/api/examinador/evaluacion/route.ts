@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/auth';
-import { ensureAiAccess } from '@/lib/ai/access';
+import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import { EVAL_CASES, runEvalBank, saveEvalRun } from '@/lib/evalBank';
 
 export const dynamic = 'force-dynamic';
@@ -15,8 +15,11 @@ export const maxDuration = 300;
  */
 export async function POST() {
   const user = await requireUser();
-  const denied = await ensureAiAccess(user.id);
-  if (denied) return denied;
+  const ai = await ensureAiAccess(user.id);
+  if (ai.denied) return ai.denied;
+  // El ámbito se activa AQUÍ, en el marco de la ruta: así las llamadas al motor
+  // de más abajo ven la clave de este usuario.
+  activateAiCredentials(ai.credentials);
 
   try {
     const run = await runEvalBank(EVAL_CASES);

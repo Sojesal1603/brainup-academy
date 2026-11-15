@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { currentTenant } from '@/lib/tenantContext';
-import { ensureAiAccess } from '@/lib/ai/access';
+import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import {
   buildNoteWriterSystemPrompt,
   buildNoteWriterUserMessage,
@@ -440,8 +440,9 @@ export async function POST(request: Request) {
 
     // La puerta de credenciales va ANTES del sondeo: sin clave propia (y fuera
     // de la lista de plataforma) se responde 402 y no se construye ni un cliente.
-    const aiDenied = await ensureAiAccess(authUser.id);
-    if (aiDenied) return aiDenied;
+    const ai = await ensureAiAccess(authUser.id);
+    if (ai.denied) return ai.denied;
+    activateAiCredentials(ai.credentials);
 
     // Sondeo real (incluye el motor local): en una instancia serverless recién
     // arrancada Ollama todavía no constaba y se negaba a redactar sin motivo.

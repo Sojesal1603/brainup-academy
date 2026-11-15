@@ -37,12 +37,13 @@ process.env.GROQ_API_KEY = 'PLATFORM-GROQ-DO-NOT-USE';
 process.env.BRAINUP_AI_TEST_MODE = '0';
 process.env.OLLAMA_ENABLED = 'false';
 
-const engineOut = compilaTs('aiEngine', '.tmp-verify-ai-keys');
+// Una sola compilación para el motor y la puerta: comparten el módulo de
+// credenciales (y su `AsyncLocalStorage`), igual que dentro de la app. Con
+// carpetas distintas, `enterWith` en una no se vería en la otra.
+const engineOut = compilaTs(['aiEngine', 'ai/access'], '.tmp-verify-ai-keys');
 const engine = require(path.join(engineOut, 'aiEngine.js'));
 const credentials = require(path.join(engineOut, 'ai', 'credentials.js'));
-
-const accessOut = compilaTs('ai/access', '.tmp-verify-ai-access');
-const access = require(path.join(accessOut, 'ai', 'access.js'));
+const access = require(path.join(engineOut, 'ai', 'access.js'));
 
 let checks = 0;
 async function ok(name, fn) {
@@ -99,10 +100,11 @@ function spyFetch() {
   });
 
   await ok('ensureAiAccess devuelve HTTP 402 con el código ai_key_required', async () => {
-    const response = await access.ensureAiAccess(STRANGER);
-    assert.ok(response, 'debía devolver una respuesta');
-    assert.equal(response.status, 402);
-    const body = await response.json();
+    const gate = await access.ensureAiAccess(STRANGER);
+    assert.ok(gate.denied, 'debía devolver una respuesta');
+    assert.equal(gate.denied.status, 402);
+    assert.deepEqual(gate.credentials, [], 'un rechazo no entrega credenciales');
+    const body = await gate.denied.json();
     assert.equal(body.code, 'ai_key_required');
     assert.equal(body.ok, false);
     assert.ok(!/PLATFORM-/.test(JSON.stringify(body)), 'la respuesta filtra la clave');
@@ -258,6 +260,46 @@ function spyFetch() {
     }
   );
 
+  await ok(
+    'con clave propia de Groq y Gemini de plataforma, la petición solo va a Groq',
+    async () => {
+      const seen = [];
+      const original = global.fetch;
+      global.fetch = async (url) => {
+        const target = String(url);
+        seen.push(target);
+        if (target.includes('/models')) {
+          return { ok: true, json: async () => ({ data: [{ id: 'openai/gpt-oss-120b' }] }) };
+        }
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: 'respuesta de groq' } }] }),
+        };
+      };
+      const ownGroq = [
+        {
+          provider: 'groq',
+          key: 'USER-GROQ-ONLY-KEY',
+          source: 'usuario',
+          label: 'principal',
+          envVar: 'usuario',
+        },
+      ];
+      let result = null;
+      try {
+        result = await credentials.runWithAiCredentials(ownGroq, () =>
+          engine.runAiText({ systemInstruction: 'x', message: 'hola' })
+        );
+      } finally {
+        global.fetch = original;
+      }
+      assert.equal(result.provider, 'groq');
+      assert.ok(seen.length > 0, 'la prueba no ejercitó ninguna petición');
+      const foreign = seen.filter((url) => !/api\.groq\.com/.test(url));
+      assert.deepEqual(foreign, [], `se llamó fuera de Groq: ${foreign.join(', ')}`);
+    }
+  );
+
   await ok('src/ solo lee claves de IA en credentials.ts', () => {
     const keyRead =
       /process\.env(?:\.|\s*\[\s*['"])(?:GEMINI|GROQ|OPENROUTER|NVIDIA)_API_KEY(?:_[2-4])?|process\.env(?:\.|\s*\[\s*['"])GOOGLE_(?:GENERATIVE_AI|GENAI|API)_KEY/;
@@ -288,15 +330,44 @@ function spyFetch() {
       'src/app/api/puesta-a-punto/route.ts',
       'src/app/api/examinador/start/route.ts',
       'src/app/api/examinador/submit/route.ts',
+      'src/app/api/examinador/foto/route.ts',
+      'src/app/api/examinador/evaluacion/route.ts',
     ];
     for (const route of routes) {
       const source = fs.readFileSync(path.join(projectRoot, route), 'utf8');
       assert.ok(source.includes('ensureAiAccess'), `${route} no llama a ensureAiAccess`);
+      // La puerta solo resuelve: el ámbito tiene que activarlo la ruta en su
+      // propio marco o el motor se queda sin proveedores (bug del catedrático).
+      assert.ok(
+        source.includes('activateAiCredentials'),
+        `${route} no activa las credenciales en su marco`
+      );
       assert.ok(
         !/process\.env\.(?:GEMINI|GROQ|OPENROUTER|NVIDIA)_API_KEY/.test(source),
         `${route} lee una clave de IA del entorno`
       );
     }
+  });
+
+  /*
+   * REGRESIÓN DEL CATEDRÁTICO.
+   *
+   * La puerta devolvía la respuesta 402 o `null` y activaba el ámbito dentro de
+   * su propia función. `AsyncLocalStorage.enterWith` no propaga al llamante, así
+   * que la ruta seguía sin credenciales: con clave válida, el motor contestaba
+   * «no hay ningún proveedor» y el chat caía al respaldo local. Aquí se comprueba
+   * el patrón correcto —resolver y activar en el mismo marco— y que el ámbito
+   * sigue vivo después de un `await`, como en una ruta real.
+   */
+  await ok('la puerta deja el ámbito activo en el marco que la llama', async () => {
+    const gate = await access.ensureAiAccess(OWNER);
+    assert.equal(gate.denied, null, 'el dueño de plataforma tiene credenciales');
+    assert.ok(gate.credentials.length > 0, 'la puerta no devolvió credenciales');
+    access.activateAiCredentials(gate.credentials);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    const providers = engine.getConfiguredProviders();
+    assert.ok(providers.includes('gemini'), `sin Gemini tras la puerta: ${providers.join(', ')}`);
+    assert.ok(engine.hasAiProvider(), 'hasAiProvider() falso teniendo clave');
   });
 
   console.log(`\n  ✅ ${checks} comprobaciones en verde\n`);

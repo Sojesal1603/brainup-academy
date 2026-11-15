@@ -15,7 +15,7 @@ import {
   type TutorReply,
 } from '@/lib/tutor';
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
-import { ensureAiAccess } from '@/lib/ai/access';
+import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
 import { isLocalModeReply } from '@/lib/setupFallback';
 import {
@@ -197,8 +197,16 @@ export async function POST(request: Request) {
   const { user: authUser, tenant } = await currentTenant();
   // Sin clave propia (y sin estar en PLATFORM_AI_USER_IDS) no se llama al
   // motor: 402 `ai_key_required` antes de gastar ni un token.
-  const aiDenied = await ensureAiAccess(authUser.id);
-  if (aiDenied) return aiDenied;
+  /*
+   * El ámbito de credenciales se activa EN ESTA FUNCIÓN, no dentro de la puerta.
+   * `activateAiCredentials` usa `AsyncLocalStorage.enterWith`, que cambia el
+   * contexto del recurso que ejecuta en ese momento: si se llamara desde dentro
+   * de `ensureAiAccess`, al volver aquí ya no habría ámbito y el motor diría que
+   * no hay ningún proveedor teniendo la clave propia del alumno.
+   */
+  const ai = await ensureAiAccess(authUser.id);
+  if (ai.denied) return ai.denied;
+  activateAiCredentials(ai.credentials);
   let body: TutorRequestBody;
   try {
     body = (await request.json()) as TutorRequestBody;

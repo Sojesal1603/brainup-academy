@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   AiKeyRequiredError,
-  enterAiCredentialsForRequest,
   resolveAllAiCredentials,
   runWithAiCredentials,
   type AiCredential,
@@ -16,23 +15,45 @@ import { AiKeyStoreError } from './userKeyErrors';
  * `ai_key_required`. El motor nunca lee la clave de plataforma por su cuenta.
  */
 
-export { enterAiCredentialsForRequest };
+export { activateAiCredentials } from './credentials';
 
 /**
- * Deja las credenciales activas o devuelve la respuesta 402 lista para enviar.
- *
- * Es la primera línea de una ruta de IA: si el usuario no tiene clave (y no es
- * de plataforma), la petición muere aquí y no se llega a construir ni un
- * cliente de IA. Un fallo que no sea de credenciales se propaga.
+ * Lo que devuelve la puerta: o una respuesta para enviar, o las credenciales
+ * que la ruta debe activar en SU propio marco.
  */
-export async function ensureAiAccess(userId: string): Promise<NextResponse | null> {
+export interface AiAccess {
+  /** Respuesta 402/503 si no se puede usar la IA; `null` si todo está bien. */
+  denied: NextResponse | null;
+  /** Credenciales del usuario, ya resueltas. Vacías si `denied` no es `null`. */
+  credentials: readonly AiCredential[];
+}
+
+/**
+ * Resuelve las credenciales de la ruta (402 si no hay, 503 si el vault falla).
+ *
+ * NO activa el ámbito: eso lo hace `activateAiCredentials` en la ruta. Es
+ * deliberado —`enterWith` desde otra función no llega al llamante— y es
+ * exactamente el fallo que dejaba al catedrático sin motor teniendo clave.
+ *
+ * La forma de usarla, en la primera línea de una ruta de IA:
+ *
+ * ```ts
+ * const ai = await ensureAiAccess(user.id);
+ * if (ai.denied) return ai.denied;
+ * activateAiCredentials(ai.credentials);
+ * ```
+ */
+export async function ensureAiAccess(userId: string): Promise<AiAccess> {
   try {
-    await enterAiCredentialsForRequest(userId);
-    return null;
+    const credentials = await resolveAllAiCredentials(userId);
+    if (credentials.length === 0) throw new AiKeyRequiredError();
+    return { denied: null, credentials };
   } catch (error) {
     const denied = aiKeyRequiredResponse(error);
-    if (denied) return denied;
-    if (error instanceof AiKeyStoreError) return aiKeyStoreErrorResponse(error);
+    if (denied) return { denied, credentials: [] };
+    if (error instanceof AiKeyStoreError) {
+      return { denied: aiKeyStoreErrorResponse(error), credentials: [] };
+    }
     throw error;
   }
 }

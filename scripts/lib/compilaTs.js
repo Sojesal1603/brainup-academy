@@ -25,6 +25,11 @@ const projectRoot = path.join(__dirname, '..', '..');
  * no morir en silencio.
  */
 function compilaTs(entrada, outDirName) {
+  // Una o varias entradas. Varias sirven cuando la prueba necesita modules que
+  // comparten estado de módulo (el ámbito de credenciales es un
+  // `AsyncLocalStorage`): en carpetas distintas serían DOS instancias y la
+  // prueba mediría algo que la app no hace.
+  const entradas = Array.isArray(entrada) ? entrada : [entrada];
   // Cada proceso compila en **su propia** carpeta (el sufijo es su PID). Si dos
   // scripts comparten carpeta, uno borra la del otro mientras la está usando y el
   // `require` acaba en un «Cannot find module» que no tiene nada que ver con el
@@ -41,7 +46,7 @@ function compilaTs(entrada, outDirName) {
 
   const tsc = require.resolve('typescript/bin/tsc');
   const args = [
-    path.join('src', 'lib', entrada),
+    ...entradas.map((item) => path.join('src', 'lib', item)),
     '--outDir',
     outDirRel,
     '--module',
@@ -65,7 +70,7 @@ function compilaTs(entrada, outDirName) {
     const salida = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim();
     const detalle = salida.split('\n').slice(0, 20).join('\n');
     throw new Error(
-      `No se ha podido compilar src/lib/${entrada}.ts${detalle ? `:\n${detalle}` : ` (${error.message})`}`
+      `No se ha podido compilar ${entradas.map((item) => `src/lib/${item}.ts`).join(', ')}${detalle ? `:\n${detalle}` : ` (${error.message})`}`
     );
   }
 

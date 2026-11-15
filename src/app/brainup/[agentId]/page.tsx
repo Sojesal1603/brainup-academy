@@ -61,15 +61,11 @@ export default async function TutorPage({
   // Motores que pueden escribir ahora mismo: con ellos se comparan las
   // versiones de un mismo apunte (Gemini, Groq, OpenRouter, local…).
   const engines = runWithAiCredentials(aiCredentials, () => getConfiguredEngines());
-  // Proveedor que toca ahora mismo: Gemini es el primario y Groq el respaldo,
-  // así que el rótulo sale del modelo configurado, no de una suposición.
-  const engineLabel = /groq/i.test(modelLabel)
-    ? 'Groq'
-    : /openrouter/i.test(modelLabel)
-      ? 'OpenRouter'
-      : /ollama|local/i.test(modelLabel)
-        ? 'Local'
-        : 'Gemini';
+  // Proveedor que toca ahora mismo: el PRIMERO de la cadena real de esta
+  // cuenta, no el primero que aparezca en la etiqueta del modelo. La etiqueta
+  // «auto (Gemini + Groq)» contiene «Groq» y la cabecera anunciaba Groq a un
+  // alumno cuya clave era de Gemini: decir la verdad es parte del arreglo.
+  const engineLabel = aiCredentials.length === 0 ? 'Sin IA' : engines[0]?.name ?? 'Sin IA';
 
   // La dirección puede ser el UUID del agente o el nombre de la materia
   // («lengua-castellana-y-literatura-i»). El UUID es frágil: cambia al volver a

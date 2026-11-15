@@ -26,7 +26,7 @@ import {
   LOCAL_MODE_PROVIDER,
   stripLocalModeNotice,
 } from '@/lib/setupFallback';
-import { ensureAiAccess } from '@/lib/ai/access';
+import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import { prismaErrorCode } from '@/lib/databaseDiagnostics';
 import { isTransientDbError } from '@/lib/prismaRetry';
 
@@ -74,8 +74,9 @@ export async function POST(request: Request) {
   const { user: authUser, tenant } = await currentTenant();
   // La entrevista es una pantalla de IA: sin clave propia no se responde en
   // local «por debajo», se pide la clave con 402 y la interfaz enseña el botón.
-  const aiDenied = await ensureAiAccess(authUser.id);
-  if (aiDenied) return aiDenied;
+  const ai = await ensureAiAccess(authUser.id);
+  if (ai.denied) return ai.denied;
+  activateAiCredentials(ai.credentials);
   let body: SetupRequestBody;
   try {
     body = (await request.json()) as SetupRequestBody;

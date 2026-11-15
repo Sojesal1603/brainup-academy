@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { ensureAiAccess } from '@/lib/ai/access';
+import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import { buildEbauPackage } from '@/lib/ebauSimulator';
 import {
   getEbauCommunity,
@@ -49,8 +49,9 @@ export async function POST(request: NextRequest) {
   try {
     // Generar un simulacro es una pantalla de IA: sin clave, 402 antes de tocar
     // el generador local. La corrección posterior sí puede caer a autoevaluación.
-    const aiDenied = await ensureAiAccess(user.id);
-    if (aiDenied) return aiDenied;
+    const ai = await ensureAiAccess(user.id);
+    if (ai.denied) return ai.denied;
+    activateAiCredentials(ai.credentials);
 
     const pkg = await buildEbauPackage(user.id, {
       subjectId,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentTenant } from '@/lib/tenantContext';
-import { ensureAiAccess } from '@/lib/ai/access';
+import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import { hasAiProviderAsync, hasAnyFreeKey, runAiText, TutorError } from '@/lib/aiEngine';
 import {
   buildStudyToolPrompt,
@@ -50,8 +50,9 @@ export async function POST(request: Request) {
   const { user, tenant } = await currentTenant();
   // Primero las credenciales: el sondeo de proveedores ya tiene que ver la
   // clave de ESTE usuario, no una global del proceso.
-  const aiDenied = await ensureAiAccess(user.id);
-  if (aiDenied) return aiDenied;
+  const ai = await ensureAiAccess(user.id);
+  if (ai.denied) return ai.denied;
+  activateAiCredentials(ai.credentials);
 
   if (!(await hasAiProviderAsync())) {
     return NextResponse.json(

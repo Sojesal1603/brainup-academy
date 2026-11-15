@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/auth';
-import { ensureAiAccess } from '@/lib/ai/access';
+import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import { readUpload, readUploadBytes } from '@/lib/docStore';
 import { MAX_INLINE_ATTACHMENT_BYTES, isImageMime } from '@/lib/attachmentLimits';
 import { transcribeHandwriting } from '@/lib/corrector';
@@ -18,8 +18,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   const user = await requireUser();
-  const denied = await ensureAiAccess(user.id);
-  if (denied) return denied;
+  const ai = await ensureAiAccess(user.id);
+  if (ai.denied) return ai.denied;
+  activateAiCredentials(ai.credentials);
 
   const body = (await request.json().catch(() => null)) as {
     uploadId?: unknown;

@@ -178,19 +178,50 @@ async function readOwnKey(userId: string, provider: AiKeyProvider): Promise<stri
  *
  * Se llama una vez por petición y proveedor; no se cachea entre peticiones.
  */
+/**
+ * Las claves propias que tiene el usuario, por proveedor.
+ *
+ * Se leen las cuatro de una vez porque la política necesita saber si el usuario
+ * tiene alguna clave propia, y no solo la del proveedor que se va a usar: quien
+ * tiene la suya no debe completarse con claves de plataforma de OTROS
+ * proveedores (Groq, OpenRouter, NVIDIA), ni siquiera siendo la cuenta de
+ * plataforma. Lo que el alumno pega es lo que se gasta.
+ */
+async function readOwnKeys(userId: string): Promise<Map<AiKeyProvider, string>> {
+  const keys = new Map<AiKeyProvider, string>();
+  for (const provider of AI_KEY_PROVIDERS) {
+    const key = (await readOwnKey(userId, provider))?.trim() ?? '';
+    if (key.length > 0) keys.set(provider, key);
+  }
+  return keys;
+}
+
+/** Credencial de una clave propia. */
+function ownCredential(provider: AiKeyProvider, key: string): AiCredential {
+  return {
+    provider,
+    key,
+    source: 'usuario',
+    label: 'principal',
+    envVar: 'usuario',
+  };
+}
+
 export async function resolveAiCredentials(
   userId: string,
   provider: AiKeyProvider
 ): Promise<AiCredential> {
-  const ownKey = (await readOwnKey(userId, provider))?.trim() ?? '';
-  if (ownKey.length > 0) {
-    return {
-      provider,
-      key: ownKey,
-      source: 'usuario',
-      label: 'principal',
-      envVar: 'usuario',
-    };
+  const own = await readOwnKeys(userId);
+  const ownKey = own.get(provider);
+  if (ownKey) return ownCredential(provider, ownKey);
+
+  if (own.size > 0) {
+    // Tiene claves propias, pero no de este proveedor: no se le completa con la
+    // de plataforma. Se le dice qué falta, en vez de gastar otra cuenta.
+    throw new AiKeyRequiredError(
+      `Tu clave de ${providerLabel(provider)} no está guardada y no se usa la de plataforma cuando tienes claves propias. Añádela en Ajustes si quieres usar este proveedor.`,
+      provider
+    );
   }
 
   if (isPlatformAiUser(userId)) {
@@ -199,6 +230,14 @@ export async function resolveAiCredentials(
   }
 
   throw new AiKeyRequiredError(AI_KEY_REQUIRED_MESSAGE, provider);
+}
+
+/** Nombre del proveedor para los mensajes. */
+export function providerLabel(provider: AiKeyProvider): string {
+  if (provider === 'gemini') return 'Gemini';
+  if (provider === 'groq') return 'Groq';
+  if (provider === 'openrouter') return 'OpenRouter';
+  return 'NVIDIA';
 }
 
 /**
@@ -213,9 +252,7 @@ export async function resolveAllAiCredentials(
   userId: string,
   options: { tolerateVaultErrors?: boolean } = {}
 ): Promise<AiCredential[]> {
-  const credentials: AiCredential[] = [];
-  const platformAllowed = isPlatformAiUser(userId);
-
+  const own: AiCredential[] = [];
   for (const provider of AI_KEY_PROVIDERS) {
     let ownKey = '';
     try {
@@ -228,20 +265,20 @@ export async function resolveAllAiCredentials(
       if (options.tolerateVaultErrors && error instanceof AiKeyStoreError) continue;
       throw error;
     }
-    if (ownKey.length > 0) {
-      credentials.push({
-        provider,
-        key: ownKey,
-        source: 'usuario',
-        label: 'principal',
-        envVar: 'usuario',
-      });
-      continue;
-    }
-    if (platformAllowed) credentials.push(...platformCredentialsFor(provider));
+    if (ownKey.length > 0) own.push(ownCredential(provider, ownKey));
   }
 
-  return credentials;
+  /*
+   * Si el alumno ha pegado alguna clave, sus peticiones van SOLO con las suyas.
+   * Antes se completaba con las de plataforma de los proveedores que no tenía, y
+   * un alumno con clave de Gemini acababa gastando Groq de la plataforma sin
+   * saberlo (y viendo «Groq» en la cabecera). La regla es la de la casa: la
+   * clave propia manda y no se mezcla.
+   */
+  if (own.length > 0) return own;
+
+  if (!isPlatformAiUser(userId)) return [];
+  return AI_KEY_PROVIDERS.flatMap((provider) => platformCredentialsFor(provider));
 }
 
 /**
@@ -262,16 +299,19 @@ export function runWithAiCredentials<T>(
 }
 
 /**
- * Resuelve las credenciales del usuario y las deja activas para el resto de la
- * petición (await incluidos). Lanza `AiKeyRequiredError` si no tiene ninguna.
+ * Deja estas credenciales activas para el resto del contexto actual.
  *
- * Se usa al principio de una ruta de IA; el motor nunca lee el entorno.
+ * TIENE QUE LLAMARSE EN LA MISMA FUNCIÓN QUE VA A USAR EL MOTOR (la ruta),
+ * justo después de resolverlas. No vale llamarlo desde un ayudante:
+ * `AsyncLocalStorage.enterWith` cambia el contexto del recurso asíncrono que
+ * está ejecutando AHORA, y el llamante que espera a un ayudante sigue en el
+ * suyo, sin ámbito. Ese fue el bug del catedrático: la puerta entraba con las
+ * credenciales dentro de su propia función, la ruta se quedaba sin ellas y
+ * `hasAiProviderAsync()` contestaba «no hay ningún motor» aunque la clave
+ * propia fuera válida.
  */
-export async function enterAiCredentialsForRequest(userId: string): Promise<readonly AiCredential[]> {
-  const credentials = await resolveAllAiCredentials(userId);
-  if (credentials.length === 0) throw new AiKeyRequiredError();
+export function activateAiCredentials(credentials: readonly AiCredential[]): void {
   credentialStorage.enterWith(credentials);
-  return credentials;
 }
 
 /** Credenciales activas en este contexto, o `null` si no hay ámbito. */
