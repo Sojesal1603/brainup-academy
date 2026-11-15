@@ -33,11 +33,13 @@ const outDir = compilaTs('ai/userKeyStore', '.tmp-verify-user-ai-key');
 const outAttempts = compilaTs('ai/keyAttempts', '.tmp-verify-user-attempts');
 const outCheck = compilaTs('ai/geminiKeyCheck', '.tmp-verify-user-check');
 const outFormat = compilaTs('ai/keyFormat', '.tmp-verify-user-format');
+const outCreds = compilaTs('ai/credentials', '.tmp-verify-user-creds');
 const store = require(path.join(outDir, 'ai', 'userKeyStore.js'));
 const vault = require(path.join(outDir, 'security', 'vault.js'));
 const attempts = require(path.join(outAttempts, 'ai', 'keyAttempts.js'));
 const check = require(path.join(outCheck, 'geminiKeyCheck.js'));
 const keyFormat = require(path.join(outFormat, 'keyFormat.js'));
+const creds = require(path.join(outCreds, 'ai', 'credentials.js'));
 
 let checks = 0;
 async function ok(name, fn) {
@@ -58,6 +60,27 @@ async function ok(name, fn) {
       assert.match(keyFormat.aiKeyFormatError('AIza clave con espacio'), /sin espacios/i);
       assert.match(keyFormat.aiKeyFormatError('AIza\nclave'), /sin espacios/i);
       assert.match(keyFormat.aiKeyFormatError('AIza/clave'), /puntos/i);
+    });
+
+    await ok('el formato vale para los cuatro proveedores y google es gemini', () => {
+      const groqKey = `gsk_${'a'.repeat(30)}`;
+      const openRouterKey = `sk-or-v1-${'b'.repeat(30)}`;
+      const nvidiaKey = `nvapi-${'c'.repeat(30)}`;
+      for (const [provider, key] of [
+        ['gemini', 'AIzaSy-Example_Key.123'],
+        ['groq', groqKey],
+        ['openrouter', openRouterKey],
+        ['nvidia', nvidiaKey],
+      ]) {
+        assert.equal(keyFormat.providerKeyFormatError(provider, key), null, provider);
+      }
+      assert.match(keyFormat.providerKeyFormatError('groq', 'gsk clave con espacio'), /sin espacios/i);
+      assert.match(keyFormat.providerKeyFormatError('nvidia', 'nvapi'), /demasiado corta/i);
+      assert.equal(keyFormat.normalizeUserKeyProvider('google'), 'gemini');
+      assert.equal(keyFormat.normalizeUserKeyProvider('GOOGLE'), 'gemini');
+      assert.equal(keyFormat.normalizeUserKeyProvider('groq'), 'groq');
+      assert.equal(keyFormat.normalizeUserKeyProvider('openai'), null);
+      assert.equal(keyFormat.normalizeUserKeyProvider(''), null);
     });
 
     await ok('el formulario y el servidor comparten la misma regla de formato', () => {
@@ -280,6 +303,61 @@ async function ok(name, fn) {
       await store.deleteUserAiKey(TEST_ACCOUNT, 'gemini');
       assert.equal(await store.readDecryptedUserKey(TEST_ACCOUNT, 'gemini'), null);
       assert.equal(await store.readUserAiKeySummary(TEST_ACCOUNT, 'gemini'), null);
+    });
+
+    /*
+     * AISLAMIENTO ENTRE PROVEEDORES.
+     *
+     * La cuenta de prueba está (simulada) en `PLATFORM_AI_USER_IDS` y tiene
+     * señuelos de plataforma de los cuatro proveedores. Con UNA clave propia de
+     * Groq, el resolver debe entregar solo esa y no completar Gemini, OpenRouter
+     * ni NVIDIA con las de plataforma: el alumno gasta lo que pega.
+     */
+    await ok('con clave propia no se entregan claves de plataforma de otros proveedores', async () => {
+      const envNames = ['PLATFORM_AI_USER_IDS', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'OPENROUTER_API_KEY', 'NVIDIA_API_KEY'];
+      const before = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+      process.env.PLATFORM_AI_USER_IDS = TEST_ACCOUNT;
+      process.env.GEMINI_API_KEY = 'PLATFORM-DECOY-GEMINI';
+      process.env.GROQ_API_KEY = 'PLATFORM-DECOY-GROQ';
+      process.env.OPENROUTER_API_KEY = 'PLATFORM-DECOY-OPENROUTER';
+      process.env.NVIDIA_API_KEY = 'PLATFORM-DECOY-NVIDIA';
+      const ownGroq = `gsk_propia_${'d'.repeat(30)}`;
+      try {
+        await store.saveUserAiKey({
+          userId: TEST_ACCOUNT,
+          provider: 'groq',
+          key: ownGroq,
+          status: 'valida',
+          lastError: null,
+        });
+
+        const all = await creds.resolveAllAiCredentials(TEST_ACCOUNT);
+        assert.deepEqual(
+          all.map((entry) => `${entry.provider}:${entry.source}`),
+          ['groq:usuario'],
+          `se entregaron credenciales de más: ${all.map((entry) => entry.provider).join(', ')}`
+        );
+        assert.ok(all.every((entry) => !entry.key.startsWith('PLATFORM-DECOY')));
+
+        let caught = null;
+        try {
+          await creds.resolveAiCredentials(TEST_ACCOUNT, 'gemini');
+        } catch (error) {
+          caught = error;
+        }
+        assert.ok(caught, 'Gemini no tiene clave propia y no debe resolver');
+        assert.equal(caught.code, 'ai_key_required');
+        assert.ok(
+          !String(caught.message).includes('PLATFORM-DECOY'),
+          'el mensaje filtra la clave de plataforma'
+        );
+      } finally {
+        await store.deleteUserAiKey(TEST_ACCOUNT, 'groq').catch(() => undefined);
+        for (const name of envNames) {
+          if (before[name] === undefined) delete process.env[name];
+          else process.env[name] = before[name];
+        }
+      }
     });
   } finally {
     await store.deleteUserAiKey(TEST_ACCOUNT, 'gemini').catch(() => undefined);

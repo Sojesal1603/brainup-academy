@@ -36,6 +36,12 @@ export interface LocalTutorInput {
   courseUnit: string | null;
   /** Apuntes del alumno en esta materia (títulos). */
   noteTitles: string[];
+  /**
+   * Proveedores con clave PROPIA del alumno («Gemini», «Groq»…). Cuando hay
+   * alguna, el aviso no habla de «los modelos gratuitos» (que suena a la clave
+   * de plataforma) sino de SU clave, que es la que no ha respondido.
+   */
+  ownKeyProviders?: string[];
 }
 
 /** «1 día» / «3 días». */
@@ -53,8 +59,11 @@ export function buildLocalTutorReply(input: LocalTutorInput): string {
   const first = (input.studentName || 'Estudiante').split(' ')[0];
   const lines: string[] = [];
 
+  const own = (input.ownKeyProviders ?? []).filter((name) => name.trim().length > 0);
   lines.push(
-    '⚠️ **Sin IA ahora mismo**: los modelos gratuitos están saturados o el cupo del día está gastado. Te contesto con lo que el sistema sí sabe de tu curso; en un par de minutos podrás preguntarme lo que quieras.'
+    own.length > 0
+      ? `⚠️ **Sin IA ahora mismo**: no se ha podido usar tu clave de ${own.join(' ni ')} (el proveedor no ha contestado o se ha quedado sin cupo). Te contesto con lo que el sistema sí sabe de tu curso; en un par de minutos podrás preguntarme lo que quieras.`
+      : '⚠️ **Sin IA ahora mismo**: los modelos gratuitos están saturados o el cupo del día está gastado. Te contesto con lo que el sistema sí sabe de tu curso; en un par de minutos podrás preguntarme lo que quieras.'
   );
   lines.push('');
   lines.push(`**Dónde estás en ${input.subjectName}**`);

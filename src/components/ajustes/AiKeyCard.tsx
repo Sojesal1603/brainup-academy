@@ -18,7 +18,14 @@ import {
   type AiKeySummaryView,
   type UserAiKeyStatus,
 } from '@/lib/ai/keyStatus';
-import { aiKeyFormatError } from '@/lib/ai/keyFormat';
+import {
+  USER_KEY_PROVIDERS,
+  USER_KEY_PROVIDER_HINT,
+  USER_KEY_PROVIDER_LABEL,
+  USER_KEY_PROVIDER_SIGNUP,
+  providerKeyFormatError,
+  type UserKeyProvider,
+} from '@/lib/ai/keyFormat';
 
 const STATUS_STYLE: Record<UserAiKeyStatus, string> = {
   valida: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
@@ -35,34 +42,68 @@ function formatDate(iso: string | null): string | null {
 }
 
 export default function AiKeyCard({
-  initialSummary,
+  initialSummaries,
   vaultReady,
   vaultError,
   isPlatformUser,
 }: {
-  initialSummary: AiKeySummaryView | null;
+  initialSummaries: AiKeySummaryView[];
   vaultReady: boolean;
   vaultError: string | null;
   isPlatformUser: boolean;
 }) {
   const router = useRouter();
-  const [summary, setSummary] = useState<AiKeySummaryView | null>(initialSummary);
+  const [summaries, setSummaries] = useState<Record<string, AiKeySummaryView>>(() =>
+    Object.fromEntries(initialSummaries.map((summary) => [summary.provider, summary]))
+  );
+  const [provider, setProvider] = useState<UserKeyProvider>('gemini');
   const [value, setValue] = useState('');
   const [result, setResult] = useState<AiKeyActionResult | null>(null);
   const [pending, startTransition] = useTransition();
   const [deleting, startDelete] = useTransition();
   const [checking, startCheck] = useTransition();
 
+  const summary = summaries[provider] ?? null;
   const status = summary?.status ?? 'sin_comprobar';
   const statusLabel = summary ? AI_KEY_STATUS_LABEL[status] : 'Sin clave';
   const checkedAt = formatDate(summary?.lastCheckedAt ?? null);
   const busy = pending || deleting || checking;
+  const label = USER_KEY_PROVIDER_LABEL[provider];
+
+  const applyResult = (next: AiKeyActionResult) => {
+    setResult(next);
+    if (!next.ok || !next.provider) return;
+    setSummaries((current) => {
+      const copy = { ...current };
+      if (next.last4 && next.status) {
+        copy[next.provider!] = {
+          provider: next.provider!,
+          status: next.status,
+          last4: next.last4,
+          lastCheckedAt: new Date().toISOString(),
+          lastError: next.status === 'valida' ? null : next.message,
+        };
+      } else if (next.status) {
+        const previous = copy[next.provider!];
+        if (previous) {
+          copy[next.provider!] = {
+            ...previous,
+            status: next.status,
+            lastCheckedAt: new Date().toISOString(),
+            lastError: next.status === 'valida' ? null : next.message,
+          };
+        }
+      }
+      return copy;
+    });
+    router.refresh();
+  };
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const rawKey = String(formData.get('key') ?? '').trim();
-    const formatError = aiKeyFormatError(rawKey);
+    const formatError = providerKeyFormatError(provider, rawKey);
     setResult(null);
     if (formatError) {
       setResult({ ok: false, message: formatError });
@@ -70,57 +111,35 @@ export default function AiKeyCard({
     }
     startTransition(async () => {
       const next = await saveMyAiKey(formData);
-      setResult(next);
-      if (next.ok) {
-        setValue('');
-        if (next.status && next.last4) {
-          setSummary({
-            provider: 'gemini',
-            status: next.status,
-            last4: next.last4,
-            lastCheckedAt: new Date().toISOString(),
-            lastError: next.status === 'valida' ? null : next.message,
-          });
-        }
-        router.refresh();
-      }
+      if (next.ok) setValue('');
+      applyResult(next);
     });
   };
 
   const remove = () => {
-    if (!window.confirm('¿Borrar tu clave de IA guardada? Las pantallas de IA volverán a pedirla.')) {
+    if (!window.confirm(`¿Borrar tu clave de ${label}? Las pantallas de IA volverán a pedirla.`)) {
       return;
     }
     setResult(null);
     startDelete(async () => {
-      const next = await deleteMyAiKey();
-      setResult(next);
+      const next = await deleteMyAiKey(provider);
       if (next.ok) {
-        setSummary(null);
+        setSummaries((current) => {
+          const copy = { ...current };
+          delete copy[provider];
+          return copy;
+        });
         setValue('');
-        router.refresh();
       }
+      setResult(next);
+      if (next.ok) router.refresh();
     });
   };
 
   const recheck = () => {
     setResult(null);
     startCheck(async () => {
-      const next = await recheckMyAiKey();
-      setResult(next);
-      if (next.ok && next.status) {
-        setSummary((current) =>
-          current
-            ? {
-                ...current,
-                status: next.status!,
-                lastCheckedAt: new Date().toISOString(),
-                lastError: next.status === 'valida' ? null : next.message,
-              }
-            : current
-        );
-        router.refresh();
-      }
+      applyResult(await recheckMyAiKey(provider));
     });
   };
 
@@ -134,8 +153,8 @@ export default function AiKeyCard({
           <div>
             <h3 className="text-sm font-bold text-slate-100">Mi clave de IA</h3>
             <p className="mt-0.5 max-w-2xl text-xs text-slate-400">
-              Se guarda cifrada y solo se usa en tus peticiones. La clave de plataforma no se gasta
-              por otras cuentas: si no tienes la tuya, las pantallas de IA te la pedirán.
+              Se guarda cifrada y solo se usa en tus peticiones. Puedes tener una clave por
+              proveedor; si tienes la tuya no se gasta la de plataforma.
             </p>
           </div>
         </div>
@@ -154,9 +173,62 @@ export default function AiKeyCard({
         </span>
       </div>
 
-      <p className="rounded-xl border border-slate-700/70 bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
-        Google exige ser mayor de 18 años para crear claves de API de Gemini.
-      </p>
+      {/* Un chip por proveedor: el estado de cada clave, de un vistazo. */}
+      <div className="flex flex-wrap gap-2">
+        {USER_KEY_PROVIDERS.map((id) => {
+          const saved = summaries[id];
+          const selected = id === provider;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setProvider(id);
+                setValue('');
+                setResult(null);
+              }}
+              aria-pressed={selected}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                selected
+                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+                  : 'border-slate-700 bg-white/[0.02] text-slate-400 hover:border-slate-500 hover:text-slate-200'
+              }`}
+            >
+              {USER_KEY_PROVIDER_LABEL[id]}
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  saved?.status === 'valida'
+                    ? 'bg-emerald-400'
+                    : saved
+                      ? 'bg-amber-400'
+                      : 'bg-slate-600'
+                }`}
+                aria-hidden
+              />
+            </button>
+          );
+        })}
+      </div>
+
+      {provider === 'gemini' ? (
+        <p className="rounded-xl border border-slate-700/70 bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+          Google exige ser mayor de 18 años para crear claves de API de Gemini.
+        </p>
+      ) : (
+        <p className="rounded-xl border border-slate-700/70 bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+          La clave se comprueba contra {label} antes de guardarse. Sácala en{' '}
+          <a
+            href={USER_KEY_PROVIDER_SIGNUP[provider]}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-emerald-300 underline decoration-emerald-500/40"
+          >
+            {USER_KEY_PROVIDER_SIGNUP[provider].replace('https://', '')}
+          </a>
+          . Si tienes clave propia de un proveedor, tus peticiones no se completan con la de
+          plataforma de otro.
+        </p>
+      )}
 
       {!vaultReady ? (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
@@ -168,7 +240,7 @@ export default function AiKeyCard({
       {summary ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-800 bg-[#080d18] px-3 py-2 text-[11px] text-slate-400">
           <span className="font-mono text-slate-200">•••• {summary.last4}</span>
-          <span>Google Gemini</span>
+          <span>{label}</span>
           {checkedAt ? <span>Comprobada: {checkedAt}</span> : <span>Sin comprobar todavía</span>}
           <button
             type="button"
@@ -191,8 +263,8 @@ export default function AiKeyCard({
         </div>
       ) : (
         <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-          Ahora mismo no tienes clave propia. Pega una clave gratuita de Google AI Studio para usar
-          los catedráticos, la puesta a punto y el examinador.
+          Ahora mismo no tienes clave propia de {label}. Pega una para usar los catedráticos, la
+          puesta a punto y el examinador con este proveedor.
         </p>
       )}
 
@@ -201,9 +273,12 @@ export default function AiKeyCard({
       ) : null}
 
       <form onSubmit={submit} className="space-y-2">
-        <input type="hidden" name="provider" value="gemini" />
-        <label htmlFor="ai-key" className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          Clave de Google Gemini
+        <input type="hidden" name="provider" value={provider} />
+        <label
+          htmlFor="ai-key"
+          className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+        >
+          Clave de {label}
         </label>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -216,7 +291,7 @@ export default function AiKeyCard({
             spellCheck={false}
             pattern="[A-Za-z0-9._-]+"
             title="Letras, números, puntos, guiones y guiones bajos. Sin espacios."
-            placeholder="AIza… o AQ.… (se guarda cifrada)"
+            placeholder={`${USER_KEY_PROVIDER_HINT[provider]} (se guarda cifrada)`}
             className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-[#080d18] px-3 py-2 font-mono text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-emerald-500/60"
             disabled={!vaultReady || busy}
           />
@@ -230,8 +305,8 @@ export default function AiKeyCard({
           </button>
         </div>
         <p className="text-[10px] text-slate-500">
-          Se comprueba contra Google con la cabecera <span className="font-mono">x-goog-api-key</span>.
-          Nunca se muestra entera: solo los últimos cuatro caracteres.
+          Se comprueba contra {label} antes de guardar. Nunca se muestra entera: solo los últimos
+          cuatro caracteres.
         </p>
       </form>
 
@@ -250,8 +325,8 @@ export default function AiKeyCard({
 
       {isPlatformUser ? (
         <p className="text-[10px] text-slate-500">
-          Esta cuenta está en la lista de plataforma: si borras tu clave propia, seguirá usando la
-          clave de plataforma. El resto de cuentas no tiene ese respaldo.
+          Esta cuenta está en la lista de plataforma: si no tienes ninguna clave propia, usa la de
+          plataforma. En cuanto guardes una, tus peticiones van solo con la tuya.
         </p>
       ) : null}
     </div>

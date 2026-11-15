@@ -8,6 +8,8 @@ import { PanelSkeleton } from '@/components/ui/Skeletons';
 import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
 import { isPlatformAiUser } from '@/lib/ai/credentials';
 import { readUserAiKeySummary } from '@/lib/ai/userKeyStore';
+import { USER_KEY_PROVIDERS } from '@/lib/ai/keyFormat';
+import type { AiKeySummaryView } from '@/lib/ai/keyStatus';
 import { vaultStatus } from '@/lib/security/vault';
 
 // Ajustes es un panel de paneles: cada uno baja cuando se va a ver, no todos
@@ -56,7 +58,13 @@ export default async function SettingsPage() {
   // Clave propia: el estado se lee sin descifrarla (solo estado y últimos 4).
   // Si el vault no está configurado, `vaultStatus` lo dice y la tarjeta
   // deshabilita el formulario; la página sigue funcionando.
-  const aiKeySummary = await readUserAiKeySummary(authUser.id, 'gemini');
+  // Las cuatro claves posibles, no solo Gemini: la tarjeta las gestiona todas y
+  // necesita el estado de cada una para pintar los chips sin otra ida y vuelta.
+  const aiKeySummaries = (
+    await Promise.all(
+      USER_KEY_PROVIDERS.map((provider) => readUserAiKeySummary(authUser.id, provider))
+    )
+  ).filter((summary): summary is AiKeySummaryView => summary !== null);
   const vault = vaultStatus();
   const platformAiUser = isPlatformAiUser(authUser.id);
 
@@ -135,7 +143,7 @@ export default async function SettingsPage() {
 
       {/* Clave propia: cada cuenta usa la suya, guardada cifrada */}
       <AiKeyCard
-        initialSummary={aiKeySummary}
+        initialSummaries={aiKeySummaries}
         vaultReady={vault.ready}
         vaultError={vault.reason}
         isPlatformUser={platformAiUser}

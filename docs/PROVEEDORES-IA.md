@@ -6,14 +6,15 @@ no lo que permiten los contratos de cada proveedor.
 
 ## Regla de oro
 
-1. Si el alumno tiene **su propia clave**, todas sus peticiones van con **esa**
-   clave y a **ese** proveedor. No se completa la cadena con claves de
-   plataforma: el alumno con solo Gemini no cae a Groq, NVIDIA ni OpenRouter
-   aunque Gemini falle. Lo único que recibe es un mensaje claro de que la IA no
-   está disponible.
-2. Las claves de plataforma solo se usan para los UUID de
-   `PLATFORM_AI_USER_IDS` (el autor de la app). Ese es el único usuario cuyas
-   peticiones pueden viajar a varios proveedores a la vez.
+1. Si el alumno tiene **alguna clave propia**, todas sus peticiones van con
+   **esas** claves y a **esos** proveedores. No se completa la cadena con claves
+   de plataforma: el alumno con solo Gemini no cae a Groq, NVIDIA ni OpenRouter
+   aunque Gemini falle, y el que tiene Groq no usa el Gemini de la plataforma.
+   Lo único que recibe es un mensaje claro de que ese proveedor no está
+   disponible (o el respaldo local del catedrático).
+2. Las claves de plataforma solo se usan cuando la cuenta **no tiene ninguna
+   clave propia** y su UUID está en `PLATFORM_AI_USER_IDS` (el autor de la app).
+   En ese caso la cadena puede viajar a varios proveedores a la vez.
 3. Sin clave propia y sin estar en la lista, la petición muere en un 402
    `ai_key_required` antes de construir ningún cliente.
 4. **Los archivos no se reenvían como plan B.** Si una petición lleva una
@@ -24,11 +25,18 @@ no lo que permiten los contratos de cada proveedor.
 
 | Proveedor | Texto del chat | Texto extraído de documentos | Imágenes | PDF binario | Cuándo |
 | --- | --- | --- | --- | --- | --- |
-| Google Gemini | Sí | Sí | Sí | Sí (`document`) | Clave propia del alumno; clave de plataforma solo con UUID autorizado |
-| Groq | Sí | Sí (va dentro del prompt) | No | No | Solo clave de plataforma (usuario autorizado) |
-| OpenRouter | Sí | Sí (va dentro del prompt) | Según el modelo `:free` elegido | No | Solo clave de plataforma (usuario autorizado) |
-| NVIDIA | Sí | Sí (va dentro del prompt) | No | No | Solo clave de plataforma (usuario autorizado) |
+| Google Gemini | Sí | Sí | Sí | Sí (`document`) | Clave propia del alumno, o clave de plataforma si la cuenta no tiene ninguna |
+| Groq | Sí | Sí (va dentro del prompt) | No | No | Clave propia del alumno, o clave de plataforma si la cuenta no tiene ninguna |
+| OpenRouter | Sí | Sí (va dentro del prompt) | Según el modelo `:free` elegido | No | Clave propia del alumno, o clave de plataforma si la cuenta no tiene ninguna |
+| NVIDIA | Sí | Sí (va dentro del prompt) | No | No | Clave propia del alumno, o clave de plataforma si la cuenta no tiene ninguna |
 | Ollama local | Sí | Sí | Solo modelos con visión | No | Solo si el alumno levanta el modelo en su equipo; no sale de su red |
+
+Cada alumno puede guardar, comprobar, cambiar y borrar su clave en **Ajustes →
+Mi clave de IA** para los cuatro proveedores. Se guarda cifrada (AES-256-GCM con
+AAD `userId:provider`) y se comprueba contra el endpoint real del proveedor
+antes de darla por válida: Gemini y Groq generan una respuesta mínima con el
+primer modelo de la cadena; OpenRouter valida con `/api/v1/key` y NVIDIA con su
+catálogo `/v1/models` (su cadena de chat puede estar vacía).
 
 Notas:
 
@@ -36,11 +44,15 @@ Notas:
   capa de texto, Markdown, CSV, LaTeX y código se leen en el servidor y su texto
   entra en el prompt. Por eso puede llegar a **cualquier** proveedor, no solo a
   los que tienen visión.
-- La tarjeta «Mi clave de IA» de Ajustes solo acepta claves de **Google AI
-  Studio**. Un alumno no puede guardar una clave de Groq, OpenRouter o NVIDIA:
-  esos proveedores son, a día de hoy, exclusivos del usuario de plataforma.
+- La tarjeta «Mi clave de IA» de Ajustes acepta claves de **Google AI Studio
+  (Gemini), Groq, OpenRouter y NVIDIA**. Un alumno puede tener las cuatro a la
+  vez; el motor elige por proveedor, en el orden Gemini → Groq → OpenRouter →
+  NVIDIA, y solo prueba proveedores para los que tiene clave.
 - Gemini se llama con `store: false`: la conversación no se guarda como estado
   en el proveedor.
+- El enrutado es por capacidad: una imagen o un PDF que hay que *mirar* solo
+  viaja a modelos con visión (hoy, Gemini). Si no hay ninguno disponible, se
+  avisa y no se manda el archivo a un modelo de texto.
 - Las claves nunca aparecen en logs, mensajes de error ni en el estado que pinta
   la interfaz; los errores del proveedor se sanean antes de mostrarse.
 

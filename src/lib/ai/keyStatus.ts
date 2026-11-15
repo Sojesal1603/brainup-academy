@@ -21,6 +21,8 @@ export interface AiKeyActionResult {
   ok: boolean;
   message: string;
   status?: UserAiKeyStatus;
+  /** Proveedor al que se refiere el resultado (la tarjeta tiene cuatro). */
+  provider?: string;
   last4?: string;
   /** Segundos de espera si se ha superado el límite de intentos. */
   retryAfterSeconds?: number;

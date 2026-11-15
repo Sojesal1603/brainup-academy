@@ -16,6 +16,7 @@ import {
 } from '@/lib/tutor';
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
 import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
+import { providerLabel as providerDisplayName } from '@/lib/ai/credentials';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
 import { isLocalModeReply } from '@/lib/setupFallback';
 import {
@@ -704,6 +705,12 @@ export async function POST(request: Request) {
         pendingErrors,
         courseUnit: courseUnit?.title ?? null,
         noteTitles: sharedNotes.map((note) => note.title),
+        // Si el alumno tiene clave propia, el aviso nombra SU proveedor: antes
+        // decía «los modelos gratuitos están saturados» aunque la clave fuera
+        // suya, que es justo lo que confundía.
+        ownKeyProviders: ai.credentials
+          .filter((credential) => credential.source === 'usuario')
+          .map((credential) => providerDisplayName(credential.provider)),
       });
       reply = {
         text:
