@@ -70,7 +70,7 @@ export default function DashboardPage() {
 
       {/* Grid Principal: en tablet apaisada, dos columnas; en escritorio ancho,
           bloques de hoy (2 cols) + radar lateral (1 col). */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3 xl:gap-8">
+      <div className="grid grid-cols-1 gap-6 landscape:grid-cols-2 md:grid-cols-2 xl:grid-cols-3 xl:gap-8">
         <div className="min-w-0 md:col-span-1 xl:col-span-2">
           <Suspense fallback={<PanelSkeleton lines={3} />}>
             <DashboardToday />

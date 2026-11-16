@@ -149,7 +149,7 @@ export default function RetentionPanel({ analytics, windowDays }: RetentionPanel
             })()}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Ritmo: repasos de las últimas dos semanas */}
             <div className="p-6 rounded-2xl glass-card space-y-4">
               <div className="flex items-center gap-2">

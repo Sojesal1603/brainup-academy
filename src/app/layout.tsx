@@ -75,7 +75,10 @@ export default async function RootLayout({
         <Sidebar isEso={course.isEso} courseLabel={course.label} />
         <div className="flex-1 flex flex-col min-w-0 min-h-screen">
           <Header />
-          <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-[1500px] mx-auto w-full min-w-0 pb-24 md:pb-8">
+          {/* En tablet (md) el contenido gana ancho útil: el padding grande
+              espera a xl, así una pantalla apaisada de 1024 px no pierde
+              columnas por los márgenes. */}
+          <main className="flex-1 p-4 md:p-6 xl:p-8 max-w-[1600px] mx-auto w-full min-w-0 pb-24 md:pb-8">
             {children}
           </main>
         </div>

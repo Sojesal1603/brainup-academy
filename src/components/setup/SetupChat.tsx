@@ -218,7 +218,7 @@ export default function SetupChat({
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_320px]">
       {/* Chat */}
       <section className="flex flex-col rounded-2xl border border-white/10 bg-[#0c1322]">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3">

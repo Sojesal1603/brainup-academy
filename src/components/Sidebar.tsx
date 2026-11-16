@@ -119,7 +119,10 @@ export default function Sidebar({
   return (
     <>
       {/* Barra lateral de escritorio: cristal translúcido sobre el fondo espacial. */}
-      <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col justify-between border-r border-white/[0.08] bg-[#0a0a0c]/70 p-3 backdrop-blur-xl md:flex md:p-4 lg:w-64">
+      {/* A partir de 768 px (tablet en vertical, tablet apaisada y escritorio)
+          se muestra la navegación completa con etiquetas, no el rail de iconos.
+          En móvil queda la barra inferior y el cajón «Más». */}
+      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col justify-between border-r border-white/[0.08] bg-[#0a0a0c]/70 p-3 backdrop-blur-xl md:flex md:p-4 lg:w-64">
         <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Marca: logo destacado con aura de luz detrás (azul → púrpura → verde). */}
           <Link

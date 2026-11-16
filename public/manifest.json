@@ -1,14 +1,14 @@
 {
   "name": "BrainUp Academy",
   "short_name": "BrainUp",
-  "description": "Academia privada de rendimiento académico adaptada a Bachillerato y PAU",
+  "description": "Academia privada de rendimiento académico adaptada a ESO, Bachillerato y PAU",
   "id": "brainup-academy-app",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0a0a0c",
   "theme_color": "#0a0a0c",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "icons": [
     {
       "src": "/icon.png",
