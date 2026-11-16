@@ -22,6 +22,7 @@ import {
   runWithAiCredentials,
 } from './ai/credentials';
 import { isTemarioSource, normalizeTopicTitle, parseTemarioText, TemarioSource } from './temarioImport';
+import { buildSubjectTutorPrompt, resolveCourse } from './courseCatalog';
 
 /** Todo lo que depende del temario se refresca con cada cambio de estado. */
 function revalidateTemario() {
@@ -768,25 +769,31 @@ export async function createCustomSubject(data: {
   isPhaseGeneral: boolean;
   pauWeight: number;
 }) {
-  const { tenant: prisma } = await currentTenant();
+  const { tenant: prisma, userId } = await currentTenant();
+  const profile = await prisma.userProfile.findUnique({
+    where: { id: userId },
+    select: { modality: true },
+  });
+  const course = resolveCourse(profile?.modality);
   const subject = await prisma.subject.create({
     data: {
       name: data.name,
       color: data.color || '#3b82f6',
       isPhaseGeneral: data.isPhaseGeneral,
-      pauWeight: data.pauWeight || 0.2,
+      // En ESO no hay ponderación PAU, aunque el formulario mande otra cosa.
+      pauWeight: course.stage === 'ESO' ? 0 : data.pauWeight || 0.2,
       currentGrade: 7.5,
       targetGrade: 9.5,
     },
   });
 
-  // Crear agente catedrático asociado
+  // Crear agente catedrático asociado, con el nivel del curso real.
   await prisma.aiAgent.create({
     data: {
       subjectId: subject.id,
       name: `Catedrático de ${data.name}`,
-      specialty: `Dominio curricular y preparación estratégica de ${data.name}`,
-      systemPrompt: `Eres el Catedrático especializado en ${data.name} para 1º de Bachillerato. Explicas con rigor, preguntas socráticas y enfoque de preparación pre-PAU.`,
+      specialty: `Dominio curricular de ${data.name} en ${course.label}`,
+      systemPrompt: buildSubjectTutorPrompt(data.name, course),
     },
   });
 

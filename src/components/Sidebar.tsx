@@ -62,7 +62,13 @@ const navItems: Array<{
 /** El orden en que se pintan los bloques del menú. */
 const GROUP_ORDER: NavGroup[] = ['Hoy', 'Estudio', 'Inteligencia', 'Sistema'];
 
-export default function Sidebar() {
+export default function Sidebar({
+  isEso = false,
+  courseLabel = 'Bachillerato',
+}: {
+  isEso?: boolean;
+  courseLabel?: string;
+}) {
   const pathname = usePathname();
   /** El cajón «Más» del móvil: aquí viven las secciones que no caben abajo. */
   const [open, setOpen] = useState(false);
@@ -70,6 +76,12 @@ export default function Sidebar() {
   /** Marca la sección activa también en sus subpáginas (/brainup/lengua…). */
   const isCurrent = (href: string) =>
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
+
+  // PAU no existe en ESO: el examinador desaparece del menú, no se deja una
+  // puerta que lleve a un simulacro sobre 14 sin sentido para el curso.
+  const visibleNavItems = isEso
+    ? navItems.filter((item) => item.href !== '/examinador')
+    : navItems;
 
   // Al cambiar de página el cajón se cierra solo.
   useEffect(() => {
@@ -107,13 +119,13 @@ export default function Sidebar() {
   return (
     <>
       {/* Barra lateral de escritorio: cristal translúcido sobre el fondo espacial. */}
-      <aside className="sticky top-0 hidden h-dvh w-20 shrink-0 flex-col justify-between border-r border-white/[0.08] bg-[#0a0a0c]/70 p-3 backdrop-blur-xl md:flex xl:w-64 xl:p-4">
+      <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col justify-between border-r border-white/[0.08] bg-[#0a0a0c]/70 p-3 backdrop-blur-xl md:flex md:p-4 lg:w-64">
         <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Marca: logo destacado con aura de luz detrás (azul → púrpura → verde). */}
           <Link
             href="/"
             aria-label="BrainUp Academy — ir al Cuartel"
-            className="group relative mb-6 flex items-center justify-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-2 py-3 transition-colors duration-300 hover:border-white/15 xl:justify-start xl:px-2.5"
+            className="group relative mb-6 flex items-center justify-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-2 py-3 transition-colors duration-300 hover:border-white/15 md:justify-start md:px-2.5"
           >
             <span
               aria-hidden="true"
@@ -136,12 +148,12 @@ export default function Sidebar() {
                 className="relative h-9 w-9 rounded-lg transition-transform duration-300 group-hover:scale-105"
               />
             </span>
-            <div className="hidden min-w-0 xl:block">
+            <div className="hidden min-w-0 md:block">
               <h1 className="text-sm font-bold uppercase tracking-wider text-slate-100 drop-shadow-[0_0_10px_rgba(255,255,255,0.15)]">
                 BrainUp Academy
               </h1>
               <p className="font-mono text-[11px] tracking-tight text-emerald-400">
-                Bachillerato &amp; PAU
+                {isEso ? `${courseLabel} · LOMLOE` : 'Bachillerato & PAU'}
               </p>
             </div>
           </Link>
@@ -153,13 +165,13 @@ export default function Sidebar() {
                 key={group}
                 className={clsx(
                   'space-y-1',
-                  group !== 'Hoy' && 'md:border-t md:border-white/[0.06] md:pt-3 xl:border-0 xl:pt-0'
+                  group !== 'Hoy' && 'md:border-t md:border-white/[0.06] md:pt-3 lg:border-0 lg:pt-0'
                 )}
               >
-                <p className="hidden px-3 pb-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500 xl:block">
+                <p className="hidden px-3 pb-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500 md:block">
                   {group}
                 </p>
-                {navItems
+                {visibleNavItems
                   .filter((item) => item.group === group)
                   .map((item) => {
                     const Icon = item.icon;
@@ -172,7 +184,7 @@ export default function Sidebar() {
                         title={item.name}
                         aria-label={item.name}
                         className={clsx(
-                          'group relative flex items-center justify-center gap-3 rounded-lg border px-2 py-2.5 text-xs font-medium transition-all duration-200 hover:translate-x-0.5 xl:justify-start xl:px-3',
+                          'group relative flex items-center justify-center gap-3 rounded-lg border px-2 py-2.5 text-xs font-medium transition-all duration-200 hover:translate-x-0.5 md:justify-start md:px-3',
                           isActive
                             ? 'border-emerald-400/30 bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-transparent text-emerald-200 shadow-[0_0_18px_rgba(16,185,129,0.16)]'
                             : 'border-transparent text-slate-400 hover:border-white/10 hover:bg-white/[0.035] hover:text-slate-200',
@@ -194,9 +206,9 @@ export default function Sidebar() {
                             item.highlight && !isActive && 'text-emerald-400'
                           )}
                         />
-                        <span className="hidden xl:inline">{item.name}</span>
+                        <span className="hidden md:inline">{item.name}</span>
                         {item.highlight && (
-                          <span className="ml-auto hidden rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300 xl:inline-flex">
+                          <span className="ml-auto hidden rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300 md:inline-flex">
                             LIVE
                           </span>
                         )}
@@ -209,7 +221,7 @@ export default function Sidebar() {
         </div>
 
         {/* Estado del sistema, en la misma tarjeta de cristal que el resto. */}
-        <div className="glass-card hidden p-3 text-[11px] text-slate-400 xl:block">
+        <div className="glass-card hidden p-3 text-[11px] text-slate-400 lg:block">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="font-mono text-[9px] font-semibold uppercase tracking-widest text-slate-500">
               Sistema Local
@@ -223,16 +235,6 @@ export default function Sidebar() {
           <p className="mt-0.5 text-[10px] text-slate-500">Datos persistidos 24/7</p>
         </div>
 
-        {/* En el rail compacto, el estado se queda en un punto con tooltip. */}
-        <div
-          className="mt-2 hidden items-center justify-center py-2 md:flex xl:hidden"
-          title="Sistema local conectado · PostgreSQL Cloud"
-        >
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
-          </span>
-        </div>
       </aside>
 
       {/* Barra inferior del móvil: cuatro destinos diarios y «Más» */}
@@ -241,7 +243,7 @@ export default function Sidebar() {
         className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-white/10 bg-[#0a0a0c]/85 px-2 pt-2 backdrop-blur-xl md:hidden"
         style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}
       >
-        {navItems
+        {visibleNavItems
           .filter((item) => item.mobile)
           .map((item) => {
             const Icon = item.icon;
@@ -273,7 +275,7 @@ export default function Sidebar() {
           aria-controls="menu-mas"
           className={clsx(
             'flex flex-1 flex-col items-center gap-1 rounded-lg p-2 text-[10px]',
-            open || navItems.some((i) => !i.mobile && isCurrent(i.href))
+            open || visibleNavItems.some((i) => !i.mobile && isCurrent(i.href))
               ? 'font-semibold text-emerald-400'
               : 'text-slate-400'
           )}
@@ -316,7 +318,7 @@ export default function Sidebar() {
             </div>
 
             {GROUP_ORDER.map((group) => {
-              const items = navItems.filter((item) => !item.mobile && item.group === group);
+              const items = visibleNavItems.filter((item) => !item.mobile && item.group === group);
               if (items.length === 0) return null;
               return (
                 <div key={group} className="mb-3">

@@ -11,6 +11,8 @@ import { readUserAiKeySummary } from '@/lib/ai/userKeyStore';
 import { USER_KEY_PROVIDERS } from '@/lib/ai/keyFormat';
 import type { AiKeySummaryView } from '@/lib/ai/keyStatus';
 import { vaultStatus } from '@/lib/security/vault';
+import { COURSE_OPTIONS, resolveCourse } from '@/lib/courseCatalog';
+import { setStudentCourse } from './courseActions';
 
 // Ajustes es un panel de paneles: cada uno baja cuando se va a ver, no todos
 // de golpe al abrir la sección.
@@ -48,6 +50,9 @@ export default async function SettingsPage() {
   // Memoizado por petición: el Header del layout ya ha pedido este perfil.
   const { user: authUser, tenant: prisma } = await currentTenant();
   const user = await ensureUserProfile(authUser.id);
+  const course = resolveCourse(user.modality);
+  const isEso = course.stage === 'ESO';
+  const knownCourseIds = new Set(COURSE_OPTIONS.map((option) => option.id));
   // Solo hay sesión que cerrar si la puerta está puesta en el entorno.
   const authOn = hasSupabaseAuthConfig();
 
@@ -298,12 +303,14 @@ export default async function SettingsPage() {
 
           <div className="p-3 rounded-xl bg-[#080d18] border border-slate-800 font-mono">
             <p className="text-[10px] text-slate-500 uppercase font-semibold">
-              Objetivo PAU
+              {isEso ? 'Currículo' : 'Objetivo PAU'}
             </p>
             <p className="text-sm font-bold text-emerald-400 mt-1">
-              {user?.targetGradePau.toFixed(2)} / 14.00
+              {isEso ? course.curriculum : `${user?.targetGradePau.toFixed(2)} / 14.00`}
             </p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Meta que persigues (no una medición)</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {isEso ? 'Nivel pedagógico de los Catedráticos IA' : 'Meta que persigues (no una medición)'}
+            </p>
           </div>
 
           <div className="p-3 rounded-xl bg-[#080d18] border border-slate-800 font-mono">
@@ -318,6 +325,40 @@ export default async function SettingsPage() {
             </p>
           </div>
         </div>
+
+        {/* Curso real: al elegir 1º ESO se añaden sus materias base. */}
+        <form
+          action={setStudentCourse}
+          className="flex flex-col gap-3 border-t border-white/5 pt-4 sm:flex-row sm:items-end"
+        >
+          <label className="flex-1 text-xs text-slate-400">
+            Curso del alumno
+            <select
+              name="course"
+              defaultValue={course.id}
+              className="mt-1 w-full rounded-xl border border-slate-800 bg-[#080d18] px-3 py-2 text-sm text-slate-100 outline-none transition-colors focus:border-emerald-500/50"
+            >
+              {COURSE_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                  {option.id !== option.label ? ` · ${option.id}` : ''}
+                </option>
+              ))}
+              {!knownCourseIds.has(course.id) ? <option value={course.id}>{course.id}</option> : null}
+            </select>
+          </label>
+          <button
+            type="submit"
+            className="shrink-0 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+          >
+            Guardar curso
+          </button>
+        </form>
+        <p className="text-[11px] leading-relaxed text-slate-500">
+          En 1º ESO se crean las nueve materias curriculares base si todavía no existen. Cambiar de curso
+          no borra temario, exámenes ni horas: solo ajusta el nivel de los Catedráticos IA y los elementos
+          de PAU que tienen sentido.
+        </p>
       </div>
     </div>
   );

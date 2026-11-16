@@ -5,6 +5,7 @@ import { ensureUserProfile, getCachedProfileSummary } from '@/lib/userProfile';
 import { getOptionalUser } from '@/lib/auth';
 import { safeDb } from '@/lib/dbTimeout';
 import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
+import { resolveCourse } from '@/lib/courseCatalog';
 import PwaRegister from './PwaRegister';
 import AppReadySignal from './AppReadySignal';
 
@@ -86,6 +87,8 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
   const streak = user?.streakCurrent ?? 0;
   const targetGrade = user?.targetGradePau ?? 13.5;
   const mode = user?.studyMode ?? 'athlete';
+  const course = resolveCourse(user?.modality);
+  const isEso = course.stage === 'ESO';
 
   return (
     <div className="flex items-center justify-between gap-2">
@@ -100,11 +103,11 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
           <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
             {user?.name ?? 'Estudiante'}
             <span className="hidden text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 font-mono sm:inline">
-              {user?.modality?.includes('1º') ? '1º Bachillerato' : 'Bachillerato'}
+              {course.label}
             </span>
           </h2>
           <p className="text-[11px] text-slate-400 hidden sm:block">
-            {user?.modality ?? 'Ciencias y Tecnología'}
+            {isEso ? course.curriculum : user?.modality ?? course.label}
           </p>
         </div>
       </div>
@@ -117,10 +120,10 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
           <span>{streak} días</span>
         </div>
 
-        {/* Nota Objetivo PAU */}
+        {/* Nota objetivo PAU: en ESO no aplica, se cambia por el curso real. */}
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono">
           <Target className="w-4 h-4 text-blue-400" />
-          <span>PAU: {targetGrade.toFixed(2)}/14</span>
+          <span>{isEso ? `${course.label} · LOMLOE` : `PAU: ${targetGrade.toFixed(2)}/14`}</span>
         </div>
 
         {/* Modo de Estudio */}

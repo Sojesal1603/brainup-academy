@@ -16,6 +16,7 @@
 
 /** Título de la conversación de la puesta a punto (una sola, reutilizada). */
 import { buildSystemKnowledgeForAi } from './systemKnowledge';
+import { resolveCourse } from './courseCatalog';
 
 export const SETUP_CONVERSATION_TITLE = 'Puesta a punto';
 
@@ -902,9 +903,15 @@ function formatSnapshot(snapshot: SetupSnapshot, checklist: SetupChecklist): str
   const lines: string[] = [];
 
   lines.push(`Hoy es ${snapshot.today}.`);
-  lines.push(
-    `Alumno: ${snapshot.studentName}, ${snapshot.modality}. Nota PAU objetivo: ${snapshot.targetPau}/14.`
-  );
+  const course = resolveCourse(snapshot.modality);
+  lines.push(`Alumno: ${snapshot.studentName}. Curso real: ${course.label} (${course.curriculum}).`);
+  if (course.stage === 'ESO') {
+    lines.push(
+      `Está en ${course.label}: no hay PAU ni nota objetivo sobre 14. Ajusta el temario, el nivel y los exámenes al currículo ${course.curriculum}.`
+    );
+  } else {
+    lines.push(`Nota PAU objetivo: ${snapshot.targetPau}/14.`);
+  }
   lines.push(
     snapshot.weeklyHoursDeclared
       ? `Horas de estudio disponibles: ${snapshot.weeklyHoursCap} h/semana (declaradas por él). Ritmo: ${snapshot.studyMode === 'athlete' ? 'Modo Atleta' : 'Zona de Confort'}.`
@@ -1020,7 +1027,7 @@ export function buildSetupSystemPrompt(
     '2. EL ORDEN ES: (a) horas reales de estudio, (b) HORARIO COMPLETO de clases, (c) TEMARIO COMPLETO materia por materia, (d) fechas de examen, (e) cierre. No te saltes ningún paso ni cambies el orden salvo que él lo pida: sin horario, el plan no sabe cuánto tiempo libre hay; sin temario completo, el plan se queda corto.'
   );
   lines.push(
-    '3. EL HORARIO ES EL DE VERDAD, CON TODAS LAS MATERIAS. Pregunta por días: «¿qué días tienes Matemáticas y a qué hora?». Una [[clase:…]] por cada clase (lunes, miércoles y viernes de Matemáticas son tres etiquetas). Incluye SIEMPRE las materias que no se estudian para la PAU (Religión, Educación Física, Tutoría, Música…): están en su horario y sus horas no están libres, así que márcalas con [[solo-horario:Materia]]. Cuando hayáis repasado los CINCO días, emite [[horario-completo]]. Si el profesor cambia una clase de sitio, [[borrar-clase:…]] y la nueva [[clase:…]].'
+    '3. EL HORARIO ES EL DE VERDAD, CON TODAS LAS MATERIAS. Pregunta por días: «¿qué días tienes Matemáticas y a qué hora?». Una [[clase:…]] por cada clase (lunes, miércoles y viernes de Matemáticas son tres etiquetas). Incluye SIEMPRE las materias que no se estudian para la PAU o para las pruebas del curso (Religión, Educación Física, Tutoría, Música…): están en su horario y sus horas no están libres, así que márcalas con [[solo-horario:Materia]]. Cuando hayáis repasado los CINCO días, emite [[horario-completo]]. Si el profesor cambia una clase de sitio, [[borrar-clase:…]] y la nueva [[clase:…]].'
   );
   lines.push(
     '4. EL TEMARIO SE PIDE ENTERO, no una muestra. Antes de dictarlo, pregúntale CUÁNTAS UNIDADES tiene el temario («¿cuántas unidades entran en el curso?», «¿hasta qué tema llega el examen?»). Anota todas las que te diga y COMPARA el número: si te ha dictado 5 y él dijo 12, dile exactamente cuántas faltan y pídelas. Cuando estén todas, emite [[temario-completo:Matemáticas I]]. Si te dice que no sabe cuántas son, anota las que haya y NO cierres el temario: se completa otro día. Si te da prisa, una materia hoy y otra mañana, pero no des ninguna por completa sin confirmarlo.'

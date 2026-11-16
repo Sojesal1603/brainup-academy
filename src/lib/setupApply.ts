@@ -16,6 +16,7 @@ import {
 import { consumePendingReplace, hasPendingReplace } from './setupReplaceIntent';
 import { auditSetup } from './setupAudit';
 import { prismaErrorCode } from './databaseDiagnostics';
+import { buildSubjectTutorPrompt, resolveCourse } from './courseCatalog';
 
 /** Opciones de aplicación de un turno. */
 export interface SetupApplyOptions {
@@ -224,6 +225,11 @@ export async function applySetupActions(
   if (willChange && !willUndo) await captureUndoSnapshot(userId);
 
   let subjects: SubjectRow[] = await prisma.subject.findMany({ orderBy: [{ order: 'asc' }] });
+  const profile = await prisma.userProfile.findUnique({
+    where: { id: userId },
+    select: { modality: true },
+  });
+  const course = resolveCourse(profile?.modality);
 
   let focus: SubjectRow | null = null;
   let source: SetupUnitSource = 'entrevista';
@@ -309,8 +315,8 @@ export async function applySetupActions(
       data: {
         subjectId: created.id,
         name: `Catedrático de ${name}`,
-        specialty: `Dominio curricular y preparación estratégica de ${name}`,
-        systemPrompt: `Eres el Catedrático especializado en ${name} para 1º de Bachillerato. Explicas con rigor, preguntas socráticas y enfoque de preparación pre-PAU.`,
+        specialty: `Dominio curricular de ${name} en ${course.label}`,
+        systemPrompt: buildSubjectTutorPrompt(name, course),
       },
     });
     subjects = [...subjects, created];

@@ -4,6 +4,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import SplashScreen from '@/components/SplashScreen';
 import AppErrorReporter from '@/components/AppErrorReporter';
+import { getViewerCourse } from '@/lib/viewerCourse';
 
 // La app entera depende de PostgreSQL en tiempo de petición. Sin esto, Next
 // intenta prerenderizar `/_not-found` durante el build, monta el `Header` y
@@ -51,11 +52,15 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // La navegación necesita saber si el curso es ESO para ocultar lo de PAU.
+  // La lectura es tolerante a fallos: sin perfil se pinta la navegación normal.
+  const course = await getViewerCourse();
+
   return (
     <html lang="es" className="dark">
       <body className="bg-[#0a0a0c] text-slate-100 min-h-screen flex antialiased selection:bg-emerald-500 selection:text-slate-950">
@@ -67,7 +72,7 @@ export default function RootLayout({
         </noscript>
         {/* Escucha los errores que se escapan de React y los apunta en el taller. */}
         <AppErrorReporter />
-        <Sidebar />
+        <Sidebar isEso={course.isEso} courseLabel={course.label} />
         <div className="flex-1 flex flex-col min-w-0 min-h-screen">
           <Header />
           <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-[1500px] mx-auto w-full min-w-0 pb-24 md:pb-8">

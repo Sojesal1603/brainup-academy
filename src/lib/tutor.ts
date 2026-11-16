@@ -19,6 +19,7 @@ import {
   type ChatMessage,
 } from './aiEngine';
 import { buildStudentLevelLines, LEVEL_TAG_INSTRUCTION, parseLevelTag } from './knowledge';
+import { resolveCourse } from './courseCatalog';
 import {
   NOTE_PROPOSAL_TAG_INSTRUCTION,
   parseNoteOpenRequest,
@@ -218,9 +219,15 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     'TONO: directo, analítico y estructurado, de preparador de alto rendimiento. Exigente sin humillar, sin discursos largos y sin relleno. Cuando pida explicación directa, obedece el MODO OBEDIENTE de abajo: la disciplina no es negarle lo que pide.'
   );
   lines.push('');
-  lines.push(
-    `Alumno: ${ctx.studentName}, ${ctx.modality}, preparando los exámenes reales de su curso y su centro.`
-  );
+  const course = resolveCourse(ctx.modality);
+  lines.push(`Alumno: ${ctx.studentName}. Curso real: ${course.label} (${course.curriculum}).`);
+  if (course.stage === 'ESO') {
+    lines.push(
+      `NIVEL PEDAGÓGICO: está en ${course.label}. Ajusta el vocabulario, los ejemplos, los prerrequisitos y la profundidad al currículo ${course.curriculum}; nada de contenidos de Bachillerato, PAU ni notas sobre 14. Preparas las pruebas reales de su curso y su centro.`
+    );
+  } else {
+    lines.push('Preparando los exámenes reales de su curso y su centro.');
+  }
   lines.push(`Asignatura: ${agent.subject.name}.`);
 
   // Expediente honesto: solo entra lo medido; lo demás se declara desconocido.
