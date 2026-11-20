@@ -13,14 +13,16 @@ import {
   Target,
 } from 'lucide-react';
 import { db } from '@/lib/db';
-import { getTenantProfileSummary, type ProfileSummary } from '@/lib/userProfile';
+import { getTenantProfileSummary, type TenantProfileSummary } from '@/lib/userProfile';
 import { currentTenant } from '@/lib/tenantContext';
 import { safeDb } from '@/lib/dbTimeout';
 import { buildReviewQueue } from '@/lib/srs';
 import { levelFromXp, weekKeyOf } from '@/lib/challenges';
 import { ensureTodayPlan } from '@/lib/dayPlan';
+import { buildProactiveProposal, localDaysBetween } from '@/lib/proactivity';
 import { readTodayPlanConstraints } from '@/lib/planner/constraintStore';
 import PlanConstraintsCard from './PlanConstraintsCard';
+import ProactiveCard from './ProactiveCard';
 import { getTodayClassCheckIn } from '@/lib/temario';
 import { StudyMode } from '@/lib/types';
 import HoyTocaEsto from './HoyTocaEsto';
@@ -42,7 +44,7 @@ import { PanelSkeleton } from '@/components/ui/Skeletons';
  */
 
 const getDashboardUser = cache((userId: string) =>
-  safeDb<ProfileSummary | null>(
+  safeDb<TenantProfileSummary | null>(
     'cuartel.perfil',
     () => getTenantProfileSummary(userId),
     null,
@@ -568,8 +570,9 @@ export async function DashboardConstraints() {
 
 export async function DashboardToday() {
   const { user } = await currentTenant();
-  const dayKey = localDayKey(new Date());
-  const [plan, checkInItems] = await Promise.all([
+  const now = new Date();
+  const dayKey = localDayKey(now);
+  const [plan, checkInItems, profile, upcomingExams, risk] = await Promise.all([
     safeDb<Awaited<ReturnType<typeof ensureTodayPlan>> | null>(
       'cuartel.plan',
       () => readDayPlan(user.id, dayKey),
@@ -582,7 +585,36 @@ export async function DashboardToday() {
       [],
       3_500
     ),
+    getDashboardUser(user.id),
+    loadUpcomingExams(user.id),
+    loadRiskData(user.id),
   ]);
+
+  // La propuesta no decide nada nuevo: cita el plan que ya existe y añade lo
+  // que el plan no puede saber (racha y día local). Sin IA y sin escrituras.
+  const timezone = profile?.timezone ?? 'Europe/Madrid';
+  const nextExam = upcomingExams[0] ?? null;
+  const decision = buildProactiveProposal({
+    now,
+    timezone,
+    stage: profile?.stage ?? null,
+    plan,
+    nextExam: nextExam
+      ? {
+          title: nextExam.title,
+          days: localDaysBetween(now, nextExam.examDate, timezone),
+          weight: nextExam.subject.pauWeight,
+          subjectName: nextExam.subject.name,
+        }
+      : null,
+    streak: profile
+      ? {
+          current: profile.streakCurrent,
+          studiedToday: (plan?.studiedMinutes ?? 0) > 0,
+        }
+      : null,
+    measuredUnits: risk.measuredUnitsCount,
+  });
 
   return (
     <div className="min-w-0 space-y-4">
@@ -591,6 +623,7 @@ export async function DashboardToday() {
 
       {plan ? (
         <>
+          <ProactiveCard decision={decision} />
           <HoyTocaEsto plan={plan} />
           <DashboardReminder />
         </>

@@ -95,7 +95,10 @@ export default function HoyTocaEsto({ plan }: { plan: DayPlan }) {
 
         {/* El único bloque que se ve entero: el siguiente que toca hacer. */}
         {now && (
-          <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.04] p-4">
+          <div
+            id="ahora"
+            className="scroll-mt-24 rounded-xl border border-emerald-500/35 bg-emerald-500/[0.04] p-4"
+          >
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-400 font-bold mb-1.5">

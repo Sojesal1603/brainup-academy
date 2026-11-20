@@ -131,7 +131,7 @@ const planBase = {
   dueReviews: 2,
   errorsOpen: 3,
   headline: 'Hoy toca Matemáticas',
-  studiedMinutesToday: 0,
+  studiedMinutes: 0,
 };
 
 const examSoon = { title: 'Examen de Matemáticas', days: 3, weight: 0.2, subjectName: 'Matemáticas' };
@@ -199,7 +199,7 @@ check('por la mañana no se habla de racha en riesgo', streakMorning.primary.kin
 const streakDone = P.buildProactiveProposal({
   now: at('2026-11-20T18:30:00Z'),
   timezone: MADRID,
-  plan: { ...planBase, dueReviews: 0, errorsOpen: 0, studiedMinutesToday: 50 },
+  plan: { ...planBase, dueReviews: 0, errorsOpen: 0, studiedMinutes: 50 },
   measuredUnits: 4,
   streak: { current: 5, studiedToday: true },
 });
@@ -321,6 +321,35 @@ check('sin examen se apoya en la unidad floja', /Fracciones/.test(weakLine), wea
 
 const emptyLine = P.buildTutorProactiveLine({ stage: 'UNIVERSIDAD' });
 check('sin señales no inventa línea', emptyLine === null, emptyLine);
+
+/* ------------------------------------------------------------------ */
+/* Integración en el Cuartel                                           */
+/* ------------------------------------------------------------------ */
+
+console.log('\nIntegración: la tarjeta cita el plan y no decide por su cuenta');
+
+const widgetsSource = fs.readFileSync(
+  path.join(projectRoot, 'src', 'components', 'cuartel', 'DashboardWidgets.tsx'),
+  'utf8'
+);
+const cardSource = fs.readFileSync(
+  path.join(projectRoot, 'src', 'components', 'cuartel', 'ProactiveCard.tsx'),
+  'utf8'
+);
+const hoySource = fs.readFileSync(
+  path.join(projectRoot, 'src', 'components', 'cuartel', 'HoyTocaEsto.tsx'),
+  'utf8'
+);
+
+check('el Cuartel usa el motor', /buildProactiveProposal/.test(widgetsSource));
+check(
+  'la tarjeta va antes de «Hoy toca esto»',
+  widgetsSource.indexOf('<ProactiveCard') > -1 &&
+    widgetsSource.indexOf('<ProactiveCard') < widgetsSource.indexOf('<HoyTocaEsto')
+);
+check('la tarjeta no consulta Prisma ni IA', !/from '@\/lib\/(db|prisma|aiEngine)'/.test(cardSource));
+check('el descarte usa la clave del día', /dismissalStorageKey\(decision\.dayKey\)/.test(cardSource));
+check('«Hoy toca esto» tiene el ancla del bloque actual', /id="ahora"/.test(hoySource));
 
 /* ------------------------------------------------------------------ */
 /* Resultado                                                           */
