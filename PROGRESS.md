@@ -19,7 +19,7 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 | 9. Restricciones y contexto del tutor | hecho | este commit | Restricciones `max_minutes`/`avoid_subject`/`only_subject` con `responseSchema` de Gemini y Zod; la propuesta se enseña y solo se guarda tras confirmar. El plan de hoy filtra candidatos, aplica el techo de minutos y respeta las restricciones al inyectar repasos. El catedrático recibe restricciones, errores, exámenes y método del profesor; el saludo se redacta por reglas sin IA. `open_document` se ejecuta en servidor con el userId de la sesión, sin SSE, y las citas usan `?doc=note:ID` + `NoteSplitPanel`. `verify-constraints` 8/8. | El flujo completo de confirmar restricciones en el navegador no se ha recorrido con sesión real; los contratos, el filtrado y la integración están compilados y probados por unidad. |
 | 10a. Adjuntos en el catedrático | hecho | este commit | `PUT/GET/DELETE /api/tutor/attachments` exigen sesión y guardan/leen en `data/uploads/{userId}/`; `readUpload`, `readUploadBytes`, `readUploadText` y `deleteUpload` reciben el userId, así que un id ajeno da 404. Tipo real por magic bytes (PNG/JPG/WEBP/GIF/PDF/ZIP/texto UTF-8), tope de 300 páginas de PDF, 512 MB por archivo y 15 MB para enviar bytes al modelo. El prompt declara los documentos como DATO y el modelo no tiene herramientas. `AiAttachment.userId` se escribe con la sesión. `verify-attachments` 11/11 (imagen, PDF, extensión falsa, acceso cruzado, tamaño y 301 páginas). | `localPath` sigue en disco local: en serverless no persiste. Deuda anotada: mover a Supabase Storage con bucket privado y rutas `{userId}/…` antes de usar serverless. La visión real depende del modelo que responda; si no puede ver, el aviso es explícito. |
 | 10. Cierre de sesión, corrector, foto y banco | hecho | este commit | `sessionClose.ts` escribe en una transacción el `TutorSessionOutcome` (clave `sesion:<agente>:<día>`), las fichas de `ErrorLog` y las `ReviewCard` con `frontHash`, y después invalida el plan; el índice único `[userId, sessionKey]` impide duplicados al repetir. Migración `20261114210000_session_close` aplicada (2026-11-14T22:28:21Z; columnas e índices comprobados). Corrector con rúbrica Zod, dos pasadas y mediana por bloque, sin rellenar notas que el modelo no da. Foto manuscrita: `/api/examinador/foto` la transcribe con visión y devuelve confianza; el envío corrige **la transcripción** y avisa si no se ha podido leer. Banco de 4 casos con nota a mano y MAE real **0,19 pts** (2 pasadas, `gemini-3.5-flash-lite`), visible en el Examinador. `verify:cierre` 17/17, `verify:corrector` 29/29, `verify:sesiones` 115, `verify:srs` y `verify:planificador` en verde; `tsc` y `eslint` 0; `npm run build` 0 (`VgvJw3g8eVB5PjHDK32bo`); salud 200 con ese build, `/` y `/examinador` 307, APIs 401. | `verify:examinador` no puede pasar sin una sesión real de Supabase (responde 401 en esta máquina); el recorrido de la foto con sesión real queda como prueba manual. La transcripción necesita un modelo con visión: sin él se avisa y no se corrige. |
-| 11. B3 pedagogía activa | pendiente | — | — | — |
+| 11. B3 pedagogía activa | hecho | `8343bdd`, `1b969cb`, este commit | Etapas ESO 1º–4º, Bachillerato 1º–2º y Universidad (5 ramas, cursos 1º–5º, titulación editable, ECTS y convocatorias) en `src/lib/stages/`; migración `20261120120000_education_stage` **expand-only, no aplicada a producción**; backfill con `--dry-run` por defecto; cabecera, barra lateral, Ajustes, Estadísticas y prompts dejan de asumir PAU/14. Pedagogía activa determinista (`pickTechnique`) declarada en la capa de etapa y conectada con el cierre del Paso 10 sin tocar `sessionClose.ts`. `verify:stages` (66), `verify:corrector` (29), `check`, `lint` y `build` en verde. `verify:cierre` queda **bloqueado a propósito** hasta aplicar la migración: la base de producción aún no tiene `stage` y el test crea perfiles reales. | La migración y el backfill se ejecutan a mano en Supabase (SQL abajo). El recorrido visual de Ajustes/Universidad con sesión real queda como prueba manual. |
 | 12. Verificación SymPy/unidades/química | pendiente | — | — | — |
 | 13. Proactividad diaria | pendiente | — | — | — |
 | 14. B7 modos por materia | pendiente | — | — | — |
@@ -210,6 +210,51 @@ Medido con `node scripts/check-ai-models.js` y llamadas directas (sin imprimir c
 - **Banco y MAE.** Cuatro casos de frontera con nota puesta a mano (dos de Matemáticas II, uno de Física, uno de Lengua). Se corrigen dos veces y se publica el error absoluto medio por materia y por bloque, sin esconderlo cuando es alto. Medición real de este corte: `mates2-algebra-1` 0,50; `mates2-analisis-1` 0,00; `fisica-campo-1` 0,00; `lengua-comentario-1` 0,25; **MAE 0,19**. El caso de Álgebra está mal a propósito (una respuesta que se contradice) y el corrector lo baja a 0,5: prefiere pecar de duro antes que dar por bueno un desarrollo incoherente.
 - **Pruebas.** `verify:cierre` usa una cuenta temporal y la borra (cascadas incluidas): 17 comprobaciones con el doble cierre, la validación y el `frontHash`. `verify:corrector` 29/29 sin gastar IA. `verify:sesiones` 115 y `verify:srs` siguen verdes. `npx tsc --noEmit` y `npx eslint src scripts` 0. `npm run build` 0; el servidor nuevo sirve `VgvJw3g8eVB5PjHDK32bo`, salud 200 con base OK, `/` y `/examinador` 307 a `/login`, y las tres rutas nuevas del examinador 401 sin sesión.
 - **Límite honesto.** `verify:examinador` es end-to-end por HTTP y necesita una sesión real; aquí responde 401, así que no se ha podido recorrer la foto ni la entrega con sesión. La transcripción depende de que haya un modelo con visión disponible; sin él, el aviso es explícito.
+
+## Paso 11 (2026-11-20)
+
+**Definición ratificada.** PROGRESS.md no definía el Paso 11 (solo decía «B3 pedagogía activa») y en `docs/ENCARGO.md` «B3» es otra cosa (salidas persistentes, ya cerrada en el Paso 10). Se adoptó esta definición: *el Catedrático conduce cada sesión con una técnica de aprendizaje activo elegida por reglas según etapa, materia, errores y temario; la técnica se declara en el prompt y el cierre confirmado por el alumno sigue siendo el del Paso 10*. Queda escrito aquí para que no vuelva a haber ambigüedad.
+
+- **Commit 1 (`8343bdd`) — etapas.** Enum `EducationStage` y columnas `stage` (default `BACHILLERATO`), `gradeLevel`, `trackKey` y `degreeName` en `UserProfile`, todas expand-only y sin tocar `modality`. `src/lib/stages/catalog.ts` concentra escala (0–10 vs PAU /14), herramientas visibles, valores del planificador y personalidad; `getStageConfig` resuelve desde la columna o desde `modality`. ESO trae plantilla LOMLOE en 1º–4º (1º conserva exactamente sus nueve materias), Bachillerato sus tres modalidades sin crear materias, y Universidad sus cinco ramas con 4 troncales y créditos ECTS por rama. `applyCourseToProfile` es el único escritor de los campos derivados y sigue siendo idempotente. Cabecera, barra lateral, `/ajustes` (selector de etapa con titulación editable) y `/estadisticas` dejan de enseñar 14 donde no hay PAU.
+- **Commit 2 (`1b969cb`) — prompts en capas.** `src/lib/stages/prompts.ts` separa base pedagógica, capa de etapa y capa de materia. ESO y Bachillerato mantienen **palabra por palabra** el texto anterior (test de paridad); Universidad estrena capa propia con guía docente, ECTS y convocatorias. `activePedagogy.ts` elige técnica por reglas deterministas (errores > examen próximo > unidades flojas > tipo de materia > etapa) y entra en el prompt tras la capa de etapa. No importa `sessionClose.ts` ni escribe `StudyBlock`.
+- **Commit 3 (este) — verificación.** `scripts/verify-stages.js` comprueba inferencia, catálogo, plantillas, ida y vuelta de `modality`, paridad de prompts, determinismo de la técnica, que la migración siga siendo expand-only y que no haya condicionales por etapa fuera de `src/lib/stages/`, `courseCatalog.ts` y el selector de Ajustes.
+
+### SQL exacto para Supabase (ejecutar antes del `git push`)
+
+Con copia de seguridad verificada y `DIRECT_URL` (puerto 5432). **No se ha aplicado desde este entorno.**
+
+```sql
+-- 1. Etapas educativas (expand-only). Idempotente solo si el enum no existe:
+--    si ya existe, saltar el CREATE TYPE.
+CREATE TYPE "EducationStage" AS ENUM ('ESO', 'BACHILLERATO', 'UNIVERSIDAD');
+
+ALTER TABLE "UserProfile"
+  ADD COLUMN "stage" "EducationStage" NOT NULL DEFAULT 'BACHILLERATO',
+  ADD COLUMN "gradeLevel" TEXT,
+  ADD COLUMN "trackKey" TEXT,
+  ADD COLUMN "degreeName" TEXT;
+```
+
+Después, desde un entorno con la `DATABASE_URL` correcta:
+
+```bash
+npx prisma migrate deploy                  # marca la migración en _prisma_migrations
+node scripts/backfill-education-stage.js           # simulación: cuenta perfiles
+node scripts/backfill-education-stage.js --apply   # escribe stage/gradeLevel/trackKey/degreeName
+```
+
+El backfill **no modifica `modality`** ni borra materias. En modalidades desconocidas deja `stage = BACHILLERATO` y el curso nulo, sin inventar datos. Es idempotente: la segunda pasada no encuentra filas pendientes.
+
+### Plan de rollback
+
+1. Revertir el código al commit anterior (`ecca48a` o el que corresponda): la app sigue funcionando porque nacía leyendo solo `modality`.
+2. Las columnas y el enum pueden quedarse: son expand y ningún código antiguo las lee. Si se quieren retirar, con copia previa:
+   `ALTER TABLE "UserProfile" DROP COLUMN "degreeName", DROP COLUMN "trackKey", DROP COLUMN "gradeLevel", DROP COLUMN "stage"; DROP TYPE "EducationStage";`
+3. El backfill no toca `modality`, así que no hay datos de curso que restaurar.
+
+**Límites honestos.** La migración se escribió a mano y se validó con `prisma validate`; no se ejecutó `prisma migrate dev` porque la `DATABASE_URL` de este entorno apunta a producción y la regla del proyecto prohíbe migrar producción desde aquí. Por eso `verify:cierre` falla ahora con `The column stage does not exist in the current database`: es el resultado esperado y la prueba de que el orden obligatorio es **SQL → deploy**, nunca al revés. Tras aplicar la migración, ese test vuelve a correr sin tocar su código. No se ha recorrido Ajustes/Universidad en navegador con sesión real; lo cubierto son los contratos, el catálogo, los prompts y el build.
+
+**Orden de despliegue obligatorio.** El código nuevo lee `stage` en cabecera, barra lateral y perfil; si se publica antes de la migración, esas consultas fallan. Aplicar primero el SQL (o `prisma migrate deploy`) y después desplegar.
 
 ## Deuda técnica anotada (2026-11-14)
 

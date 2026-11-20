@@ -5,6 +5,7 @@ import {
   resolveCourse,
   type CourseOption,
 } from './courseCatalog';
+import { stageConfig } from './stages';
 import { normalizeTopicTitle } from './temarioImport';
 
 export interface CourseApplyResult {
@@ -31,6 +32,7 @@ export async function applyCourseToProfile(
   modality: string
 ): Promise<CourseApplyResult> {
   const course = resolveCourse(modality);
+  const config = stageConfig(course.stage);
 
   await prisma.userProfile.update({
     where: { id: userId },
@@ -60,9 +62,9 @@ export async function applyCourseToProfile(
       data: {
         name: base.name,
         color: base.color,
-        // La ponderación PAU solo existe en Bachillerato.
-        pauWeight: course.stage === 'BACHILLERATO' ? 0.2 : 0,
-        isPhaseGeneral: course.stage === 'BACHILLERATO',
+        // La ponderación PAU solo existe donde la etapa la declara.
+        pauWeight: config.scale.hasPau ? 0.2 : 0,
+        isPhaseGeneral: config.scale.hasPau,
         currentGrade: 7.0,
         gradeSource: 'sin_medir',
         targetGrade: 9,
@@ -75,10 +77,9 @@ export async function applyCourseToProfile(
       data: {
         subjectId: subject.id,
         name: `Catedrático de ${base.name}`,
-        specialty:
-          course.stage === 'UNIVERSIDAD'
-            ? `${course.degreeName ?? 'Grado'} · ${course.trackLabel ?? 'Universidad'}: ${base.name}${base.credits ? ` (${base.credits} ECTS)` : ''}`
-            : `Currículo ${course.curriculum}: ${base.name}`,
+        specialty: config.supportsEcts
+          ? `${course.degreeName ?? 'Grado'} · ${course.trackLabel ?? 'Universidad'}: ${base.name}${base.credits ? ` (${base.credits} ECTS)` : ''}`
+          : `Currículo ${course.curriculum}: ${base.name}`,
         systemPrompt: buildSubjectTutorPrompt(base.name, course),
       },
     });

@@ -17,6 +17,7 @@
 /** Título de la conversación de la puesta a punto (una sola, reutilizada). */
 import { buildSystemKnowledgeForAi } from './systemKnowledge';
 import { resolveCourse } from './courseCatalog';
+import { buildSetupStageLines, getStageConfig } from './stages';
 
 export const SETUP_CONVERSATION_TITLE = 'Puesta a punto';
 
@@ -904,14 +905,18 @@ function formatSnapshot(snapshot: SetupSnapshot, checklist: SetupChecklist): str
 
   lines.push(`Hoy es ${snapshot.today}.`);
   const course = resolveCourse(snapshot.modality);
+  const stage = getStageConfig({ modality: snapshot.modality });
   lines.push(`Alumno: ${snapshot.studentName}. Curso real: ${course.label} (${course.curriculum}).`);
-  if (course.stage === 'ESO') {
-    lines.push(
-      `Está en ${course.label}: no hay PAU ni nota objetivo sobre 14. Ajusta el temario, el nivel y los exámenes al currículo ${course.curriculum}.`
-    );
-  } else {
-    lines.push(`Nota PAU objetivo: ${snapshot.targetPau}/14.`);
-  }
+  lines.push(
+    ...buildSetupStageLines({
+      stage: course.stage,
+      label: course.label,
+      curriculum: course.curriculum,
+      scaleLabel: stage.scale.label,
+      hasPau: stage.scale.hasPau,
+      targetPau: snapshot.targetPau,
+    })
+  );
   lines.push(
     snapshot.weeklyHoursDeclared
       ? `Horas de estudio disponibles: ${snapshot.weeklyHoursCap} h/semana (declaradas por él). Ritmo: ${snapshot.studyMode === 'athlete' ? 'Modo Atleta' : 'Zona de Confort'}.`

@@ -55,7 +55,7 @@ export default function StageSelector({ stages, current }: StageSelectorProps) {
     setStageKey(summary.stage);
     setGradeLevel(summary.gradeLevels[0].key);
     setTrackKey(summary.tracks[0]?.key ?? '');
-    if (summary.stage !== 'UNIVERSIDAD') setDegreeName('');
+    if (!summary.supportsEcts) setDegreeName('');
   };
 
   return (
@@ -81,7 +81,7 @@ export default function StageSelector({ stages, current }: StageSelectorProps) {
         </label>
 
         <label className="text-xs text-slate-400">
-          {active.stage === 'UNIVERSIDAD' ? 'Curso' : 'Curso'}
+          Curso
           <select
             name="gradeLevel"
             value={gradeLevel}
@@ -98,7 +98,7 @@ export default function StageSelector({ stages, current }: StageSelectorProps) {
 
         {active.tracks.length > 0 ? (
           <label className="text-xs text-slate-400">
-            {active.stage === 'UNIVERSIDAD' ? 'Rama de conocimiento' : 'Modalidad'}
+            {active.supportsEcts ? 'Rama de conocimiento' : 'Modalidad'}
             <select
               name="trackKey"
               value={trackKey}
@@ -119,7 +119,7 @@ export default function StageSelector({ stages, current }: StageSelectorProps) {
         )}
       </div>
 
-      {active.stage === 'UNIVERSIDAD' ? (
+      {active.supportsEcts ? (
         <label className="block text-xs text-slate-400">
           Titulación
           <input

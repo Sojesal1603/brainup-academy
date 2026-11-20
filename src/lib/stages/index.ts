@@ -33,6 +33,7 @@ export type {
 
 export {
   BASE_PEDAGOGY_LAYER,
+  buildSetupStageLines,
   buildStagePromptLayer,
   buildSubjectLayer,
 } from './prompts';

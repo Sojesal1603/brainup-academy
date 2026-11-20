@@ -109,7 +109,7 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
             </span>
           </h2>
           <p className="text-[11px] text-slate-400 hidden sm:block">
-            {course.stage === 'BACHILLERATO' ? user?.modality ?? course.label : course.curriculum}
+            {stage.headerChipKind === 'pau' ? user?.modality ?? course.label : course.curriculum}
           </p>
         </div>
       </div>
@@ -126,9 +126,9 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono">
           <Target className="w-4 h-4 text-blue-400" />
           <span>
-            {hasPau
+            {stage.headerChipKind === 'pau'
               ? `PAU: ${targetGrade.toFixed(2)}/14`
-              : course.stage === 'ESO'
+              : stage.headerChipKind === 'lomloe'
                 ? `${course.label} · LOMLOE`
                 : course.label}
           </span>

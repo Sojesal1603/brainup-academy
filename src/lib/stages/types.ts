@@ -66,6 +66,8 @@ export interface StageConfig {
   tools: StageTools;
   supportsEcts: boolean;
   supportsConvocatorias: boolean;
+  /** Qué enseña la cabecera: PAU /14, currículo LOMLOE o solo el curso. */
+  headerChipKind: 'pau' | 'lomloe' | 'course';
   /** Personalidad base del Catedrático en esta etapa (sin la materia). */
   personality: string;
   /** Cómo se nombra la etapa cuando se habla de su nivel pedagógico. */

@@ -187,6 +187,7 @@ export const STAGE_CONFIGS: Record<EducationStage, StageConfig> = {
     tools: { hiddenHrefs: ['/examinador'], navBadge: 'ESO · LOMLOE' },
     supportsEcts: false,
     supportsConvocatorias: false,
+    headerChipKind: 'lomloe',
     personality:
       'Ajustas el nivel al currículo oficial de la ESO: explicas desde cero, con ejemplos cotidianos, no das por sabidos contenidos de cursos superiores y preparas las pruebas del curso sin enfoque PAU. Exiges rigor, preguntas socráticas y trabajo diario.',
   },
@@ -201,6 +202,7 @@ export const STAGE_CONFIGS: Record<EducationStage, StageConfig> = {
     tools: { hiddenHrefs: [], navBadge: 'Bachillerato & PAU' },
     supportsEcts: false,
     supportsConvocatorias: false,
+    headerChipKind: 'pau',
     personality:
       'Explicas con rigor, preguntas socráticas y enfoque de preparación pre-PAU. Nota sobre 14, ponderaciones oficiales y criterios de corrección del tribunal.',
   },
@@ -215,6 +217,7 @@ export const STAGE_CONFIGS: Record<EducationStage, StageConfig> = {
     tools: { hiddenHrefs: ['/examinador'], navBadge: 'Universidad · Grado' },
     supportsEcts: true,
     supportsConvocatorias: true,
+    headerChipKind: 'course',
     personality:
       'Ajustas el nivel al Grado universitario: rigor formal, bibliografía, guía docente y criterios del profesor. Trabajas con créditos ECTS y convocatorias, sin enfoque PAU ni contenidos de Bachillerato. Exiges autonomía: el alumno propone y tú verificas.',
   },
@@ -267,7 +270,9 @@ export function inferStageFromModality(modality: string | null | undefined): Sta
     const level = levelMatch ? `${Number(levelMatch[1])}º curso` : '1º curso';
     const track = UNI_TRACKS.find((candidate) => raw.toLowerCase().includes(candidate.label.toLowerCase()));
     const degreeMatch = raw.match(/grado\s+en\s+([^()·]+)/i);
-    const degreeName = degreeMatch ? clean(degreeMatch[1]) : null;
+    // Se guarda la titulación completa: «Grado en Ingeniería Mecánica», no solo
+    // el nombre suelto, para que el campo editable de Ajustes sea fiel.
+    const degreeName = degreeMatch ? `Grado en ${clean(degreeMatch[1])}` : null;
     return {
       stage: 'UNIVERSIDAD',
       gradeLevel: level,
@@ -333,8 +338,11 @@ export function buildModality(input: {
   if (stage === 'UNIVERSIDAD') {
     const track = UNI_TRACKS.find((option) => option.key === trackKey);
     const degree = clean(degreeName) || 'Grado';
+    // Acepta «Ingeniería Mecánica» y «Grado en Ingeniería Mecánica» sin
+    // duplicar el prefijo ni perderlo al volver a leer la modalidad.
+    const degreeLabel = /^grado\b/i.test(degree) ? degree : `Grado en ${degree}`;
     const level = UNI_LEVELS.find((option) => option.key === gradeLevel)?.key ?? '1º curso';
-    return `Universidad · ${degree}${track ? ` (${track.label})` : ''} · ${level}`;
+    return `Universidad · ${degreeLabel}${track ? ` (${track.label})` : ''} · ${level}`;
   }
   const level = BACH_LEVELS.find((option) => option.key === gradeLevel)?.key ?? '1º Bachillerato';
   const short = level.replace(' Bachillerato', '');

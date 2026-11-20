@@ -58,6 +58,29 @@ export function buildStagePromptLayer(data: StagePromptData): string[] {
   return ['Preparando los exámenes reales de su curso y su centro.'];
 }
 
+/**
+ * Línea de etapa del coordinador de la puesta a punto.
+ *
+ * Vive aquí por la misma razón que las capas: el resto de la app no debe
+ * repetir «si es ESO no hay PAU». ESO y Bachillerato conservan el texto
+ * original palabra por palabra.
+ */
+export function buildSetupStageLines(
+  data: StagePromptData & { targetPau: number }
+): string[] {
+  if (data.stage === 'ESO') {
+    return [
+      `Está en ${data.label}: no hay PAU ni nota objetivo sobre 14. Ajusta el temario, el nivel y los exámenes al currículo ${data.curriculum}.`,
+    ];
+  }
+  if (data.stage === 'UNIVERSIDAD') {
+    return [
+      `Está en ${data.label} (${data.curriculum}): sin PAU ni nota sobre 14. Trabaja con créditos ECTS, convocatorias y la guía docente del Grado.`,
+    ];
+  }
+  return [`Nota PAU objetivo: ${data.targetPau}/14.`];
+}
+
 /** Capa 3: la materia concreta (la identidad larga la aporta el agente). */
 export function buildSubjectLayer(subjectName: string): string[] {
   const name = String(subjectName ?? '').trim() || 'la materia';

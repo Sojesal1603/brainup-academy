@@ -23,6 +23,7 @@ import {
 } from './ai/credentials';
 import { isTemarioSource, normalizeTopicTitle, parseTemarioText, TemarioSource } from './temarioImport';
 import { buildSubjectTutorPrompt, resolveCourse } from './courseCatalog';
+import { stageConfig } from './stages';
 
 /** Todo lo que depende del temario se refresca con cada cambio de estado. */
 function revalidateTemario() {
@@ -780,9 +781,8 @@ export async function createCustomSubject(data: {
       name: data.name,
       color: data.color || '#3b82f6',
       isPhaseGeneral: data.isPhaseGeneral,
-      // La ponderación PAU solo existe en Bachillerato, aunque el formulario
-      // mande otra cosa (ESO y Universidad no preparan PAU).
-      pauWeight: course.stage === 'BACHILLERATO' ? data.pauWeight || 0.2 : 0,
+      // La ponderación PAU solo existe donde la etapa la declara.
+      pauWeight: stageConfig(course.stage).scale.hasPau ? data.pauWeight || 0.2 : 0,
       currentGrade: 7.5,
       targetGrade: 9.5,
     },
