@@ -402,6 +402,37 @@ check(
 check('las etiquetas de estado están en español', verify.VERIFICATION_STATUS_LABELS.ok === 'Comprobado');
 
 /* ------------------------------------------------------------------ */
+/* Integración con el corrector y la interfaz                          */
+/* ------------------------------------------------------------------ */
+
+console.log('\nIntegración: evidencia, nunca nota');
+
+const readSource = (relative) => fs.readFileSync(path.join(projectRoot, relative), 'utf8');
+const correctorSource = readSource(path.join('src', 'lib', 'corrector.ts'));
+const ebauSource = readSource(path.join('src', 'lib', 'ebauSimulator.ts'));
+const resultsSource = readSource(path.join('src', 'components', 'examen', 'ExamResults.tsx'));
+const typesSource = readSource(path.join('src', 'lib', 'examenTypes.ts'));
+
+check(
+  'el corrector adjunta la verificación al bloque',
+  /verification:\s*verifications\[index\]/.test(correctorSource)
+);
+check(
+  'el corrector la calcula antes de las pasadas',
+  /const verifications = params\.blocks\.map/.test(correctorSource)
+);
+check(
+  'la corrección EBAU también la adjunta',
+  /verification:\s*verifications\[index\]/.test(ebauSource)
+);
+check(
+  'la penalización EBAU sigue saliendo solo de notationIssues',
+  /notationPenalty = Math\.min\(\s*1,\s*Math\.round\(notationIssues\.length/.test(ebauSource)
+);
+check('el tipo del bloque admite la verificación', /verification\?:\s*BlockVerification/.test(typesSource));
+check('la interfaz pinta el resultado', /result\.verification/.test(resultsSource));
+
+/* ------------------------------------------------------------------ */
 
 fs.rmSync(outDir, { recursive: true, force: true });
 

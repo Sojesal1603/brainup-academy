@@ -4,6 +4,8 @@
  * componentes de cliente sin arrastrar Prisma al bundle.
  */
 
+import type { BlockVerification } from './verify';
+
 export interface ExamBlock {
   topicId: string | null;
   topicTitle: string;
@@ -46,6 +48,11 @@ export interface BlockResult {
   notationIssues?: string[];
   /** Nota apartado a apartado, si el corrector la ha devuelto. */
   apartados?: ExamApartadoResult[];
+  /**
+   * Evidencia del motor determinista (Paso 12). Se muestra y se le da al
+   * corrector, pero **no modifica la nota**: un fallo de verificación se marca.
+   */
+  verification?: BlockVerification;
 }
 
 export interface ExamAudit {

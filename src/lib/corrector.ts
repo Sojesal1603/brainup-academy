@@ -25,20 +25,29 @@ import {
   type RubricGrading,
   type RubricPass,
 } from './correctorRubric';
+import { summarizeVerification, verifyBlock, type BlockVerification } from './verify';
 
 export { combinePasses, median, rubricPassSchema } from './correctorRubric';
 export type { RubricGrading, RubricPass } from './correctorRubric';
 
-function buildPrompt(params: { subjectName: string; blocks: ExamBlock[]; answers: string[] }): string {
+function buildPrompt(params: {
+  subjectName: string;
+  blocks: ExamBlock[];
+  answers: string[];
+  verifications?: BlockVerification[];
+}): string {
   const examText = params.blocks
-    .map(
-      (block, index) =>
-        `BLOQUE ${index + 1} (máx ${block.points} pts) — tema «${block.topicTitle}»:\n${
-          block.prompt
-        }\nRESPUESTA DEL ALUMNO: ${
-          params.answers[index]?.trim() ? params.answers[index].trim() : '(en blanco)'
-        }`
-    )
+    .map((block, index) => {
+      const verification = params.verifications?.[index];
+      const evidence = verification
+        ? `\nVERIFICACIÓN DETERMINISTA DEL BLOQUE ${index + 1}: ${summarizeVerification(verification)}`
+        : '';
+      return `BLOQUE ${index + 1} (máx ${block.points} pts) — tema «${block.topicTitle}»:\n${
+        block.prompt
+      }\nRESPUESTA DEL ALUMNO: ${
+        params.answers[index]?.trim() ? params.answers[index].trim() : '(en blanco)'
+      }${evidence}`;
+    })
     .join('\n\n');
 
   return `Corrige este simulacro:\n\n${examText}`;
@@ -51,6 +60,7 @@ function buildSystem(params: { subjectName: string; passes: number }): string {
     'Sé exigente y justo como un corrector real: penaliza resultados sin justificar, unidades ausentes y errores de notación. Una respuesta en blanco puntúa 0.',
     'En "feedback" escribe una crítica breve (2-3 frases) en español que diga exactamente qué falló y cómo se habría asegurado el punto.',
     'En "weakTopicTitles" lista solo los temas con puntuación por debajo del 60% del máximo.',
+    'Antes de cada respuesta puede aparecer una «VERIFICACIÓN DETERMINISTA»: son cuentas hechas por el servidor, no una nota. Si dice FALLO, no afirmes que el resultado es correcto y refleja el fallo en "feedback". Si dice correcto, no lo contradigas sin explicar por qué. La nota sigue siendo tuya: no copies cifras de la verificación como puntuación.',
     `Esta es la pasada ${params.passes}. Corrige por tu cuenta: no supongas que otra pasada ya ha puntuado.`,
     'Devuelve EXCLUSIVAMENTE un JSON con este esquema exacto:',
     '{"blocks":[{"index":0,"score":1.5,"feedback":"..."}],"weakTopicTitles":["tema"],"globalFeedback":"valoración global de 2-3 frases con nota final sobre 10"}',
@@ -64,6 +74,7 @@ export async function runRubricPass(params: {
   blocks: ExamBlock[];
   answers: string[];
   passNumber?: number;
+  verifications?: BlockVerification[];
 }): Promise<{ pass: RubricPass; model: string } | null> {
   try {
     const result = await runAiText({
@@ -109,10 +120,20 @@ export async function gradeWithRubricMedian(params: {
   const valid: RubricPass[] = [];
   let model: string | null = null;
 
+  // Evidencia determinista ANTES de corregir: el modelo la lee, pero la nota
+  // sigue siendo suya. Un fallo se marca; nunca se convierte en un cero.
+  const verifications = params.blocks.map((block, index) =>
+    verifyBlock({
+      subjectName: params.subjectName,
+      prompt: block.prompt,
+      answer: params.answers[index] ?? '',
+    })
+  );
+
   // En serie a propósito: dos llamadas simultáneas al mismo modelo gratuito se
   // pisan la cuota y suelen acabar las dos en 429.
   for (let i = 1; i <= wanted; i++) {
-    const result = await runRubricPass({ ...params, passNumber: i });
+    const result = await runRubricPass({ ...params, passNumber: i, verifications });
     if (result) {
       valid.push(result.pass);
       model = result.model;
@@ -125,7 +146,10 @@ export async function gradeWithRubricMedian(params: {
   return {
     mode: 'ai',
     total: combined.total,
-    blocks: combined.blocks,
+    blocks: combined.blocks.map((block, index) => ({
+      ...block,
+      verification: verifications[index],
+    })),
     weakTopicTitles: combined.weakTopicTitles,
     globalFeedback: combined.globalFeedback,
     model,

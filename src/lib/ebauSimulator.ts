@@ -33,6 +33,7 @@ import type {
   ExamGrade,
   ExamPackage,
 } from './examenTypes';
+import { summarizeVerification, verifyBlock } from './verify';
 
 /** Píldora de repaso que se crea tras un fallo de simulacro. */
 export const EBAU_ERROR_PILL_MINUTES = 15;
@@ -332,6 +333,16 @@ export async function gradeEbauWithRubric(
 
   const community = getEbauCommunity(input.communityCode);
 
+  // Evidencia determinista por bloque (Paso 12). No toca la nota ni la
+  // penalización de notación: solo se le enseña al corrector y al alumno.
+  const verifications = input.blocks.map((block, index) =>
+    verifyBlock({
+      subjectName: input.subjectName,
+      prompt: block.prompt,
+      answer: input.answers[index] ?? '',
+    })
+  );
+
   const examText = input.blocks
     .map(
       (block, index) =>
@@ -341,7 +352,7 @@ export async function gradeEbauWithRubric(
           block.apartados?.length ? `APARTADOS: ${block.apartados.join(' | ')}\n` : ''
         }RESPUESTA DEL ALUMNO: ${
           input.answers[index]?.trim() ? input.answers[index].trim() : '(en blanco)'
-        }`
+        }\nVERIFICACIÓN DETERMINISTA: ${summarizeVerification(verifications[index])}`
     )
     .join('\n\n');
 
@@ -353,6 +364,7 @@ export async function gradeEbauWithRubric(
     'Sé exigente y justo como un corrector real: penaliza resultados sin justificar, unidades ausentes y errores de notación. Una respuesta en blanco puntúa 0.',
     'Aunque el alumno no haya separado los apartados, asígnales nota: el desglose es obligatorio.',
     'En `notationIssues` escribe cada fallo formal concreto (unidad ausente, signo, notación incorrecta). Si no hay, deja la lista vacía.',
+    'Cada bloque trae una «VERIFICACIÓN DETERMINISTA» calculada por el servidor. Es evidencia, no una nota: si dice FALLO, no des el resultado por bueno; si dice correcto, no lo contradigas sin explicar por qué. No copies sus cifras como puntuación.',
     'En `feedback` escribe una crítica breve (2-3 frases) que diga exactamente qué falló y cómo se habría asegurado el punto.',
     'En `weakTopicTitles` lista solo los temas con puntuación por debajo del 60% del máximo.',
     'Devuelve EXCLUSIVAMENTE un JSON válido con este esquema:',
@@ -404,6 +416,7 @@ export async function gradeEbauWithRubric(
         feedback: asString(found?.feedback) || 'Sin comentario del corrector para este bloque.',
         notationIssues: issues.length > 0 ? issues : undefined,
         apartados: apartados && apartados.length > 0 ? apartados : undefined,
+        verification: verifications[index],
       };
     });
 

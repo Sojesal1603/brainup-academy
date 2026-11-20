@@ -21,6 +21,49 @@ function scoreColor(total: number): string {
   return 'text-rose-400';
 }
 
+/**
+ * Sello de la verificación determinista (Paso 12). Es información, no nota:
+ * un «no cuadra» no resta puntos por sí mismo.
+ */
+function verificationTone(status: 'ok' | 'fail' | 'mixed' | 'no_verificable'): {
+  box: string;
+  label: string;
+  title: string;
+} {
+  if (status === 'ok') {
+    return {
+      box: 'border-emerald-500/25 bg-emerald-500/[0.05]',
+      label: 'text-emerald-300',
+      title: 'Verificación de cálculos',
+    };
+  }
+  if (status === 'fail') {
+    return {
+      box: 'border-rose-500/30 bg-rose-500/[0.06]',
+      label: 'text-rose-300',
+      title: 'La verificación no cuadra',
+    };
+  }
+  if (status === 'mixed') {
+    return {
+      box: 'border-amber-500/30 bg-amber-500/[0.06]',
+      label: 'text-amber-300',
+      title: 'Verificación con fallos',
+    };
+  }
+  return {
+    box: 'border-slate-700/60 bg-slate-800/20',
+    label: 'text-slate-400',
+    title: 'Sin verificación',
+  };
+}
+
+function checkDot(status: 'ok' | 'fail' | 'no_verificable'): string {
+  if (status === 'ok') return 'bg-emerald-400';
+  if (status === 'fail') return 'bg-rose-400';
+  return 'bg-slate-500';
+}
+
 export default function ExamResults({
   subjectName,
   blocks,
@@ -210,6 +253,40 @@ export default function ExamResults({
                       <li key={issue}>{issue}</li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {result?.verification && result.verification.checks.length > 0 && (
+                <div
+                  className={`rounded-lg border p-3 ${
+                    verificationTone(result.verification.status).box
+                  }`}
+                >
+                  <p
+                    className={`mb-1 text-[10px] font-semibold uppercase tracking-wider ${
+                      verificationTone(result.verification.status).label
+                    }`}
+                  >
+                    {verificationTone(result.verification.status).title}
+                  </p>
+                  <ul className="space-y-1 text-[11px] text-slate-300">
+                    {result.verification.checks.map((check, checkIndex) => (
+                      <li key={`${check.kind}-${checkIndex}`} className="flex gap-1.5">
+                        <span
+                          className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${checkDot(
+                            check.status
+                          )}`}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <MathText text={check.detail} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+                    Comprobado con cuentas del servidor, no con el modelo. No cambia la nota:
+                    solo avisa.
+                  </p>
                 </div>
               )}
 
