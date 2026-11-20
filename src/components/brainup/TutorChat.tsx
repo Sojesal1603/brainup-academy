@@ -30,6 +30,7 @@ import {
 import clsx from 'clsx';
 import MarkdownMessage from './MarkdownMessage';
 import StudyToolPanel from './StudyToolPanel';
+import type { SubjectCategory } from '@/lib/subjects/category';
 import NoteSplitPanel, {
   type EngineOption,
   type NoteVariant,
@@ -288,7 +289,7 @@ interface TutorAgent {
   id: string;
   name: string;
   specialty: string;
-  subject: { name: string; color: string; category: string | null };
+  subject: { name: string; color: string; category: SubjectCategory | null };
 }
 
 /** Contexto real del alumno para el saludo de apertura del catedrático. */
@@ -2175,6 +2176,7 @@ export default function TutorChat({
       <StudyToolPanel
         agentId={agent.id}
         subjectColor={agent.subject.color}
+        category={agent.subject.category}
         focus={lastUserText}
       />
 

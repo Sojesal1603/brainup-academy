@@ -14,6 +14,11 @@
  * La IA propone; el código valida. Igual que en `classCheckIn.ts`.
  */
 
+import {
+  SUBJECT_CATEGORY_META,
+  type SubjectCategory,
+} from './subjects/category';
+
 export const STUDY_TOOL_KINDS = ['flashcards', 'test', 'mapa', 'guia'] as const;
 
 export type StudyToolKind = (typeof STUDY_TOOL_KINDS)[number];
@@ -37,7 +42,7 @@ export const STUDY_TOOL_META: Record<
   test: {
     label: 'Test interactivo',
     short: 'Test',
-    description: 'Preguntas tipo EBAU con corrección y explicación de cada fallo.',
+    description: 'Preguntas con corrección y explicación de cada fallo.',
   },
   mapa: {
     label: 'Mapa mental',
@@ -50,6 +55,17 @@ export const STUDY_TOOL_META: Record<
     description: 'Resumen ejecutivo con lo que cae, las trampas y el plan de repaso.',
   },
 };
+
+/**
+ * Orden del panel: primero las herramientas propias de la categoría y después
+ * las demás, para que el método de la materia esté a un clic y ninguna
+ * herramienta desaparezca. Las aún no implementadas se omiten.
+ */
+export function studyToolOrder(category?: SubjectCategory | null): StudyToolKind[] {
+  const preferred = SUBJECT_CATEGORY_META[category ?? 'GENERAL'].tools.filter(isStudyToolKind);
+  const chosen = new Set(preferred);
+  return [...preferred, ...STUDY_TOOL_KINDS.filter((kind) => !chosen.has(kind))];
+}
 
 export interface StudyToolTopic {
   title: string;
@@ -64,6 +80,8 @@ export interface StudyToolInput {
   agentName: string;
   specialty: string;
   subjectName: string;
+  /** Categoría didáctica: ajusta el estilo del test, no su formato. */
+  category?: SubjectCategory | null;
   studentName: string;
   topic: StudyToolTopic;
   /** Lo que el alumno acaba de pedir en el chat (si lo hay). */
@@ -125,21 +143,35 @@ export type StudyToolPayload = FlashcardsTool | TestTool | MindMapTool | StudyGu
 /* 1. El prompt                                                        */
 /* ------------------------------------------------------------------ */
 
+/** Cómo se reparte la aplicación en el test según el método de la materia. */
+const TEST_APPLICATION: Record<SubjectCategory, string> = {
+  PROBLEMAS: '4 de aplicación o cálculo, con datos, unidades y comprobación del resultado',
+  LABORATORIO: '4 de interpretación de datos, diseño experimental o análisis de resultados',
+  COMENTARIO: '4 de análisis de un fragmento o de una obra, con pruebas del texto',
+  IDIOMA: '4 de uso de la lengua: gramática, vocabulario o comprensión en el idioma',
+  EXPOSICION: '4 de análisis de una obra, una audición o un discurso',
+  TECNICA: '4 de aplicación, cálculo o diseño, sin ejecutar el código en el servidor',
+  GENERAL: '4 de aplicación',
+};
+
+function buildTestSpec(category: SubjectCategory): string {
+  return [
+    'Diseña un TEST de 8 preguntas de opción múltiple con 4 opciones (A-D) cada una, al estilo de la prueba que pondría su profesor.',
+    `Mezcla 4 de concepto y ${TEST_APPLICATION[category]}. Una sola opción correcta por pregunta.`,
+    'Cada pregunta lleva su explicación: por qué la correcta lo es y qué error esconde cada distractor, citando la fuente.',
+    'Estructura: {"title":"...","notice":null,"questions":[{"question":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"...","source":"..."}]}',
+    '`correctIndex` es el índice 0-3 de la opción correcta.',
+  ].join('\n');
+}
+
 /** Qué tiene que devolver exactamente cada herramienta. */
-const TOOL_SPECS: Record<StudyToolKind, string> = {
+const TOOL_SPECS: Record<Exclude<StudyToolKind, 'test'>, string> = {
   flashcards: [
     'Genera 12 FLASHCARDS de recuerdo activo (sistema Leitner).',
     'Cada tarjeta: una sola pregunta directa y una respuesta inequívoca, sin rodeos. Si aplica, la fórmula en LaTeX entre $...$.',
     'Prohíbidas las preguntas de relleno («¿qué es este tema?») y las respuestas de más de 60 palabras.',
     'Cada tarjeta lleva su fuente (documento y página, apunte o unidad del temario). Si no hay fuente para una tarjeta, no la escribas.',
     'Estructura: {"title":"...","notice":null,"cards":[{"front":"...","back":"...","source":"..."}]}',
-  ].join('\n'),
-  test: [
-    'Diseña un TEST de 8 preguntas de opción múltiple con 4 opciones (A-D) cada una, al estilo de la EBAU de esta materia.',
-    'Mezcla 4 de concepto y 4 de aplicación o cálculo. Una sola opción correcta por pregunta.',
-    'Cada pregunta lleva su explicación: por qué la correcta lo es y qué error esconde cada distractor, citando la fuente.',
-    'Estructura: {"title":"...","notice":null,"questions":[{"question":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"...","source":"..."}]}',
-    '`correctIndex` es el índice 0-3 de la opción correcta.',
   ].join('\n'),
   mapa: [
     'Construye un MAPA MENTAL del tema en sintaxis Mermaid válida, empezando por la palabra `mindmap` en la primera línea.',
@@ -164,7 +196,7 @@ export function buildStudyToolPrompt(input: StudyToolInput): {
   message: string;
 } {
   const system = [
-    `Eres ${input.agentName}, ${input.specialty} de Upgrade Academy (Bachillerato y EBAU, España).`,
+    `Eres ${input.agentName}, ${input.specialty} de Upgrade Academy (España).`,
     'Tu alumno te pide material de estudio y tú lo fabricas con rigor de cátedra, sin saludos ni explicaciones sobre lo que vas a hacer.',
     '',
     'REGLA DE FUENTES (no negociable):',
@@ -177,7 +209,9 @@ export function buildStudyToolPrompt(input: StudyToolInput): {
     '- Español de España, tuteo, notación correcta y LaTeX entre $...$ cuando haga falta.',
     '- Nada de contenido de relleno: si el tema no da para 12 flashcards honestas, entrega las que puedas y dilo en `notice`.',
     '',
-    TOOL_SPECS[input.kind],
+    input.kind === 'test'
+      ? buildTestSpec(input.category ?? 'GENERAL')
+      : TOOL_SPECS[input.kind],
   ].join('\n');
 
   const unit = input.topic.unitNumber

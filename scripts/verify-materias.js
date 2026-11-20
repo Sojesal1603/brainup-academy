@@ -32,8 +32,11 @@ execFileSync(
   [
     require.resolve('typescript/bin/tsc'),
     path.join('src', 'lib', 'subjects', 'category.ts'),
+    path.join('src', 'lib', 'studyTools.ts'),
     '--outDir',
     '.tmp-verify-materias',
+    '--rootDir',
+    path.join('src', 'lib'),
     '--module',
     'commonjs',
     '--target',
@@ -46,7 +49,8 @@ execFileSync(
   { cwd: projectRoot, stdio: 'inherit' }
 );
 
-const C = require(path.join(outDir, 'category.js'));
+const C = require(path.join(outDir, 'subjects', 'category.js'));
+const T = require(path.join(outDir, 'studyTools.js'));
 
 /* ------------------------------------------------------------------ */
 /* Inferencia                                                          */
@@ -154,6 +158,66 @@ check('IDIOMA empieza por idioma', C.SUBJECT_CATEGORY_META.IDIOMA.tools[0] === '
 check('una herramienta base sigue disponible', C.categorySupportsTool('COMENTARIO', 'test'));
 
 /* ------------------------------------------------------------------ */
+/* Herramientas de estudio: orden y lenguaje                          */
+/* ------------------------------------------------------------------ */
+
+console.log('\nHerramientas de estudio: el orden sigue a la categoría y el examen no se inventa');
+
+check(
+  'GENERAL conserva el orden de siempre',
+  T.studyToolOrder('GENERAL').join(',') === 'flashcards,test,mapa,guia',
+  T.studyToolOrder('GENERAL')
+);
+check(
+  'EXPOSICION empieza por la guía',
+  T.studyToolOrder('EXPOSICION')[0] === 'guia',
+  T.studyToolOrder('EXPOSICION')
+);
+check(
+  'ninguna herramienta desaparece del panel',
+  T.studyToolOrder('IDIOMA').length === T.STUDY_TOOL_KINDS.length &&
+    T.STUDY_TOOL_KINDS.every((kind) => T.studyToolOrder('IDIOMA').includes(kind))
+);
+
+const generalPrompt = T.buildStudyToolPrompt({
+  kind: 'test',
+  agentName: 'Catedrático',
+  specialty: 'Profesor',
+  subjectName: 'Orientación',
+  studentName: 'Alumno',
+  topic: { title: 'Unidad', unitNumber: 1 },
+  focus: null,
+}).system;
+const comentarioPrompt = T.buildStudyToolPrompt({
+  kind: 'test',
+  agentName: 'Catedrático',
+  specialty: 'Profesor',
+  subjectName: 'Historia del Arte',
+  category: 'COMENTARIO',
+  studentName: 'Alumno',
+  topic: { title: 'Unidad', unitNumber: 1 },
+  focus: null,
+}).system;
+
+check('el test no promete EBAU por defecto', !/EBAU|PAU/i.test(generalPrompt));
+check(
+  'COMENTARIO pide análisis de fragmento',
+  /análisis de un fragmento/.test(comentarioPrompt) && !/cálculo/.test(comentarioPrompt)
+);
+check(
+  'el panel recibe la categoría y usa el orden',
+  /studyToolOrder/.test(fs.readFileSync(path.join(projectRoot, 'src', 'components', 'brainup', 'StudyToolPanel.tsx'), 'utf8'))
+);
+check(
+  'la ruta de herramientas pasa la categoría',
+  /category:\s*agent\.subject\.category/.test(fs.readFileSync(path.join(projectRoot, 'src', 'app', 'api', 'tutor', 'tools', 'route.ts'), 'utf8'))
+);
+check(
+  'las herramientas no hablan de etapa por su cuenta',
+  !/\b(Bachillerato|ESO|EBAU)\b/.test(fs.readFileSync(path.join(projectRoot, 'src', 'lib', 'studyTools.ts'), 'utf8'))
+);
+
+/* ------------------------------------------------------------------ */
 /* Esquema y migración                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -205,7 +269,10 @@ check(
 );
 check('la ruta pasa la categoría al prompt', /category:\s*agent\.subject\.category/.test(tutorRoute));
 check('la página pasa la categoría al chat', /category:\s*agent\.subject\.category/.test(agentPage));
-check('el chat tipa la categoría', /category:\s*string\s*\|\s*null/.test(chat));
+check(
+  'el chat tipa la categoría',
+  /category:\s*(string|SubjectCategory)\s*\|\s*null/.test(chat)
+);
 check(
   'crear materia guarda categoría explícita o inferida',
   /normalizeSubjectCategory\(data\.category\)\s*\?\?\s*inferSubjectCategory\(data\.name\)/.test(actions)

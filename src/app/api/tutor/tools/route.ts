@@ -116,6 +116,7 @@ export async function POST(request: Request) {
     agentName: agent.name,
     specialty: agent.specialty,
     subjectName: agent.subject.name,
+    category: agent.subject.category,
     studentName: profile?.name ?? 'Estudiante',
     topic: {
       title: topic.title,

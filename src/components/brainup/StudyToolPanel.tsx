@@ -18,19 +18,19 @@ import clsx from 'clsx';
 import MarkdownMessage from './MarkdownMessage';
 import {
   STUDY_TOOL_META,
+  studyToolOrder,
   type Flashcard,
   type QuizQuestion,
   type StudyToolKind,
   type StudyToolPayload,
 } from '@/lib/studyTools';
+import type { SubjectCategory } from '@/lib/subjects/category';
 import {
   RECALL_RATINGS,
   RECALL_RATING_ORDER,
   type RecallRating,
 } from '@/lib/spacedRepetition';
 import { rateStudyCard } from '@/lib/spacedRepetitionActions';
-
-const KIND_ORDER: StudyToolKind[] = ['flashcards', 'test', 'mapa', 'guia'];
 
 const ICONS: Record<StudyToolKind, ComponentType<{ className?: string }>> = {
   flashcards: Layers,
@@ -308,12 +308,15 @@ function MindMapView({ mermaid, summary }: { mermaid: string; summary: string })
 export default function StudyToolPanel({
   agentId,
   subjectColor,
+  category,
   focus,
 }: {
   agentId: string;
   subjectColor: string;
+  category?: SubjectCategory | null;
   focus: string;
 }) {
+  const order = studyToolOrder(category);
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<StudyToolKind | null>(null);
   const [loading, setLoading] = useState(false);
@@ -375,7 +378,7 @@ export default function StudyToolPanel({
             <Sparkles className="h-3 w-3" /> Herramientas
           </span>
 
-          {KIND_ORDER.map((id) => {
+          {order.map((id) => {
             const Icon = ICONS[id];
             const active = open && kind === id;
             return (
