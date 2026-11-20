@@ -147,7 +147,7 @@ export interface ProactivePlan {
   dueReviews?: number;
   errorsOpen?: number;
   headline?: string | null;
-  studiedMinutesToday?: number;
+  studiedMinutes?: number;
 }
 
 export interface ProactiveExam {
@@ -374,20 +374,30 @@ export function dismissalStorageKey(dayKey: string): string {
 }
 
 /**
+ * Tono de la etapa que la página obtiene de `getStageConfig`. Aquí no se
+ * comparan literales de etapa: eso vive solo en `src/lib/stages`.
+ */
+export interface ProactiveStageTone {
+  label: string;
+  hasPau: boolean;
+  supportsEcts: boolean;
+}
+
+/**
  * Línea breve para el saludo del catedrático, adaptada a la etapa.
  *
  * No usa el plan ni la base: se alimenta de lo que la página del tutor ya ha
  * leído (unidad floja medida, unidades sin medir, examen y errores). Sin IA.
  */
 export function buildTutorProactiveLine(input: {
-  stage?: ProactiveStage | string | null;
+  tone: ProactiveStageTone;
   weakTopicLabel?: string | null;
   unmeasuredCount?: number | null;
   examTitle?: string | null;
   examDays?: number | null;
   pendingErrors?: number | null;
 }): string | null {
-  const stage = input.stage === 'ESO' || input.stage === 'UNIVERSIDAD' ? input.stage : 'BACHILLERATO';
+  const tone = input.tone;
   const weak = input.weakTopicLabel?.trim() || null;
   const unmeasured = Math.max(0, input.unmeasuredCount ?? 0);
   const examTitle = input.examTitle?.trim() || null;
@@ -395,33 +405,33 @@ export function buildTutorProactiveLine(input: {
   const errors = Math.max(0, input.pendingErrors ?? 0);
 
   if (examTitle && examDays !== null && examDays >= 0) {
-    if (stage === 'ESO') {
-      return `Lo más útil hoy: preparar **${examTitle}**, que cae ${daysLabel(examDays)}. Empezamos por lo que ya sabes y cerramos los huecos.`;
-    }
-    if (stage === 'UNIVERSIDAD') {
+    if (tone.supportsEcts) {
       return `Lo más útil hoy: **${examTitle}**, ${daysLabel(examDays)}. Vamos a lo que entra y a lo que más pesa en la asignatura.`;
+    }
+    if (!tone.hasPau) {
+      return `Lo más útil hoy: preparar **${examTitle}**, que cae ${daysLabel(examDays)}. Empezamos por lo que ya sabes y cerramos los huecos.`;
     }
     return `Lo más útil hoy: **${examTitle}**, ${daysLabel(examDays)}. Con la fecha a la vista, cada bloque cuenta para la nota.`;
   }
 
   if (weak) {
-    if (stage === 'ESO') {
-      return `La unidad que peor llevas medida es **${weak}**. Hoy basta con arreglar una parte pequeña y comprobar que se queda.`;
-    }
-    if (stage === 'UNIVERSIDAD') {
+    if (tone.supportsEcts) {
       return `La unidad con peor nivel medido es **${weak}**. La atacamos con problemas y criterio de corrección, no releyendo apuntes.`;
+    }
+    if (!tone.hasPau) {
+      return `La unidad que peor llevas medida es **${weak}**. Hoy basta con arreglar una parte pequeña y comprobar que se queda.`;
     }
     return `La unidad con peor nivel medido es **${weak}**. Es la que más margen de nota tiene: empezamos por ahí.`;
   }
 
   if (unmeasured > 0) {
-    return stage === 'ESO'
+    return !tone.hasPau && !tone.supportsEcts
       ? `Todavía no sé tu nivel en ${plural(unmeasured, 'unidad', 'unidades')}. Antes de decirte qué repasar, te hago unas preguntas cortas.`
       : `Todavía no hay ninguna medición real de tu nivel en ${plural(unmeasured, 'unidad', 'unidades')}. No voy a suponer que algo se te da mal: hoy toca medirlo.`;
   }
 
   if (errors > 0) {
-    return stage === 'ESO'
+    return !tone.hasPau && !tone.supportsEcts
       ? `Arrastras ${plural(errors, 'fallo', 'fallos')} sin cerrar. Con dos o tres bien trabajados, hoy ya ganas algo.`
       : `Arrastras ${plural(errors, 'error sin dominar', 'errores sin dominar')}. Cerrarlos vale más que volver a leer lo que ya entiendes.`;
   }

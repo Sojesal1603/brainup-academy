@@ -21,7 +21,7 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 | 10. Cierre de sesión, corrector, foto y banco | hecho | este commit | `sessionClose.ts` escribe en una transacción el `TutorSessionOutcome` (clave `sesion:<agente>:<día>`), las fichas de `ErrorLog` y las `ReviewCard` con `frontHash`, y después invalida el plan; el índice único `[userId, sessionKey]` impide duplicados al repetir. Migración `20261114210000_session_close` aplicada (2026-11-14T22:28:21Z; columnas e índices comprobados). Corrector con rúbrica Zod, dos pasadas y mediana por bloque, sin rellenar notas que el modelo no da. Foto manuscrita: `/api/examinador/foto` la transcribe con visión y devuelve confianza; el envío corrige **la transcripción** y avisa si no se ha podido leer. Banco de 4 casos con nota a mano y MAE real **0,19 pts** (2 pasadas, `gemini-3.5-flash-lite`), visible en el Examinador. `verify:cierre` 17/17, `verify:corrector` 29/29, `verify:sesiones` 115, `verify:srs` y `verify:planificador` en verde; `tsc` y `eslint` 0; `npm run build` 0 (`VgvJw3g8eVB5PjHDK32bo`); salud 200 con ese build, `/` y `/examinador` 307, APIs 401. | `verify:examinador` no puede pasar sin una sesión real de Supabase (responde 401 en esta máquina); el recorrido de la foto con sesión real queda como prueba manual. La transcripción necesita un modelo con visión: sin él se avisa y no se corrige. |
 | 11. B3 pedagogía activa | hecho | `8343bdd`, `1b969cb`, este commit | Etapas ESO 1º–4º, Bachillerato 1º–2º y Universidad (5 ramas, cursos 1º–5º, titulación editable, ECTS y convocatorias) en `src/lib/stages/`; migración `20261120120000_education_stage` **expand-only, no aplicada a producción**; backfill con `--dry-run` por defecto; cabecera, barra lateral, Ajustes, Estadísticas y prompts dejan de asumir PAU/14. Pedagogía activa determinista (`pickTechnique`) declarada en la capa de etapa y conectada con el cierre del Paso 10 sin tocar `sessionClose.ts`. `verify:stages` (66), `verify:corrector` (29), `check`, `lint` y `build` en verde. `verify:cierre` queda **bloqueado a propósito** hasta aplicar la migración: la base de producción aún no tiene `stage` y el test crea perfiles reales. | La migración y el backfill se ejecutan a mano en Supabase (SQL abajo). El recorrido visual de Ajustes/Universidad con sesión real queda como prueba manual. |
 | 12. Verificación SymPy/unidades/química | hecho | `0dfd504`, `49c5dc6`, este commit | `docs/ENCARGO.md` §3.7 cerrado **sin SymPy**: el despliegue es Node puro (no hay `Dockerfile` ni `render.yaml`; `netlify.toml:26-33` y `runtime = 'nodejs'`) y `python3` local no trae la librería. Motor determinista en `src/lib/verify/`: LaTeX → expresión, CAS acotado, unidades SI y química (masas molares IUPAC, ajuste por eliminación gaussiana con carga, reactivo limitante). Se adjunta como evidencia en `BlockResult.verification`, se le da al corrector y se pinta en `ExamResults`; **no toca la nota ni `notationPenalty`**. `verify:verificacion` 103 comprobaciones. Solución de referencia `expected` privada en `questionsJson` (se quita antes de renderizar) y botón «Comprobar cálculo» en el catedrático contra `/api/verificar`, determinista y con sesión. | Queda el recorrido visual con sesión real: un simulacro corregido y el botón del catedrático. |
-| 13. Proactividad diaria | pendiente | — | — | — |
+| 13. Proactividad diaria | hecho | `4d95c28`, `a2ca8f3`, `b9a785b`, este commit | Motor puro `src/lib/proactivity.ts` con ranking fijo (examen → repaso vencido → errores → racha → siguiente bloque) y honestidad sin mediciones. Tarjeta `ProactiveCard` encima de «Hoy toca esto», con enlaces profundos y descarte «Hoy no» por día en `localStorage` (sin migración). Silencio local 22:00–08:00 validado al guardar el aviso y al enviarlo, con zona horaria del alumno. El saludo del catedrático recibe una línea por reglas adaptada con `getStageConfig` (ESO, Bachillerato, Universidad), sin IA. **No escribe `StudyBlock`.** `verify:proactividad` 71 comprobaciones. | El envío push en producción depende de un cron externo; la ventana de silencio es fija y no configurable; el descarte es por dispositivo; no se ha recorrido la tarjeta en navegador con sesión real. |
 | 14. B7 modos por materia | pendiente | — | — | — |
 | 15. Fase 0 de seguridad | en curso (parte segura) | este commit | RLS activo en 30/30 tablas de `public` (incluida `PushSubscription`); `anon` y `authenticated` sin privilegios (0 filas en `information_schema.role_table_grants`); anon recibe HTTP 401/42501 en las 6 tablas probadas. TLS con CA de Supabase y `sslaccept=strict`. | Defaults de `supabase_admin` siguen abiertos (requiere SQL como ese rol); faltan `prisma_app`, secretos Moodle y retry de lecturas. |
 | 16. Soporte 1º ESO | hecho | `8a45b15` | `UserProfile.modality` sigue siendo la única fuente del curso; `src/lib/courseCatalog.ts` la normaliza a curso + currículo y define las nueve materias base de 1º ESO (Lengua Castellana y Literatura, Matemáticas, Geografía e Historia, Biología y Geología, Inglés, Tecnología y Digitalización, Educación Física, Música y Educación Plástica). `/ajustes` permite elegir el curso y, al activar 1º ESO, `courseApply.ts` crea de forma idempotente las materias que falten con su Catedrático IA en LOMLOE 1º ESO; cambiar de curso no borra nada. La cabecera y la barra lateral reciben el curso real y en ESO ocultan el objetivo PAU y el Examinador PAU; el coordinador de la puesta a punto y los Catedráticos IA reciben `1º ESO (LOMLOE 1º ESO)` para ajustar nivel y prerrequisitos. `tsc`, `eslint` y `npm run build` en verde. | La creación de materias al cambiar de curso y el ocultado del menú requieren una sesión real en el navegador para recorrerse a mano; la lógica está compilada y cubierta por los tipos. |
@@ -83,23 +83,27 @@ Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
 - Rollback preparado: `DISABLE RLS` + `GRANT ALL` usando `grants-before.json` y el
   dump. No fue necesario.
 
-## Corte actual (2026-11-13)
+## Corte actual (2026-11-20)
 
-Hechos y verificados: pasos **1 a 8**. El plan diario se decide con reglas
+Hechos y verificados: pasos **1 a 13**. El plan diario se decide con reglas
 (determinista, una sola vez, con lock), se invalida con motivo, conserva lo
-empezado, calibra horas con sesiones reales y el Cuartel tiene un solo «Ahora»,
-selector de energía y aviso push.
+empezado y calibra horas con sesiones reales. El Cuartel tiene un solo «Ahora»,
+selector de energía, aviso push con franja de silencio y una propuesta diaria
+que cita el plan. El catedrático verifica cuentas y abre con una línea adaptada
+a la etapa.
 
-Pendientes: pasos **1 a 3 de claves de IA** (bloqueado: falta `SECRETS_KEY_V1`) y pasos **9 a 14**. No se han empezado. Bloqueos concretos conocidos:
+Pendiente: paso **14** (modos por materia). Bloqueos que siguen abiertos:
 
-- 9: no existen `responseSchema`, `open_document` ni la confirmación Zod de
-  restricciones.
-- 10: no existen `frontHash`, `TutorSessionOutcome` en el cierre ni doble
-  corrección con mediana; el examinador actual no los cubre.
-- 11: la pedagogía activa no está separada del cierre del paso 10.
-- 12: no hay SymPy ni verificación de unidades/química.
-- 13: la proactividad diaria con horas de silencio no está implementada.
-- 14: no hay modos por materia.
+- La migración expand del Paso 11 (`20261120120000_education_stage`) no está
+  aplicada en producción: `verify:cierre` queda bloqueado y cualquier consulta
+  que lea `stage` falla hasta aplicar el SQL y desplegar después. El Paso 13
+  evita esa columna y deduce la etapa desde `modality`.
+- `verify:cierre` tampoco puede ejecutarse desde este entorno cuando la base no
+  responde (Prisma `P1001`).
+- El aviso push no tiene reloj programado en el repositorio: `netlify.toml` no
+  declara funciones con `schedule` y el único cron es `npm run push:cron`, que
+  corre en local. El silencio y la idempotencia están probados; el envío real en
+  producción depende de un cron externo (Render, Netlify o un servicio de reloj).
 
 ## Última verificación (2026-11-13)
 
@@ -268,6 +272,19 @@ El backfill **no modifica `modality`** ni borra materias. En modalidades descono
 - **«Comprobar cálculo» en el catedrático.** `POST /api/verificar` exige sesión, valida el texto y devuelve el informe del motor; no llama a ningún modelo ni reescribe la respuesta. En el chat aparece como acción sobre el mensaje (solo si contiene cuentas) y el resultado se pinta aparte, con el aviso de que no cambia la nota.
 - **Pruebas.** `scripts/verify-verificacion.js` compila `src/lib/verify` y ejecuta **103 comprobaciones** (LaTeX, CAS, unidades, química, contrato de marcado e integración: `expected` no se filtra, el endpoint exige sesión y no usa IA) sin gastar IA. `verify:corrector` sigue en 29.
 - **Límites honestos.** Sin caret, `NO3-` se lee como nitrato (−1) y `Fe3+` como hierro(III); es una convención de aula, no una certeza. La química redox compleja y las disoluciones con actividades quedan fuera. No se ha recorrido `ExamResults` en navegador con un simulacro real corregido.
+
+## Paso 13 (2026-11-20)
+
+**Definición del encargo** (`docs/ENCARGO.md:243-251`, `PLAN.md:160-166`): propuesta diaria basada en el plan y en riesgo real (examen próximo, error repetido, repaso vencido), **sin LLM en la apertura**, respetando horas de silencio y sin push nocturno. La proactividad no escribe `StudyBlock`.
+
+- **Motor puro y determinista.** `src/lib/proactivity.ts` no importa Prisma, red ni IA. Ordena las señales con prioridad fija: examen a ≤14 días, repasos vencidos, errores abiertos, racha en riesgo (solo desde las 18:00) y siguiente bloque del plan. Si no hay mediciones, no inventa un punto débil: propone medir o se calla. Devuelve una propuesta primaria, como máximo dos secundarias y la evidencia en texto.
+- **Sin duplicar el planificador.** La tarjeta no vuelve a puntuar: cita el bloque, el motivo y el titular que `computeDayPlan` ya decidió. Si no hay señales ni plan, no se pinta nada.
+- **Tarjeta en el Cuartel.** `ProactiveCard` se coloca justo encima de «Hoy toca esto» y enlaza a la acción real (`/repaso`, `/errores`, `/examenes`, `/temario` o `/#ahora`). «Hoy no» guarda el descarte del día en `localStorage` con la clave `brainup.proactive.<día>`: no hay escritura ni migración, y mañana vuelve a proponer. El ancla `#ahora` se añadió al bloque actual.
+- **Horas de silencio reales.** La franja local 22:00–08:00 se aplica dos veces: `saveReminder` rechaza guardar una hora dentro de ella y `sendDueReminders` la vuelve a comprobar antes de enviar, así que una hora vieja en la base tampoco despierta a nadie. La zona sale de `UserProfile.timezone`, no del servidor.
+- **Catedrático adaptado a la etapa.** El saludo recibe una frase por reglas construida con los datos que la página ya lee (unidad floja medida, unidades sin medir, examen y errores). El tono se decide con `getStageConfig`: ESO habla de partes pequeñas, Bachillerato de nota, Universidad de problemas y criterio. **No se gasta ninguna llamada de IA.**
+- **Sin esquema y sin migración.** Todo se apoya en tablas existentes (`Topic`, `ReviewCard`, `Exam`, `ErrorLog`, `PlanState`, `PushSubscription`) y en `localStorage`. La etapa se deduce de `modality` para no seleccionar la columna `stage` mientras la migración del Paso 11 no esté aplicada.
+- **Pruebas.** `scripts/verify-proactividad.js` compila el motor y ejecuta **71 comprobaciones**: ranking, fronteras 08:00/22:00, Madrid/Tokio, día local, validación de la hora del aviso, honestidad sin mediciones, descartes, inmutabilidad del plan, línea por etapa y guardas estáticas de la integración. `verify:stages` (66), `verify:corrector` (29), `verify:verificacion` (103), `check`, `lint` y `build` en verde.
+- **Límites honestos.** El push de producción necesita un reloj externo: el repo no declara ninguna función programada y `npm run push:cron` es local. La ventana de silencio es fija (no configurable por el alumno) y el descarte vive en el navegador, no en la cuenta. No se ha recorrido la tarjeta ni el saludo con una sesión real de navegador.
 
 ## Deuda técnica anotada (2026-11-14)
 

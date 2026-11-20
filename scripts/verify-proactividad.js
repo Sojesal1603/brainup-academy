@@ -305,9 +305,13 @@ const examLine = {
   unmeasuredCount: 3,
   pendingErrors: 2,
 };
-const lineEso = P.buildTutorProactiveLine({ ...examLine, stage: 'ESO' });
-const lineBach = P.buildTutorProactiveLine({ ...examLine, stage: 'BACHILLERATO' });
-const lineUni = P.buildTutorProactiveLine({ ...examLine, stage: 'UNIVERSIDAD' });
+const TONE_ESO = { label: 'ESO', hasPau: false, supportsEcts: false };
+const TONE_BACH = { label: 'Bachillerato', hasPau: true, supportsEcts: false };
+const TONE_UNI = { label: 'Universidad', hasPau: false, supportsEcts: true };
+
+const lineEso = P.buildTutorProactiveLine({ ...examLine, tone: TONE_ESO });
+const lineBach = P.buildTutorProactiveLine({ ...examLine, tone: TONE_BACH });
+const lineUni = P.buildTutorProactiveLine({ ...examLine, tone: TONE_UNI });
 
 check('ESO nombra el examen', /Examen de Física/.test(lineEso), lineEso);
 check('Bachillerato nombra el examen', /Examen de Física/.test(lineBach), lineBach);
@@ -316,10 +320,10 @@ check('las tres etapas no dicen lo mismo', new Set([lineEso, lineBach, lineUni])
 check('Bachillerato habla de nota', /nota/.test(lineBach), lineBach);
 check('ESO no habla de nota de corte', !/nota de corte/i.test(lineEso), lineEso);
 
-const weakLine = P.buildTutorProactiveLine({ stage: 'ESO', weakTopicLabel: 'Fracciones' });
+const weakLine = P.buildTutorProactiveLine({ tone: TONE_ESO, weakTopicLabel: 'Fracciones' });
 check('sin examen se apoya en la unidad floja', /Fracciones/.test(weakLine), weakLine);
 
-const emptyLine = P.buildTutorProactiveLine({ stage: 'UNIVERSIDAD' });
+const emptyLine = P.buildTutorProactiveLine({ tone: TONE_UNI });
 check('sin señales no inventa línea', emptyLine === null, emptyLine);
 
 /* ------------------------------------------------------------------ */
@@ -364,6 +368,32 @@ check(
 check(
   'el push no decide la hora por su cuenta',
   !/QUIET_START_MINUTES\s*=/.test(pushSource)
+);
+
+const tutorSource = fs.readFileSync(
+  path.join(projectRoot, 'src', 'components', 'brainup', 'TutorChat.tsx'),
+  'utf8'
+);
+const tutorPageSource = fs.readFileSync(
+  path.join(projectRoot, 'src', 'app', 'brainup', '[agentId]', 'page.tsx'),
+  'utf8'
+);
+const engineSource = fs.readFileSync(
+  path.join(projectRoot, 'src', 'lib', 'proactivity.ts'),
+  'utf8'
+);
+
+check('el motor no importa Prisma ni IA', !/^import\s/m.test(engineSource));
+check('el saludo recibe la línea proactiva', /proactiveLine: string \| null/.test(tutorSource));
+check('el saludo la pinta', /if \(opening\.proactiveLine\)/.test(tutorSource));
+check('la página usa el motor por reglas', /buildTutorProactiveLine\(/.test(tutorPageSource));
+check(
+  'la etapa sale de getStageConfig',
+  /getStageConfig\(\{ modality: profile\?\.modality \}\)/.test(tutorPageSource)
+);
+check(
+  'la página no selecciona la columna stage sin migrar',
+  /select: \{ modality: true \}/.test(tutorPageSource) && !/stage: true/.test(tutorPageSource)
 );
 
 /* ------------------------------------------------------------------ */

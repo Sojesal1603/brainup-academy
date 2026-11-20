@@ -302,6 +302,11 @@ export interface TutorOpeningContext {
   pendingErrors: number;
   /** Cómo explicó el profesor la unidad que está en curso (si el alumno lo contó). */
   teacherMethodLabel: string | null;
+  /**
+   * Propuesta del día redactada por reglas y adaptada a la etapa. No gasta IA:
+   * se calcula en el servidor con lo que la página ya ha leído.
+   */
+  proactiveLine: string | null;
 }
 
 interface TutorChatProps {
@@ -531,6 +536,10 @@ function buildOpeningMessage(agent: TutorAgent, opening: TutorOpeningContext): s
   if (situation.length > 0) {
     lines.push('Esto es lo que veo en tu expediente:');
     lines.push(situation.map((item) => `- ${item}`).join('\n'));
+  }
+
+  if (opening.proactiveLine) {
+    lines.push(opening.proactiveLine);
   }
 
   lines.push('¿Por dónde empezamos? Elige abajo o lánzame directamente tu duda.');

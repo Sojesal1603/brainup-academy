@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { currentTenant } from '@/lib/tenantContext';
 import { agentSlug, looksLikeUuid } from '@/lib/agentSlug';
+import { getStageConfig } from '@/lib/stages';
+import { buildTutorProactiveLine } from '@/lib/proactivity';
 import nextDynamic from 'next/dynamic';
 import { ChatSkeleton } from '@/components/ui/Skeletons';
 
@@ -104,6 +106,7 @@ export default async function TutorPage({
     notesPreview,
     teacherUnit,
     sessionTopics,
+    profile,
   ] = await Promise.all([
     // OJO: el `agentId` de la URL puede ser el slug de la materia
     // («lengua-castellana-y-literatura-i»), no el UUID del agente. Buscar la
@@ -166,7 +169,30 @@ export default async function TutorPage({
       orderBy: [{ unitNumber: 'asc' }, { title: 'asc' }],
       select: { id: true, title: true },
     }),
+    // Solo `modality`: la columna `stage` del Paso 11 aún no está aplicada en
+    // producción y `getStageConfig` sabe inferir la etapa desde la modalidad.
+    // Así el saludo se adapta sin romper la página si falta la migración.
+    prisma.userProfile.findUnique({
+      where: { id: user.id },
+      select: { modality: true },
+    }),
   ]);
+
+  const stageConfig = getStageConfig({ modality: profile?.modality });
+  // Una sola frase, por reglas y con datos ya leídos. No llama al modelo: el
+  // saludo del catedrático tiene que seguir sin gastar API.
+  const proactiveLine = buildTutorProactiveLine({
+    tone: {
+      label: stageConfig.label,
+      hasPau: stageConfig.scale.hasPau,
+      supportsEcts: stageConfig.supportsEcts,
+    },
+    weakTopicLabel: measuredTopics[0]?.title ?? null,
+    unmeasuredCount: unmeasuredUnits,
+    examTitle: upcomingExams[0]?.title ?? null,
+    examDays: upcomingExams[0] ? daysUntil(upcomingExams[0].examDate) : null,
+    pendingErrors,
+  });
 
   const initialMessages =
     conversation?.messages
@@ -263,6 +289,7 @@ export default async function TutorPage({
             examDays: upcomingExams[0] ? daysUntil(upcomingExams[0].examDate) : null,
             pendingErrors,
             teacherMethodLabel: teacherUnit?.teacherMethod?.trim().slice(0, 300) || null,
+            proactiveLine,
           }}
           notes={{ total: notesTotal, titles: notesPreview.map((note) => note.title) }}
           engines={engines}
