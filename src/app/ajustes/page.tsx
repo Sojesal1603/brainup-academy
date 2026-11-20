@@ -32,6 +32,10 @@ const AiKeyCard = nextDynamic(() => import('@/components/ajustes/AiKeyCard'), {
 const GradesPanel = nextDynamic(() => import('@/components/ajustes/GradesPanel'), {
   loading: () => <PanelSkeleton lines={4} />,
 });
+const SubjectCategoriesPanel = nextDynamic(
+  () => import('@/components/ajustes/SubjectCategoriesPanel'),
+  { loading: () => <PanelSkeleton lines={4} /> }
+);
 import {
   Settings,
   Download,
@@ -144,6 +148,16 @@ export default async function SettingsPage() {
           gradeSource: subject.gradeSource,
           measuredUnits: measuredMap.get(subject.id) ?? 0,
           totalUnits: subject._count.topics,
+        }))}
+      />
+
+      {/* Cómo se trabaja cada materia (Paso 14): método y herramientas. */}
+      <SubjectCategoriesPanel
+        subjects={subjects.map((subject) => ({
+          id: subject.id,
+          name: subject.name,
+          color: subject.color,
+          category: subject.category,
         }))}
       />
 

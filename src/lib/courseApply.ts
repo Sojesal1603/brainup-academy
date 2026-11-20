@@ -7,6 +7,7 @@ import {
 } from './courseCatalog';
 import { stageConfig } from './stages';
 import { normalizeTopicTitle } from './temarioImport';
+import { inferSubjectCategory } from './subjects/category';
 
 export interface CourseApplyResult {
   course: CourseOption;
@@ -61,6 +62,7 @@ export async function applyCourseToProfile(
     const subject = await prisma.subject.create({
       data: {
         name: base.name,
+        category: inferSubjectCategory(base.name),
         color: base.color,
         // La ponderación PAU solo existe donde la etapa la declara.
         pauWeight: config.scale.hasPau ? 0.2 : 0,

@@ -520,6 +520,7 @@ export async function POST(request: Request) {
         systemPrompt: agent.systemPrompt,
         subject: {
           name: agent.subject.name,
+          category: agent.subject.category,
           currentGrade: agent.subject.currentGrade,
           gradeSource: agent.subject.gradeSource,
           targetGrade: agent.subject.targetGrade,

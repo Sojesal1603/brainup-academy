@@ -288,7 +288,7 @@ interface TutorAgent {
   id: string;
   name: string;
   specialty: string;
-  subject: { name: string; color: string };
+  subject: { name: string; color: string; category: string | null };
 }
 
 /** Contexto real del alumno para el saludo de apertura del catedrático. */

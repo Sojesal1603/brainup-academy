@@ -25,6 +25,11 @@ import { isTemarioSource, normalizeTopicTitle, parseTemarioText, TemarioSource }
 import { buildSubjectTutorPrompt, resolveCourse } from './courseCatalog';
 import { stageConfig } from './stages';
 import { validateReminderTime } from './proactivity';
+import {
+  SUBJECT_CATEGORIES,
+  inferSubjectCategory,
+  normalizeSubjectCategory,
+} from './subjects/category';
 
 /** Todo lo que depende del temario se refresca con cada cambio de estado. */
 function revalidateTemario() {
@@ -770,6 +775,8 @@ export async function createCustomSubject(data: {
   color: string;
   isPhaseGeneral: boolean;
   pauWeight: number;
+  /** "AUTO" = inferir del nombre; null también infiere. */
+  category?: string | null;
 }) {
   const { tenant: prisma, userId } = await currentTenant();
   const profile = await prisma.userProfile.findUnique({
@@ -780,6 +787,10 @@ export async function createCustomSubject(data: {
   const subject = await prisma.subject.create({
     data: {
       name: data.name,
+      // La categoría explícita manda; sin ella se infiere una vez y se guarda,
+      // para que el dato sea consultable y no dependa del nombre en cada turno.
+      category:
+        normalizeSubjectCategory(data.category) ?? inferSubjectCategory(data.name),
       color: data.color || '#3b82f6',
       isPhaseGeneral: data.isPhaseGeneral,
       // La ponderación PAU solo existe donde la etapa la declara.
@@ -803,7 +814,47 @@ export async function createCustomSubject(data: {
   updateTag('cuartel');
   revalidatePath('/planificador');
   revalidatePath('/apuntes');
+  revalidatePath('/ajustes');
   return { success: true, subjectId: subject.id };
+}
+
+/**
+ * Cambia la categoría didáctica de una materia (Paso 14).
+ *
+ * `null` vuelve a la inferencia por nombre. No toca el `systemPrompt` guardado
+ * del agente: la categoría entra como capa dinámica al construir el prompt, así
+ * que el cambio surte efecto en el turno siguiente sin reescribir filas.
+ */
+export async function setSubjectCategory(
+  subjectId: string,
+  category: string | null
+) {
+  const { tenant: prisma } = await currentTenant();
+  const cleanId = String(subjectId ?? '').trim();
+  if (!cleanId) return { success: false, error: 'Falta la materia.' };
+
+  const normalized =
+    category === null || category === '' || category === 'AUTO'
+      ? null
+      : normalizeSubjectCategory(category);
+
+  if (category !== null && category !== '' && category !== 'AUTO' && !normalized) {
+    return {
+      success: false,
+      error: `Categoría no válida. Usa una de: ${SUBJECT_CATEGORIES.join(', ')}.`,
+    };
+  }
+
+  await prisma.subject.update({
+    where: { id: cleanId },
+    data: { category: normalized },
+  });
+
+  revalidatePath('/ajustes');
+  revalidatePath('/brainup');
+  revalidatePath('/temario');
+  updateTag('cuartel');
+  return { success: true, category: normalized };
 }
 
 /**

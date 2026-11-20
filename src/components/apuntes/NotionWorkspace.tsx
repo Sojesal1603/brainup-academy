@@ -32,6 +32,10 @@ import {
   createCustomTopic,
 } from '@/lib/actions';
 import NoteRenderer from './NoteRenderer';
+import {
+  SUBJECT_CATEGORIES,
+  SUBJECT_CATEGORY_META,
+} from '@/lib/subjects/category';
 import clsx from 'clsx';
 
 /** Apunte tal y como llega del servidor, con quién lo ha escrito. */
@@ -134,6 +138,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
   const [isNewTopicModalOpen, setIsNewTopicModalOpen] = useState(false);
   const [newSubjectForm, setNewSubjectForm] = useState({
     name: '',
+    category: 'AUTO',
     color: '#3b82f6',
     isPhaseGeneral: false,
     pauWeight: 0.2,
@@ -219,6 +224,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
       setIsNewSubjectModalOpen(false);
       setNewSubjectForm({
         name: '',
+        category: 'AUTO',
         color: '#3b82f6',
         isPhaseGeneral: false,
         pauWeight: 0.2,
@@ -833,6 +839,26 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
                   required
                   className="w-full bg-[#080d18] border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Cómo se trabaja esta materia
+                </label>
+                <select
+                  value={newSubjectForm.category}
+                  onChange={(e) =>
+                    setNewSubjectForm({ ...newSubjectForm, category: e.target.value })
+                  }
+                  className="w-full bg-[#080d18] border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                >
+                  <option value="AUTO">Automática según el nombre</option>
+                  {SUBJECT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {SUBJECT_CATEGORY_META[category].label} — {SUBJECT_CATEGORY_META[category].description}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

@@ -17,6 +17,7 @@ import { consumePendingReplace, hasPendingReplace } from './setupReplaceIntent';
 import { auditSetup } from './setupAudit';
 import { prismaErrorCode } from './databaseDiagnostics';
 import { buildSubjectTutorPrompt, resolveCourse } from './courseCatalog';
+import { inferSubjectCategory } from './subjects/category';
 
 /** Opciones de aplicación de un turno. */
 export interface SetupApplyOptions {
@@ -304,6 +305,7 @@ export async function applySetupActions(
     const created = await prisma.subject.create({
       data: {
         name,
+        category: inferSubjectCategory(name),
         color: '#64748b',
         pauWeight: 0,
         isPhaseGeneral: false,

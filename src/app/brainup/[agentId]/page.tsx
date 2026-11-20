@@ -277,7 +277,11 @@ export default async function TutorPage({
             id: agent.id,
             name: agent.name,
             specialty: agent.specialty,
-            subject: { name: agent.subject.name, color: agent.subject.color },
+            subject: {
+              name: agent.subject.name,
+              color: agent.subject.color,
+              category: agent.subject.category,
+            },
           }}
           model={modelLabel}
           initialConversationId={conversation?.id ?? null}

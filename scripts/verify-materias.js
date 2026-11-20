@@ -182,6 +182,44 @@ check('el backfill solo rellena null', /category === null/.test(backfill));
 check('el backfill no pisa decisiones', !/updateMany\(\{[\s\S]*category:/.test(backfill));
 
 /* ------------------------------------------------------------------ */
+/* Integración                                                         */
+/* ------------------------------------------------------------------ */
+
+console.log('\nIntegración: el prompt, la creación y los ajustes usan la categoría');
+
+const read = (...parts) => fs.readFileSync(path.join(projectRoot, ...parts), 'utf8');
+const tutor = read('src', 'lib', 'tutor.ts');
+const tutorRoute = read('src', 'app', 'api', 'tutor', 'route.ts');
+const agentPage = read('src', 'app', 'brainup', '[agentId]', 'page.tsx');
+const chat = read('src', 'components', 'brainup', 'TutorChat.tsx');
+const actions = read('src', 'lib', 'actions.ts');
+const notion = read('src', 'components', 'apuntes', 'NotionWorkspace.tsx');
+const ajustes = read('src', 'app', 'ajustes', 'page.tsx');
+const panel = read('src', 'components', 'ajustes', 'SubjectCategoriesPanel.tsx');
+
+check('el prompt importa la capa', /buildCategoryLayer/.test(tutor) && /subjectCategoryOf/.test(tutor));
+check(
+  'la capa entra tras la de materia',
+  tutor.search(/buildSubjectLayer\(/) >= 0 &&
+    tutor.search(/buildSubjectLayer\(/) < tutor.search(/buildCategoryLayer\(/)
+);
+check('la ruta pasa la categoría al prompt', /category:\s*agent\.subject\.category/.test(tutorRoute));
+check('la página pasa la categoría al chat', /category:\s*agent\.subject\.category/.test(agentPage));
+check('el chat tipa la categoría', /category:\s*string\s*\|\s*null/.test(chat));
+check(
+  'crear materia guarda categoría explícita o inferida',
+  /normalizeSubjectCategory\(data\.category\)\s*\?\?\s*inferSubjectCategory\(data\.name\)/.test(actions)
+);
+check('el formulario deja elegir categoría', /newSubjectForm.category/.test(notion) && /AUTO/.test(notion));
+check('Ajustes muestra el panel', /SubjectCategoriesPanel/.test(ajustes));
+check('el panel escribe con la acción', /setSubjectCategory/.test(panel));
+check(
+  'las materias creadas por curso se infieren igual',
+  /category:\s*inferSubjectCategory/.test(read('src', 'lib', 'courseApply.ts')) &&
+    /category:\s*inferSubjectCategory/.test(read('src', 'lib', 'setupApply.ts'))
+);
+
+/* ------------------------------------------------------------------ */
 /* Resultado                                                           */
 /* ------------------------------------------------------------------ */
 

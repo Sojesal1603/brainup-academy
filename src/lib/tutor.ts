@@ -41,6 +41,7 @@ import {
   type NoteIndexEntry,
   type SharedNote,
 } from './tutorNotes';
+import { buildCategoryLayer, subjectCategoryOf } from './subjects/category';
 
 export {
   getConfiguredModelLabel,
@@ -86,6 +87,8 @@ export interface TutorAgentInfo {
   systemPrompt: string;
   subject: {
     name: string;
+    /** Categoría didáctica guardada; null = se infiere del nombre. */
+    category?: string | null;
     currentGrade: number;
     /** "sin_medir" | "declarada" | "simulacro": si nadie la ha declarado, no se cita. */
     gradeSource: string;
@@ -230,6 +233,16 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
 
   // Capa 3: materia concreta.
   lines.push(...buildSubjectLayer(agent.subject.name));
+
+  // Capa 4: método de la categoría (Paso 14). GENERAL no añade nada, así que
+  // una materia sin categoría conserva el prompt exacto de antes.
+  const categoryLayer = buildCategoryLayer(
+    subjectCategoryOf({ name: agent.subject.name, category: agent.subject.category })
+  );
+  if (categoryLayer.length > 0) {
+    lines.push('');
+    lines.push(...categoryLayer);
+  }
 
   // Paso 11: pedagogía activa elegida por reglas (determinista, sin IA).
   const weakUnits = ctx.measuredTopics.filter((topic) => topic.masteryLevel < WEAK_MASTERY).length;
