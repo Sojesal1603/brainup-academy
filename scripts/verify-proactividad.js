@@ -351,6 +351,21 @@ check('la tarjeta no consulta Prisma ni IA', !/from '@\/lib\/(db|prisma|aiEngine
 check('el descarte usa la clave del día', /dismissalStorageKey\(decision\.dayKey\)/.test(cardSource));
 check('«Hoy toca esto» tiene el ancla del bloque actual', /id="ahora"/.test(hoySource));
 
+const pushSource = fs.readFileSync(path.join(projectRoot, 'src', 'lib', 'push.ts'), 'utf8');
+const actionsSource = fs.readFileSync(path.join(projectRoot, 'src', 'lib', 'actions.ts'), 'utf8');
+check(
+  'el envío descarta la franja de silencio',
+  /isQuietMinutes\(clock\.minutes\)/.test(pushSource)
+);
+check(
+  'el guardado del aviso usa la misma validación',
+  /validateReminderTime/.test(actionsSource)
+);
+check(
+  'el push no decide la hora por su cuenta',
+  !/QUIET_START_MINUTES\s*=/.test(pushSource)
+);
+
 /* ------------------------------------------------------------------ */
 /* Resultado                                                           */
 /* ------------------------------------------------------------------ */

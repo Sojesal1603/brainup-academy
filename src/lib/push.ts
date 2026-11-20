@@ -2,6 +2,7 @@ import webpush from 'web-push';
 import { db } from './db';
 import { prisma } from './prisma';
 import { computeDayPlan } from './dayPlan';
+import { isQuietMinutes } from './proactivity';
 
 /**
  * Aviso diario del plan por Web Push.
@@ -9,6 +10,10 @@ import { computeDayPlan } from './dayPlan';
  * No usa IA ni escribe el plan: lee el bloque que el motor ya decidió y manda
  * su nombre. El envío es idempotente por dispositivo y día (`lastNotifiedDay`),
  * así un cron cada minuto no convierte la tarde en una tormenta de avisos.
+ *
+ * La franja local de 22:00 a 08:00 es de silencio: aunque quede una hora vieja
+ * guardada en el perfil, aquí no se envía nada. La acción de guardado ya impide
+ * elegirla, y esta comprobación es la segunda barrera.
  */
 
 export interface PushResult {
@@ -97,6 +102,11 @@ export async function sendDueReminders(now: Date = new Date()): Promise<PushResu
     if (target === null) continue;
 
     const clock = localClock(now, profile.timezone || 'Europe/Madrid');
+    if (isQuietMinutes(clock.minutes)) {
+      result.skipped += 1;
+      continue;
+    }
+
     const diff = clock.minutes - target;
     if (diff < 0 || diff > 2) continue;
 

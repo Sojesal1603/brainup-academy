@@ -24,6 +24,7 @@ import {
 import { isTemarioSource, normalizeTopicTitle, parseTemarioText, TemarioSource } from './temarioImport';
 import { buildSubjectTutorPrompt, resolveCourse } from './courseCatalog';
 import { stageConfig } from './stages';
+import { validateReminderTime } from './proactivity';
 
 /** Todo lo que depende del temario se refresca con cada cambio de estado. */
 function revalidateTemario() {
@@ -243,19 +244,19 @@ export async function reorderTodayBlocks(blockIds: string[], firstOrder = 2) {
  */
 export async function saveReminder(time: string, enabled: boolean) {
   const { tenant: prisma, userId } = await currentTenant();
-  const clean = String(time ?? '').trim();
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(clean)) {
-    return { success: false, error: 'La hora debe tener el formato HH:MM.' };
+  const parsed = validateReminderTime(time);
+  if (!parsed.ok) {
+    return { success: false, error: parsed.error };
   }
 
   await prisma.userProfile.update({
     where: { id: userId },
-    data: { reminderTime: clean, reminderEnabled: Boolean(enabled) },
+    data: { reminderTime: parsed.time, reminderEnabled: Boolean(enabled) },
   });
 
   revalidatePath('/');
   updateTag('cuartel');
-  return { success: true, time: clean, enabled: Boolean(enabled) };
+  return { success: true, time: parsed.time, enabled: Boolean(enabled) };
 }
 
 /**
