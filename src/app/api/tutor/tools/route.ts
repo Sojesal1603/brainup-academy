@@ -9,6 +9,7 @@ import {
   type StudyToolInput,
 } from '@/lib/studyTools';
 import { registerStudyToolCards } from '@/lib/reviewCards';
+import { verifyBlock } from '@/lib/verify';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -156,6 +157,17 @@ export async function POST(request: Request) {
         },
         { status: 502 }
       );
+    }
+
+    // Un problema resuelto se comprueba con el motor propio antes de entregarlo:
+    // las cuentas y las unidades se validan aquí, no se dan por buenas.
+    if (tool.kind === 'problemas') {
+      tool.verification = verifyBlock({
+        subjectName: agent.subject.name,
+        answer: [tool.statement, ...tool.steps.map((step) => `${step.title}. ${step.body}`), tool.solution].join(
+          '\n'
+        ),
+      });
     }
 
     // Las flashcards y los tests se guardan como tarjetas SM-2 para que el

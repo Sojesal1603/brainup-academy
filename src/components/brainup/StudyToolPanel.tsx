@@ -6,10 +6,14 @@ import {
   Check,
   ClipboardCopy,
   FileText,
+  FlaskConical,
+  Languages,
   Layers,
   ListChecks,
+  ListOrdered,
   Loader2,
   Network,
+  Quote,
   RotateCcw,
   Sparkles,
   X,
@@ -19,7 +23,11 @@ import MarkdownMessage from './MarkdownMessage';
 import {
   STUDY_TOOL_META,
   studyToolOrder,
+  type CommentaryTool,
   type Flashcard,
+  type LabTool,
+  type LanguageTool,
+  type ProblemsTool,
   type QuizQuestion,
   type StudyToolKind,
   type StudyToolPayload,
@@ -37,6 +45,10 @@ const ICONS: Record<StudyToolKind, ComponentType<{ className?: string }>> = {
   test: ListChecks,
   mapa: Network,
   guia: FileText,
+  problemas: ListOrdered,
+  laboratorio: FlaskConical,
+  comentario: Quote,
+  idioma: Languages,
 };
 
 const TOOL_TIMEOUT_MS = 120_000;
@@ -298,6 +310,231 @@ function MindMapView({ mermaid, summary }: { mermaid: string; summary: string })
   );
 }
 
+function VerificationBadge({ verification }: { verification: ProblemsTool['verification'] }) {
+  if (!verification) return null;
+  const tone =
+    verification.status === 'ok'
+      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+      : verification.status === 'aviso'
+        ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+        : verification.status === 'fallo'
+          ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+          : 'border-slate-600/40 bg-slate-700/20 text-slate-300';
+
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 text-[10px] ${tone}`}>
+      <p className="font-bold uppercase tracking-wider">
+        {verification.status === 'ok'
+          ? 'Cuentas comprobadas'
+          : verification.status === 'aviso'
+            ? 'Comprobación con avisos'
+            : verification.status === 'fallo'
+              ? 'Hay un fallo en las cuentas'
+              : 'Sin datos para comprobar'}
+      </p>
+      {verification.checks.slice(0, 3).map((check, index) => (
+        <p key={`${check.kind}-${index}`} className="mt-0.5 opacity-80">
+          {check.detail}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function ProblemsView({ tool }: { tool: ProblemsTool }) {
+  return (
+    <div className="space-y-3 text-[12px] leading-6 text-stone-200/90">
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+        <p className="mb-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">Enunciado</p>
+        <MarkdownMessage content={tool.statement} />
+      </div>
+      <ol className="space-y-2">
+        {tool.steps.map((step, index) => (
+          <li key={index} className="flex gap-2">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-[10px] font-bold text-sky-300">
+              {index + 1}
+            </span>
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold text-slate-200">{step.title}</p>
+              <MarkdownMessage content={step.body} />
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.07] p-2.5">
+        <p className="mb-1 text-[9px] font-bold uppercase tracking-wider text-emerald-300">Solución</p>
+        <MarkdownMessage content={tool.solution} />
+      </div>
+      <VerificationBadge verification={tool.verification} />
+    </div>
+  );
+}
+
+function LabView({ tool }: { tool: LabTool }) {
+  return (
+    <div className="space-y-3 text-[12px] leading-6 text-stone-200/90">
+      <p>
+        <span className="font-bold text-emerald-300">Hipótesis. </span>
+        {tool.hypothesis}
+      </p>
+
+      <div className="grid gap-1.5 sm:grid-cols-3">
+        {[
+          ['Independiente', tool.variables.independent],
+          ['Dependiente', tool.variables.dependent],
+          ['Controladas', tool.variables.controlled.join(', ')],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+            <p className="text-[11px]">{value || '—'}</p>
+          </div>
+        ))}
+      </div>
+
+      {tool.materials.length > 0 && (
+        <div>
+          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Material</p>
+          <p>{tool.materials.join(' · ')}</p>
+        </div>
+      )}
+
+      <div>
+        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Procedimiento</p>
+        <ol className="ml-4 list-decimal space-y-0.5">
+          {tool.procedure.map((step, index) => (
+            <li key={index}>{step}</li>
+          ))}
+        </ol>
+      </div>
+
+      {tool.dataTable && (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[11px]">
+            <thead>
+              <tr>
+                {tool.dataTable.headers.map((header, index) => (
+                  <th key={index} className="border border-white/10 px-2 py-1 text-left font-bold text-slate-300">
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tool.dataTable.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className="border border-white/10 px-2 py-1 text-slate-400">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tool.analysis && (
+        <p>
+          <span className="font-bold text-slate-300">Análisis. </span>
+          {tool.analysis}
+        </p>
+      )}
+      <p>
+        <span className="font-bold text-emerald-300">Conclusión. </span>
+        {tool.conclusion}
+      </p>
+    </div>
+  );
+}
+
+function CommentaryView({ tool }: { tool: CommentaryTool }) {
+  return (
+    <div className="space-y-3 text-[12px] leading-6 text-stone-200/90">
+      {tool.fragment && (
+        <blockquote className="border-l-2 border-amber-500/50 pl-3 text-[11px] italic text-stone-300">
+          {tool.fragment}
+        </blockquote>
+      )}
+      {tool.sections.map((section, index) => (
+        <div key={index}>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300/90">
+            {section.heading}
+          </p>
+          <MarkdownMessage content={section.content} />
+        </div>
+      ))}
+      <p>
+        <span className="font-bold text-slate-200">Valoración. </span>
+        {tool.conclusion}
+      </p>
+    </div>
+  );
+}
+
+function LanguageView({ tool }: { tool: LanguageTool }) {
+  return (
+    <div className="space-y-3 text-[12px] leading-6 text-stone-200/90">
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+        <p className="mb-1 text-[9px] font-bold uppercase tracking-wider text-violet-300">Tarea</p>
+        <MarkdownMessage content={tool.task} />
+      </div>
+
+      <div>
+        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Respuesta modelo</p>
+        <p className="whitespace-pre-wrap">{tool.modelAnswer}</p>
+      </div>
+
+      {tool.corrections.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Correcciones</p>
+          {tool.corrections.map((correction, index) => (
+            <div key={index} className="rounded-lg border border-white/10 bg-white/[0.02] p-2 text-[11px]">
+              <p>
+                <span className="text-rose-300 line-through">{correction.original}</span>
+                {' → '}
+                <span className="font-semibold text-emerald-300">{correction.corrected}</span>
+                <span className="ml-2 rounded bg-white/5 px-1.5 py-0.5 text-[9px] uppercase text-slate-400">
+                  {correction.type}
+                </span>
+              </p>
+              {correction.explanation && (
+                <p className="mt-0.5 text-[10px] text-slate-400">{correction.explanation}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tool.vocabulary.length > 0 && (
+        <div>
+          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Vocabulario</p>
+          <ul className="space-y-1">
+            {tool.vocabulary.map((item, index) => (
+              <li key={index} className="text-[11px]">
+                <span className="font-semibold text-violet-300">{item.term}</span>
+                {item.meaning && ` — ${item.meaning}`}
+                {item.example && <span className="text-slate-500"> ({item.example})</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {tool.practice.length > 0 && (
+        <div>
+          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Práctica</p>
+          <ol className="ml-4 list-decimal space-y-0.5 text-[11px]">
+            {tool.practice.map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Panel de herramientas de estudio del chat.
  *
@@ -457,6 +694,18 @@ export default function StudyToolPanel({
                   <div className="text-[13px] leading-7 text-stone-200/90">
                     <MarkdownMessage content={tool.markdown} />
                   </div>
+                )}
+                {tool.kind === 'problemas' && (
+                  <ProblemsView key={`p-${generation}`} tool={tool} />
+                )}
+                {tool.kind === 'laboratorio' && (
+                  <LabView key={`l-${generation}`} tool={tool} />
+                )}
+                {tool.kind === 'comentario' && (
+                  <CommentaryView key={`c-${generation}`} tool={tool} />
+                )}
+                {tool.kind === 'idioma' && (
+                  <LanguageView key={`i-${generation}`} tool={tool} />
                 )}
               </div>
             )}

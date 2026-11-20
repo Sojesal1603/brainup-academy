@@ -198,8 +198,8 @@ check('cada modo tiene una capa distinta', new Set(modeLayers).size === modeLaye
 console.log('\nHerramientas de estudio: el orden sigue a la categoría y el examen no se inventa');
 
 check(
-  'GENERAL conserva el orden de siempre',
-  T.studyToolOrder('GENERAL').join(',') === 'flashcards,test,mapa,guia',
+  'GENERAL conserva sus cuatro primeras',
+  T.studyToolOrder('GENERAL').slice(0, 4).join(',') === 'flashcards,test,mapa,guia',
   T.studyToolOrder('GENERAL')
 );
 check(
@@ -250,6 +250,99 @@ check(
   'las herramientas no hablan de etapa por su cuenta',
   !/\b(Bachillerato|ESO|EBAU)\b/.test(fs.readFileSync(path.join(projectRoot, 'src', 'lib', 'studyTools.ts'), 'utf8'))
 );
+
+/* ------------------------------------------------------------------ */
+/* Herramientas nucleares                                             */
+/* ------------------------------------------------------------------ */
+
+console.log('\nHerramientas nucleares: parseo estricto y categoría que las pone primero');
+
+const problems = T.parseStudyToolPayload(
+  'problemas',
+  JSON.stringify({
+    title: 'Problema',
+    statement: 'Un coche acelera…',
+    steps: [
+      { title: 'Datos', body: 'v0 = 0, a = 2 m/s²' },
+      { title: 'Cálculo', body: 's = ½at² = 100 m' },
+    ],
+    solution: 's = 100 m',
+  })
+);
+check('problemas parsea pasos y solución', problems && problems.kind === 'problemas' && problems.steps.length === 2);
+check(
+  'problemas sin solución se descarta',
+  T.parseStudyToolPayload('problemas', JSON.stringify({ statement: 'x', steps: [{ title: 'a', body: 'b' }] })) === null
+);
+
+const lab = T.parseStudyToolPayload(
+  'laboratorio',
+  JSON.stringify({
+    hypothesis: 'La masa no cambia el periodo',
+    variables: { independent: 'masa', dependent: 'periodo', controlled: ['longitud'] },
+    procedure: ['Montar', 'Medir', 'Repetir'],
+    materials: ['Péndulo'],
+    dataTable: { headers: ['m', 'T'], rows: [['0,1', '1,2']] },
+    analysis: 'Constante',
+    conclusion: 'Se cumple',
+  })
+);
+check('laboratorio parsea variables y tabla', lab && lab.kind === 'laboratorio' && lab.dataTable?.rows.length === 1);
+check(
+  'laboratorio sin conclusión se descarta',
+  T.parseStudyToolPayload('laboratorio', JSON.stringify({ hypothesis: 'x', procedure: ['a', 'b', 'c'] })) === null
+);
+
+const commentary = T.parseStudyToolPayload(
+  'comentario',
+  JSON.stringify({
+    fragment: 'Texto',
+    sections: [
+      { heading: 'Localización', content: 'Siglo XIX' },
+      { heading: 'Estructura', content: 'Dos partes' },
+    ],
+    conclusion: 'Intención crítica',
+  })
+);
+check(
+  'comentario parsea secciones',
+  commentary && commentary.kind === 'comentario' && commentary.sections.length === 2
+);
+check(
+  'comentario sin pruebas no pasa',
+  T.parseStudyToolPayload('comentario', JSON.stringify({ sections: [{ heading: 'x', content: 'y' }], conclusion: 'z' })) === null
+);
+
+const language = T.parseStudyToolPayload(
+  'idioma',
+  JSON.stringify({
+    task: 'Escribe una carta',
+    modelAnswer: 'Dear…',
+    corrections: [{ original: 'I has', corrected: 'I have', type: 'verbo', explanation: 'Concordancia' }],
+    vocabulary: [{ term: 'however', meaning: 'sin embargo', example: 'However, …' }],
+    practice: ['Completa: She ___ (go)'],
+  })
+);
+check('idioma parsea correcciones', language && language.kind === 'idioma' && language.corrections.length === 1);
+check(
+  'idioma sin tarea no pasa',
+  T.parseStudyToolPayload('idioma', JSON.stringify({ modelAnswer: 'x' })) === null
+);
+
+check('PROBLEMAS pone el problema primero', T.studyToolOrder('PROBLEMAS')[0] === 'problemas');
+check('LABORATORIO pone la práctica primero', T.studyToolOrder('LABORATORIO')[0] === 'laboratorio');
+check('COMENTARIO pone el comentario primero', T.studyToolOrder('COMENTARIO')[0] === 'comentario');
+check('IDIOMA pone la práctica de idioma primero', T.studyToolOrder('IDIOMA')[0] === 'idioma');
+check('TECNICA reutiliza problemas', T.studyToolOrder('TECNICA')[0] === 'problemas');
+
+const toolsSource = fs.readFileSync(path.join(projectRoot, 'src', 'lib', 'studyTools.ts'), 'utf8');
+const toolsRoute = fs.readFileSync(
+  path.join(projectRoot, 'src', 'app', 'api', 'tutor', 'tools', 'route.ts'),
+  'utf8'
+);
+check('idioma es text-only (sin audio)', /sin audio/i.test(toolsSource) && !/grabar|pronunciación con voz/i.test(toolsSource));
+check('el lienzo avisa de que no ejecuta', /sin ejecutar el código/i.test(toolsSource));
+check('la ruta verifica los problemas', /verifyBlock\(/.test(toolsRoute) && /tool\.verification\s*=/.test(toolsRoute));
 
 /* ------------------------------------------------------------------ */
 /* Esquema y migración                                                 */

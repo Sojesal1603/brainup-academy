@@ -19,7 +19,16 @@ import {
   type SubjectCategory,
 } from './subjects/category';
 
-export const STUDY_TOOL_KINDS = ['flashcards', 'test', 'mapa', 'guia'] as const;
+export const STUDY_TOOL_KINDS = [
+  'flashcards',
+  'test',
+  'mapa',
+  'guia',
+  'problemas',
+  'laboratorio',
+  'comentario',
+  'idioma',
+] as const;
 
 export type StudyToolKind = (typeof STUDY_TOOL_KINDS)[number];
 
@@ -53,6 +62,26 @@ export const STUDY_TOOL_META: Record<
     label: 'Guía de estudio',
     short: 'Guía',
     description: 'Resumen ejecutivo con lo que cae, las trampas y el plan de repaso.',
+  },
+  problemas: {
+    label: 'Problema resuelto',
+    short: 'Problema',
+    description: 'Un problema con método visible, unidades y solución comprobada.',
+  },
+  laboratorio: {
+    label: 'Práctica de laboratorio',
+    short: 'Laboratorio',
+    description: 'Hipótesis, variables, procedimiento, datos y conclusión.',
+  },
+  comentario: {
+    label: 'Comentario guiado',
+    short: 'Comentario',
+    description: 'Fragmento, estructura y análisis con pruebas del texto.',
+  },
+  idioma: {
+    label: 'Práctica de idioma',
+    short: 'Idioma',
+    description: 'Tarea escrita, correcciones explicadas y vocabulario en contexto.',
   },
 };
 
@@ -137,7 +166,79 @@ export interface StudyGuideTool {
   markdown: string;
 }
 
-export type StudyToolPayload = FlashcardsTool | TestTool | MindMapTool | StudyGuideTool;
+export interface ProblemStep {
+  title: string;
+  body: string;
+}
+
+/** Verificación del motor propio, ya calculada en el servidor. */
+export interface ToolVerification {
+  status: string;
+  checks: Array<{ kind: string; status: string; detail: string }>;
+}
+
+export interface ProblemsTool {
+  kind: 'problemas';
+  title: string;
+  notice: string | null;
+  statement: string;
+  steps: ProblemStep[];
+  solution: string;
+  /** La rellena la ruta al comprobar la solución con `verifyBlock`. */
+  verification?: ToolVerification | null;
+}
+
+export interface LabTool {
+  kind: 'laboratorio';
+  title: string;
+  notice: string | null;
+  hypothesis: string;
+  variables: {
+    independent: string;
+    dependent: string;
+    controlled: string[];
+  };
+  materials: string[];
+  procedure: string[];
+  dataTable: { headers: string[]; rows: string[][] } | null;
+  analysis: string;
+  conclusion: string;
+}
+
+export interface CommentaryTool {
+  kind: 'comentario';
+  title: string;
+  notice: string | null;
+  fragment: string | null;
+  sections: Array<{ heading: string; content: string }>;
+  conclusion: string;
+}
+
+export interface LanguageTool {
+  kind: 'idioma';
+  title: string;
+  notice: string | null;
+  task: string;
+  modelAnswer: string;
+  corrections: Array<{
+    original: string;
+    corrected: string;
+    type: string;
+    explanation: string;
+  }>;
+  vocabulary: Array<{ term: string; meaning: string; example: string }>;
+  practice: string[];
+}
+
+export type StudyToolPayload =
+  | FlashcardsTool
+  | TestTool
+  | MindMapTool
+  | StudyGuideTool
+  | ProblemsTool
+  | LabTool
+  | CommentaryTool
+  | LanguageTool;
 
 /* ------------------------------------------------------------------ */
 /* 1. El prompt                                                        */
@@ -184,6 +285,34 @@ const TOOL_SPECS: Record<Exclude<StudyToolKind, 'test'>, string> = {
     'Secciones obligatorias: `## Lo que cae en el examen`, `## Los 5 conceptos que no puedes fallar`, `## Fórmulas y reglas`, `## Errores que cuestan puntos` y `## Plan de repaso en 4 pasos`.',
     'Densa, sin relleno y con la fuente citada cuando una idea venga de un documento.',
     'Estructura: {"title":"...","notice":null,"markdown":"## ...\\n..."}',
+  ].join('\n'),
+  problemas: [
+    'Resuelve UN problema representativo de la unidad, del nivel real del alumno, con el método visible.',
+    'Estructura el método en pasos: datos y lo que se pide, modelo o ley que se aplica, desarrollo y comprobación (unidades, orden de magnitud, signo).',
+    'Cada paso lleva su cuenta o su razonamiento, no solo el título. No te salte ninguno.',
+    'La solución final va aislada y en LaTeX entre $...$; nada de «el resultado es el correcto» sin número.',
+    'Estructura: {"title":"...","notice":null,"statement":"...","steps":[{"title":"...","body":"..."}],"solution":"..."}',
+  ].join('\n'),
+  laboratorio: [
+    'Diseña UNA práctica de laboratorio realizable con material escolar, sobre la unidad actual.',
+    'Declara hipótesis contrastable, variable independiente, dependiente y controladas; materiales y procedimiento numerado con medidas y repeticiones.',
+    'Incluye una tabla de datos con cabeceras y filas de ejemplo (o vacía si el alumno debe medir), análisis de qué se calcula y conclusión ligada a la hipótesis.',
+    'Si el material del centro no permite medir algo, dilo en `notice` en vez de inventar datos.',
+    'Estructura: {"title":"...","notice":null,"hypothesis":"...","variables":{"independent":"...","dependent":"...","controlled":["..."]},"materials":["..."],"procedure":["..."],"dataTable":{"headers":["..."],"rows":[["..."]]},"analysis":"...","conclusion":"..."}',
+  ].join('\n'),
+  comentario: [
+    'Prepara UN comentario guiado sobre un fragmento breve y real de la unidad (texto, obra, imagen o audición descrita).',
+    'Incluye el fragmento si está en el material; si no, describe la obra y pide al alumno que pegue el texto. No inventes citas literales.',
+    'Estructura el análisis en secciones (localización, estructura, rasgos con ejemplos del texto, intención) y cierra con una valoración razonada.',
+    'Cada afirmación se apoya en una prueba concreta del fragmento: cita entre comillas o indica el elemento exacto.',
+    'Estructura: {"title":"...","notice":null,"fragment":"... o null","sections":[{"heading":"...","content":"..."}],"conclusion":"..."}',
+  ].join('\n'),
+  idioma: [
+    'Propón UNA tarea escrita en el idioma de la materia, al nivel real del alumno (sin audio ni pronunciación: todo va en texto).',
+    'Incluye tu respuesta modelo, correcciones de errores típicos (original → corrección, tipo de error y explicación breve) y vocabulario en contexto.',
+    'Las correcciones deben salir del temario o de la tarea; no inventes errores que el alumno no ha cometido.',
+    'Añade 3-5 ejercicios cortos de práctica con la respuesta esperada en la explicación, no en el enunciado.',
+    'Estructura: {"title":"...","notice":null,"task":"...","modelAnswer":"...","corrections":[{"original":"...","corrected":"...","type":"...","explanation":"..."}],"vocabulary":[{"term":"...","meaning":"...","example":"..."}],"practice":["..."]}',
   ].join('\n'),
 };
 
@@ -337,6 +466,152 @@ function parseQuestions(data: Record<string, unknown> | null): QuizQuestion[] {
   return questions;
 }
 
+function textList(value: unknown, max = 20): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => asText(entry))
+    .filter((entry) => entry.length > 0)
+    .slice(0, max);
+}
+
+function parseProblems(data: Record<string, unknown> | null): ProblemsTool | null {
+  const statement = asText(data?.statement);
+  const solution = asText(data?.solution);
+  const steps: ProblemStep[] = [];
+
+  if (Array.isArray(data?.steps)) {
+    for (const entry of data.steps) {
+      const step = asRecord(entry);
+      if (!step) continue;
+      const title = asText(step.title);
+      const body = asText(step.body) || asText(step.content);
+      if (title.length === 0 && body.length === 0) continue;
+      steps.push({ title: title || `Paso ${steps.length + 1}`, body });
+      if (steps.length >= 12) break;
+    }
+  }
+
+  if (statement.length === 0 || solution.length === 0 || steps.length < 2) return null;
+  return { kind: 'problemas', ...baseFields(data, 'problemas'), statement, steps, solution };
+}
+
+function parseLab(data: Record<string, unknown> | null): LabTool | null {
+  const hypothesis = asText(data?.hypothesis);
+  const procedure = textList(data?.procedure, 20);
+  const conclusion = asText(data?.conclusion);
+  const variables = asRecord(data?.variables);
+
+  if (hypothesis.length === 0 || procedure.length < 3 || conclusion.length === 0) return null;
+
+  let dataTable: LabTool['dataTable'] = null;
+  const table = asRecord(data?.dataTable);
+  if (table) {
+    const headers = textList(table.headers, 8);
+    const rows = Array.isArray(table.rows)
+      ? table.rows
+          .map((row) => textList(row, 8))
+          .filter((row) => row.length > 0)
+          .slice(0, 20)
+      : [];
+    if (headers.length >= 2) dataTable = { headers, rows };
+  }
+
+  return {
+    kind: 'laboratorio',
+    ...baseFields(data, 'laboratorio'),
+    hypothesis,
+    variables: {
+      independent: asText(variables?.independent),
+      dependent: asText(variables?.dependent),
+      controlled: textList(variables?.controlled, 10),
+    },
+    materials: textList(data?.materials, 20),
+    procedure,
+    dataTable,
+    analysis: asText(data?.analysis),
+    conclusion,
+  };
+}
+
+function parseCommentary(data: Record<string, unknown> | null): CommentaryTool | null {
+  const sections: CommentaryTool['sections'] = [];
+
+  if (Array.isArray(data?.sections)) {
+    for (const entry of data.sections) {
+      const section = asRecord(entry);
+      if (!section) continue;
+      const heading = asText(section.heading) || asText(section.title);
+      const content = asText(section.content) || asText(section.body);
+      if (heading.length === 0 || content.length === 0) continue;
+      sections.push({ heading, content });
+      if (sections.length >= 8) break;
+    }
+  }
+
+  const conclusion = asText(data?.conclusion);
+  if (sections.length < 2 || conclusion.length === 0) return null;
+
+  return {
+    kind: 'comentario',
+    ...baseFields(data, 'comentario'),
+    fragment: asText(data?.fragment) || null,
+    sections,
+    conclusion,
+  };
+}
+
+function parseLanguage(data: Record<string, unknown> | null): LanguageTool | null {
+  const task = asText(data?.task);
+  const modelAnswer = asText(data?.modelAnswer);
+  if (task.length === 0 || modelAnswer.length === 0) return null;
+
+  const corrections: LanguageTool['corrections'] = [];
+  if (Array.isArray(data?.corrections)) {
+    for (const entry of data.corrections) {
+      const correction = asRecord(entry);
+      if (!correction) continue;
+      const original = asText(correction.original);
+      const corrected = asText(correction.corrected);
+      if (original.length === 0 || corrected.length === 0) continue;
+      corrections.push({
+        original,
+        corrected,
+        type: asText(correction.type) || 'error',
+        explanation: asText(correction.explanation),
+      });
+      if (corrections.length >= 15) break;
+    }
+  }
+
+  const vocabulary: LanguageTool['vocabulary'] = [];
+  if (Array.isArray(data?.vocabulary)) {
+    for (const entry of data.vocabulary) {
+      const item = asRecord(entry);
+      if (!item) continue;
+      const term = asText(item.term);
+      if (term.length === 0) continue;
+      vocabulary.push({
+        term,
+        meaning: asText(item.meaning),
+        example: asText(item.example),
+      });
+      if (vocabulary.length >= 15) break;
+    }
+  }
+
+  if (corrections.length === 0 && vocabulary.length < 3) return null;
+
+  return {
+    kind: 'idioma',
+    ...baseFields(data, 'idioma'),
+    task,
+    modelAnswer,
+    corrections,
+    vocabulary,
+    practice: textList(data?.practice, 8),
+  };
+}
+
 /**
  * Convierte la respuesta cruda en la herramienta tipada. Devuelve `null` si el
  * material no sirve para estudiar: mejor un error que una tarjeta vacía.
@@ -358,6 +633,11 @@ export function parseStudyToolPayload(
     if (questions.length < 3) return null;
     return { kind, ...baseFields(data, kind), questions };
   }
+
+  if (kind === 'problemas') return parseProblems(data);
+  if (kind === 'laboratorio') return parseLab(data);
+  if (kind === 'comentario') return parseCommentary(data);
+  if (kind === 'idioma') return parseLanguage(data);
 
   if (kind === 'mapa') {
     const mermaid = (asText(data?.mermaid) || asText(data?.mindmap) || asText(data?.code))
