@@ -63,11 +63,13 @@ const navItems: Array<{
 const GROUP_ORDER: NavGroup[] = ['Hoy', 'Estudio', 'Inteligencia', 'Sistema'];
 
 export default function Sidebar({
-  isEso = false,
-  courseLabel = 'Bachillerato',
+  hiddenHrefs = [],
+  badge = 'Bachillerato & PAU',
 }: {
-  isEso?: boolean;
-  courseLabel?: string;
+  /** Rutas que esta etapa no debe ofrecer (PAU en ESO y Universidad). */
+  hiddenHrefs?: readonly string[];
+  /** Etiqueta de la marca bajo el logo. */
+  badge?: string;
 }) {
   const pathname = usePathname();
   /** El cajón «Más» del móvil: aquí viven las secciones que no caben abajo. */
@@ -77,11 +79,12 @@ export default function Sidebar({
   const isCurrent = (href: string) =>
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
 
-  // PAU no existe en ESO: el examinador desaparece del menú, no se deja una
-  // puerta que lleve a un simulacro sobre 14 sin sentido para el curso.
-  const visibleNavItems = isEso
-    ? navItems.filter((item) => item.href !== '/examinador')
-    : navItems;
+  // Las herramientas que no aplican a la etapa desaparecen del menú: no se
+  // deja una puerta que lleve a un simulacro sobre 14 sin sentido.
+  const visibleNavItems =
+    hiddenHrefs.length === 0
+      ? navItems
+      : navItems.filter((item) => !hiddenHrefs.includes(item.href));
 
   // Al cambiar de página el cajón se cierra solo.
   useEffect(() => {
@@ -156,7 +159,7 @@ export default function Sidebar({
                 BrainUp Academy
               </h1>
               <p className="font-mono text-[11px] tracking-tight text-emerald-400">
-                {isEso ? `${courseLabel} · LOMLOE` : 'Bachillerato & PAU'}
+                {badge}
               </p>
             </div>
           </Link>

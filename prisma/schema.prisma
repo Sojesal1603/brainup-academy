@@ -44,10 +44,26 @@ datasource db {
 // de retos sin chocar entre sí.
 
 // 1. Perfil del Estudiante
+/// Etapa educativa del perfil. Es un dato DERIVADO de `modality` (que sigue
+/// siendo la fuente que guarda el curso exacto): lo escriben `courseApply` y el
+/// backfill, y `src/lib/stages` es el único sitio que decide qué implica cada
+/// etapa. Se añade en migración expand, con default BACHILLERATO para no tocar
+/// los perfiles existentes que todavía no se han backfilleado.
+enum EducationStage {
+  ESO
+  BACHILLERATO
+  UNIVERSIDAD
+}
+
 model UserProfile {
   id                   String    @id @default("user_default")
   name                 String    @default("Estudiante")
   modality             String    @default("1º de Bachillerato (Ciencias y Tecnología)")
+  // Derivados de `modality` para no repetir condicionales por toda la app.
+  stage                EducationStage @default(BACHILLERATO)
+  gradeLevel           String? // "1º ESO", "2º Bachillerato", "3º curso"
+  trackKey             String? // modalidad de Bachillerato o rama universitaria
+  degreeName           String? // "Grado en Ingeniería Mecánica" (solo Universidad)
   // Comunidad autónoma del alumno: decide la estructura del simulacro EBAU
   // (duración, opciones, peso de la notación). Se puede cambiar en el examinador.
   community            String    @default("madrid")

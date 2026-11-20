@@ -1,29 +1,49 @@
 /**
  * Catálogo de cursos y materias base.
  *
- * `UserProfile.modality` sigue siendo el único campo que guarda el curso: este
- * módulo lo normaliza para que la cabecera, la barra lateral, la puesta a punto
- * y los Catedráticos IA hablen del curso real y no de un Bachillerato fijo.
+ * `UserProfile.modality` sigue siendo el campo que guarda el curso exacto. Este
+ * módulo lo normaliza a una etapa (`ESO` | `BACHILLERATO` | `UNIVERSIDAD`), un
+ * curso y una rama/modalidad, y devuelve las materias base que trae ese curso.
  *
- * Solo 1º ESO trae materias base: al elegirlo en Ajustes se crean las nueve
- * asignaturas curriculares si todavía no existen. En Bachillerato las materias
- * dependen de la modalidad y del centro, así que se siguen montando en la
- * puesta a punto.
+ * Las reglas de cada etapa (escala, PAU, herramientas, planificador y
+ * personalidad) viven en `src/lib/stages/`; aquí solo se traduce el texto que
+ * hay guardado a esa configuración. No dupliques condicionales por etapa fuera
+ * de estos dos módulos.
  */
 
-export type CourseStage = 'ESO' | 'Bachillerato' | 'Otro';
+import {
+  buildModality,
+  getStageConfig,
+  inferStageFromModality,
+  stageConfig,
+  subjectTemplatesFor,
+  type EducationStage,
+  type StageSubjectTemplate,
+} from './stages';
+
+export type CourseStage = EducationStage;
 
 export interface BaseSubject {
   name: string;
   color: string;
+  /** Créditos ECTS orientativos (solo Universidad). */
+  credits?: number;
 }
 
 export interface CourseOption {
-  /** Valor que se guarda en `UserProfile.modality`. */
+  /** Valor canónico que se guarda en `UserProfile.modality`. */
   id: string;
   /** Cómo se nombra el curso en la interfaz. */
   label: string;
-  stage: CourseStage;
+  stage: EducationStage;
+  /** "1º ESO", "2º Bachillerato", "3º curso". */
+  gradeLevel: string;
+  /** Modalidad de Bachillerato o rama universitaria. */
+  trackKey: string | null;
+  /** Etiqueta legible de la modalidad/rama. */
+  trackLabel: string | null;
+  /** Titulación editable; solo Universidad. */
+  degreeName: string | null;
   /** Currículo que recibe la IA para ajustar el nivel pedagógico. */
   curriculum: string;
   /** Materias curriculares que se crean al activar el curso (vacío = ninguna). */
@@ -34,109 +54,98 @@ export interface CourseOption {
  * Materias curriculares base de 1º ESO (LOMLOE). Son las nueve comunes a todas
  * las comunidades; Religión y Tutoría quedan fuera porque no se estudian en la
  * app y cada centro las organiza a su manera.
+ *
+ * Se conserva esta constante porque ya la usa el código existente y porque 1º
+ * ESO no puede cambiar: el catálogo multi-etapa devuelve la misma lista.
  */
-export const ESO_1_BASE_SUBJECTS: readonly BaseSubject[] = [
-  { name: 'Lengua Castellana y Literatura', color: '#f59e0b' },
-  { name: 'Matemáticas', color: '#3b82f6' },
-  { name: 'Geografía e Historia', color: '#d97706' },
-  { name: 'Biología y Geología', color: '#10b981' },
-  { name: 'Inglés', color: '#8b5cf6' },
-  { name: 'Tecnología y Digitalización', color: '#06b6d4' },
-  { name: 'Educación Física', color: '#ef4444' },
-  { name: 'Música', color: '#ec4899' },
-  { name: 'Educación Plástica', color: '#a855f7' },
-];
+export const ESO_1_BASE_SUBJECTS: readonly BaseSubject[] =
+  subjectTemplatesFor({ stage: 'ESO', gradeLevel: '1º ESO' });
 
-const ESO_1: CourseOption = {
-  id: '1º ESO',
-  label: '1º ESO',
-  stage: 'ESO',
-  curriculum: 'LOMLOE 1º ESO',
-  baseSubjects: ESO_1_BASE_SUBJECTS,
-};
-
-const BACH_CIENCIAS: CourseOption = {
-  id: '1º de Bachillerato (Ciencias y Tecnología)',
-  label: '1º Bachillerato',
-  stage: 'Bachillerato',
-  curriculum: 'Bachillerato (LOMLOE)',
-  baseSubjects: [],
-};
-
-const BACH_HUMANIDADES: CourseOption = {
-  id: '1º de Bachillerato (Humanidades y Ciencias Sociales)',
-  label: '1º Bachillerato',
-  stage: 'Bachillerato',
-  curriculum: 'Bachillerato (LOMLOE)',
-  baseSubjects: [],
-};
-
-const BACH_2: CourseOption = {
-  id: '2º de Bachillerato',
-  label: '2º Bachillerato',
-  stage: 'Bachillerato',
-  curriculum: 'Bachillerato (LOMLOE)',
-  baseSubjects: [],
-};
-
-/** Opciones que se ofrecen en Ajustes. */
-export const COURSE_OPTIONS: readonly CourseOption[] = [
-  ESO_1,
-  BACH_CIENCIAS,
-  BACH_HUMANIDADES,
-  BACH_2,
-];
-
-const DEFAULT_MODALITY = BACH_CIENCIAS.id;
+const DEFAULT_MODALITY = '1º de Bachillerato (Ciencias y Tecnología)';
 
 function clean(value: string | null | undefined): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-/** «1º de ESO», «1 ESO», «ESO»… → el curso ESO real. */
-function parseEso(raw: string): CourseOption | null {
-  if (!/\beso\b/i.test(raw)) return null;
-  const match = raw.match(/(\d)\s*[ºª°]?\s*(?:de\s+)?eso\b/i);
-  const level = match ? Number(match[1]) : 1;
-  if (level !== 1) {
-    return {
-      id: `${level}º ESO`,
-      label: `${level}º ESO`,
-      stage: 'ESO',
-      curriculum: `LOMLOE ${level}º ESO`,
-      baseSubjects: [],
-    };
-  }
-  return ESO_1;
+function toBaseSubject(template: StageSubjectTemplate): BaseSubject {
+  return template.credits === undefined
+    ? { name: template.name, color: template.color }
+    : { name: template.name, color: template.color, credits: template.credits };
 }
 
 /** Normaliza cualquier modalidad guardada a un curso con su currículo. */
 export function resolveCourse(modality: string | null | undefined): CourseOption {
-  const raw = clean(modality) || DEFAULT_MODALITY;
+  const raw = clean(modality);
+  const selection = inferStageFromModality(raw || DEFAULT_MODALITY);
+  const config = stageConfig(selection.stage);
+  const track = config.tracks.find((option) => option.key === selection.trackKey) ?? null;
 
-  const eso = parseEso(raw);
-  if (eso) return eso;
-
-  const bach = raw.match(/(\d)\s*[ºª°]?\s*(?:de\s+)?bachillerato\b/i);
-  if (bach) {
-    const level = Number(bach[1]);
-    if (level === 1) {
-      return /humanidades|sociales/i.test(raw) ? BACH_HUMANIDADES : BACH_CIENCIAS;
-    }
-    return BACH_2;
+  // Texto que no es ESO, Bachillerato ni Universidad: se respeta literalmente
+  // (etapa por defecto, sin herramientas de PAU especiales) en vez de inventar
+  // un curso que el alumno no ha elegido.
+  const recognized = /eso|bachillerato|pau|ebau|universidad|universitari|\bgrado\b/i.test(raw);
+  if (raw && !recognized) {
+    return {
+      id: raw,
+      label: raw,
+      stage: 'BACHILLERATO',
+      gradeLevel: selection.gradeLevel,
+      trackKey: null,
+      trackLabel: null,
+      degreeName: null,
+      curriculum: raw,
+      baseSubjects: [],
+    };
   }
-  if (/bachillerato|pau|ebau/i.test(raw)) return BACH_CIENCIAS;
+
+  const baseSubjects = subjectTemplatesFor({
+    stage: selection.stage,
+    gradeLevel: selection.gradeLevel,
+    trackKey: selection.trackKey,
+  }).map(toBaseSubject);
+
+  let curriculum: string;
+  if (selection.stage === 'ESO') {
+    curriculum = `LOMLOE ${selection.gradeLevel}`;
+  } else if (selection.stage === 'UNIVERSIDAD') {
+    curriculum = [selection.degreeName ?? 'Grado', track?.label, selection.gradeLevel]
+      .filter(Boolean)
+      .join(' · ');
+  } else {
+    curriculum = track
+      ? `Bachillerato (LOMLOE) · ${track.label}`
+      : 'Bachillerato (LOMLOE)';
+  }
 
   return {
-    id: raw,
-    label: raw,
-    stage: 'Otro',
-    curriculum: raw,
-    baseSubjects: [],
+    id: selection.modality || raw,
+    label: selection.gradeLevel,
+    stage: selection.stage,
+    gradeLevel: selection.gradeLevel,
+    trackKey: selection.trackKey,
+    trackLabel: track?.label ?? null,
+    degreeName: selection.degreeName,
+    curriculum,
+    baseSubjects,
   };
 }
 
-/** Materias base del curso (ninguna en Bachillerato: las pone el alumno). */
+/** Todas las combinaciones que se ofrecen en Ajustes, ya normalizadas. */
+export const COURSE_OPTIONS: readonly CourseOption[] = [
+  '1º ESO',
+  '2º ESO',
+  '3º ESO',
+  '4º ESO',
+  buildModality({ stage: 'BACHILLERATO', gradeLevel: '1º Bachillerato', trackKey: 'ciencias' }),
+  buildModality({ stage: 'BACHILLERATO', gradeLevel: '1º Bachillerato', trackKey: 'humanidades' }),
+  buildModality({ stage: 'BACHILLERATO', gradeLevel: '1º Bachillerato', trackKey: 'general' }),
+  '2º de Bachillerato',
+  buildModality({ stage: 'BACHILLERATO', gradeLevel: '2º Bachillerato', trackKey: 'ciencias' }),
+  buildModality({ stage: 'BACHILLERATO', gradeLevel: '2º Bachillerato', trackKey: 'humanidades' }),
+  buildModality({ stage: 'BACHILLERATO', gradeLevel: '2º Bachillerato', trackKey: 'general' }),
+].map((modality) => resolveCourse(modality));
+
+/** Materias base del curso (Bachillerato no trae: dependen del centro). */
 export function baseSubjectsFor(course: CourseOption): readonly BaseSubject[] {
   return course.baseSubjects;
 }
@@ -146,7 +155,12 @@ export function isEsoCourse(modality: string | null | undefined): boolean {
   return resolveCourse(modality).stage === 'ESO';
 }
 
-/** Nombre corto del curso («1º ESO», «1º Bachillerato»). */
+/** ¿Tiene sentido el Examinador PAU en este curso? */
+export function hasPauTools(modality: string | null | undefined): boolean {
+  return getStageConfig({ modality }).scale.hasPau;
+}
+
+/** Nombre corto del curso («1º ESO», «1º Bachillerato», «2º curso»). */
 export function courseLabel(modality: string | null | undefined): string {
   return resolveCourse(modality).label;
 }
@@ -158,7 +172,10 @@ export function curriculumLabel(modality: string | null | undefined): string {
 
 /**
  * Personalidad del Catedrático según el curso. Se usa al crear una materia
- * nueva para que la IA no arrastre el enfoque PAU en un perfil de ESO.
+ * nueva para que la IA no arrastre el enfoque PAU en ESO ni en Universidad.
+ *
+ * El curso puede llegar como modalidad guardada o como `CourseOption` ya
+ * resuelto (lo habitual al crear materias base).
  */
 export function buildSubjectTutorPrompt(
   subjectName: string,
@@ -169,10 +186,11 @@ export function buildSubjectTutorPrompt(
       ? modalityOrCourse
       : resolveCourse(modalityOrCourse);
   const name = clean(subjectName) || 'la materia';
+  const config = stageConfig(course.stage);
 
-  if (course.stage === 'ESO') {
-    return `Eres el Catedrático de ${name} para ${course.label} (${course.curriculum}). Ajustas el nivel al currículo oficial de la ESO: explicas desde cero, con ejemplos cotidianos, no das por sabidos contenidos de cursos superiores y preparas las pruebas del curso sin enfoque PAU. Exiges rigor, preguntas socráticas y trabajo diario.`;
+  if (course.stage === 'BACHILLERATO') {
+    return `Eres el Catedrático especializado en ${name} para ${course.label}. ${config.personality}`;
   }
 
-  return `Eres el Catedrático especializado en ${name} para ${course.label}. Explicas con rigor, preguntas socráticas y enfoque de preparación pre-PAU.`;
+  return `Eres el Catedrático de ${name} para ${course.label} (${course.curriculum}). ${config.personality}`;
 }

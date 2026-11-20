@@ -2,20 +2,27 @@ import { cache } from 'react';
 import { getOptionalUser } from './auth';
 import { safeDb } from './dbTimeout';
 import { ensureUserProfile, getCachedProfileSummary } from './userProfile';
-import { isEsoCourse, resolveCourse } from './courseCatalog';
+import { resolveCourse } from './courseCatalog';
+import { getStageConfig, type EducationStage } from './stages';
 
 export interface ViewerCourse {
   modality: string | null;
   label: string;
   curriculum: string;
-  isEso: boolean;
+  stage: EducationStage;
+  /** Etiqueta de la marca en la barra lateral. */
+  badge: string;
+  /** Rutas que no deben pintarse en la navegación (p. ej. Examinador PAU). */
+  hiddenHrefs: readonly string[];
 }
 
 const FALLBACK: ViewerCourse = {
   modality: null,
   label: 'Bachillerato',
   curriculum: 'Bachillerato (LOMLOE)',
-  isEso: false,
+  stage: 'BACHILLERATO',
+  badge: 'Bachillerato & PAU',
+  hiddenHrefs: [],
 };
 
 /**
@@ -41,11 +48,14 @@ export const getViewerCourse = cache(async (): Promise<ViewerCourse> => {
     if (!profile) return FALLBACK;
 
     const course = resolveCourse(profile.modality);
+    const config = getStageConfig({ stage: profile.stage, modality: profile.modality });
     return {
       modality: profile.modality,
       label: course.label,
       curriculum: course.curriculum,
-      isEso: isEsoCourse(profile.modality),
+      stage: course.stage,
+      badge: config.tools.navBadge,
+      hiddenHrefs: config.tools.hiddenHrefs,
     };
   } catch (error) {
     console.error(

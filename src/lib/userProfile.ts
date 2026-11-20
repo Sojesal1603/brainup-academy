@@ -1,6 +1,7 @@
 import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 import { db } from './db';
+import type { EducationStage } from './stages';
 
 /**
  * --- Multiusuario ---
@@ -43,6 +44,7 @@ export async function getTenantProfileSummary(userId: string): Promise<TenantPro
     select: {
       name: true,
       modality: true,
+      stage: true,
       targetGradePau: true,
       studyMode: true,
       streakCurrent: true,
@@ -56,6 +58,7 @@ export async function getTenantProfileSummary(userId: string): Promise<TenantPro
 export interface ProfileSummary {
   name: string;
   modality: string;
+  stage: EducationStage;
   targetGradePau: number;
   studyMode: string;
   streakCurrent: number;
@@ -77,6 +80,7 @@ const loadCachedProfileSummary = unstable_cache(
       select: {
         name: true,
         modality: true,
+        stage: true,
         targetGradePau: true,
         studyMode: true,
         streakCurrent: true,
@@ -84,7 +88,7 @@ const loadCachedProfileSummary = unstable_cache(
       },
     });
   },
-  ['profile-summary-v2'],
+  ['profile-summary-v3'],
   { revalidate: 10, tags: ['perfil'] }
 );
 

@@ -57,8 +57,8 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // La navegación necesita saber si el curso es ESO para ocultar lo de PAU.
-  // La lectura es tolerante a fallos: sin perfil se pinta la navegación normal.
+  // La navegación necesita la etapa para ocultar las herramientas que no
+  // aplican (PAU en ESO y Universidad). Sin perfil se pinta la normal.
   const course = await getViewerCourse();
 
   return (
@@ -72,7 +72,7 @@ export default async function RootLayout({
         </noscript>
         {/* Escucha los errores que se escapan de React y los apunta en el taller. */}
         <AppErrorReporter />
-        <Sidebar isEso={course.isEso} courseLabel={course.label} />
+        <Sidebar hiddenHrefs={course.hiddenHrefs} badge={course.badge} />
         <div className="flex-1 flex flex-col min-w-0 min-h-screen">
           <Header />
           {/* En tablet (md) el contenido gana ancho útil: el padding grande

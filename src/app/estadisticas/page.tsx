@@ -1,5 +1,7 @@
 import { currentTenant } from '@/lib/tenantContext';
 import { ensureUserProfile } from '@/lib/userProfile';
+import { resolveCourse } from '@/lib/courseCatalog';
+import { getStageConfig } from '@/lib/stages';
 import {
   BarChart3,
   TrendingUp,
@@ -16,6 +18,9 @@ export default async function StatsPage() {
   // Memoizado por petición: el Header del layout ya ha pedido este perfil.
   const { user: authUser, tenant: prisma } = await currentTenant();
   const user = await ensureUserProfile(authUser.id);
+  const course = resolveCourse(user.modality);
+  const stage = getStageConfig({ stage: user.stage, modality: user.modality });
+  const hasPau = stage.scale.hasPau;
 
   const subjects = await prisma.subject.findMany({
     include: {
@@ -130,17 +135,18 @@ export default async function StatsPage() {
         <div className="flex items-center gap-2">
           <BarChart3 className="w-6 h-6 text-emerald-400" />
           <h1 className="text-2xl font-black tracking-tight text-slate-100 uppercase font-mono">
-            Estadísticas & Simulador Predictivo PAU
+            {hasPau ? 'Estadísticas & Simulador Predictivo PAU' : 'Estadísticas & Progreso Real'}
           </h1>
         </div>
         <p className="text-xs text-slate-400 mt-1">
-          Proyección sobre 14 puntos calculada <strong className="text-slate-300">solo con datos
-          reales</strong>: tus notas declaradas, el nivel medido de cada unidad y los simulacros
-          corregidos. Sin datos no hay proyección.
+          {hasPau
+            ? 'Proyección sobre 14 puntos calculada solo con datos reales: tus notas declaradas, el nivel medido de cada unidad y los simulacros corregidos. Sin datos no hay proyección.'
+            : `Progreso de ${course.label} en la escala de ${stage.label.toLowerCase()} (${stage.scale.label}), con el nivel medido de cada unidad. Sin datos no hay proyección.`}
         </p>
       </div>
 
-      {/* Tarjeta de Estimación Predictiva PAU (Base 14) */}
+      {/* Tarjeta predictiva: base 14 solo donde existe PAU (Bachillerato). */}
+      {hasPau ? (
       <div className="p-6 rounded-3xl bg-gradient-to-br from-[#0c1626] via-[#131825] to-[#070d18] border border-emerald-500/40 shadow-2xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
           <div className="space-y-2">
@@ -214,6 +220,30 @@ export default async function StatsPage() {
           </div>
         </div>
       </div>
+      ) : (
+        <div className="p-6 rounded-3xl bg-gradient-to-br from-[#0c1626] via-[#131825] to-[#070d18] border border-blue-500/30 shadow-2xl">
+          <div className="flex items-center gap-2">
+            <Award className="w-5 h-5 text-blue-400" />
+            <span className="text-xs font-mono font-bold uppercase tracking-widest text-blue-400">
+              {stage.label} · {course.label}
+            </span>
+          </div>
+          <h2 className="mt-2 text-xl font-black text-slate-100">
+            Escala {stage.scale.label}
+          </h2>
+          <p className="mt-2 max-w-2xl text-xs leading-relaxed text-slate-400">
+            La proyección sobre 14 puntos es exclusiva de Bachillerato. En {stage.label.toLowerCase()} se
+            trabaja con {stage.scale.label}: tus notas declaradas y el nivel medido de cada unidad siguen
+            alimentando el plan diario, el banco de errores y a tus Catedráticos IA.
+            {stage.supportsEcts
+              ? ' Las materias troncales muestran créditos ECTS orientativos y puedes ajustar la titulación en Ajustes.'
+              : ''}
+          </p>
+          <p className="mt-2 text-[11px] font-mono text-slate-500">
+            {course.curriculum}
+          </p>
+        </div>
+      )}
 
       {/* Grid: Horas por Asignatura & Diagnóstico de Errores */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -14,11 +14,16 @@ export interface CourseApplyResult {
 }
 
 /**
- * Guarda el curso en el perfil y, si ese curso trae materias base (1º ESO),
- * crea las que falten con su Catedrático IA ya configurado para LOMLOE.
+ * Guarda el curso en el perfil y crea las materias base que falten.
  *
- * Es idempotente: cambiar de curso dos veces no duplica materias ni agentes, y
- * nunca borra las materias que el alumno ya tenía de otro curso.
+ * - `modality` sigue siendo la fuente; `stage`, `gradeLevel`, `trackKey` y
+ *   `degreeName` se escriben derivados en la MISMA operación para que no puedan
+ *   desincronizarse (este es el único escritor, junto con el backfill).
+ * - 1º ESO conserva sus nueve materias; 2º–4º ESO traen su plantilla LOMLOE y
+ *   Universidad, 3–5 troncales de la rama. Bachillerato no crea ninguna: las
+ *   materias dependen de la modalidad y del centro.
+ * - Es idempotente: cambiar de curso dos veces no duplica materias ni agentes, y
+ *   nunca borra temario, exámenes ni horas de las materias que ya existían.
  */
 export async function applyCourseToProfile(
   prisma: TenantPrisma,
@@ -29,7 +34,13 @@ export async function applyCourseToProfile(
 
   await prisma.userProfile.update({
     where: { id: userId },
-    data: { modality: course.id },
+    data: {
+      modality: course.id,
+      stage: course.stage,
+      gradeLevel: course.gradeLevel,
+      trackKey: course.trackKey,
+      degreeName: course.degreeName,
+    },
   });
 
   const baseSubjects = baseSubjectsFor(course);
@@ -49,9 +60,9 @@ export async function applyCourseToProfile(
       data: {
         name: base.name,
         color: base.color,
-        // En ESO no hay ponderación PAU: la materia no se prepara para ella.
-        pauWeight: 0,
-        isPhaseGeneral: false,
+        // La ponderación PAU solo existe en Bachillerato.
+        pauWeight: course.stage === 'BACHILLERATO' ? 0.2 : 0,
+        isPhaseGeneral: course.stage === 'BACHILLERATO',
         currentGrade: 7.0,
         gradeSource: 'sin_medir',
         targetGrade: 9,
@@ -64,7 +75,10 @@ export async function applyCourseToProfile(
       data: {
         subjectId: subject.id,
         name: `Catedrático de ${base.name}`,
-        specialty: `Currículo LOMLOE de ${course.label}: ${base.name}`,
+        specialty:
+          course.stage === 'UNIVERSIDAD'
+            ? `${course.degreeName ?? 'Grado'} · ${course.trackLabel ?? 'Universidad'}: ${base.name}${base.credits ? ` (${base.credits} ECTS)` : ''}`
+            : `Currículo ${course.curriculum}: ${base.name}`,
         systemPrompt: buildSubjectTutorPrompt(base.name, course),
       },
     });

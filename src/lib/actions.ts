@@ -780,8 +780,9 @@ export async function createCustomSubject(data: {
       name: data.name,
       color: data.color || '#3b82f6',
       isPhaseGeneral: data.isPhaseGeneral,
-      // En ESO no hay ponderación PAU, aunque el formulario mande otra cosa.
-      pauWeight: course.stage === 'ESO' ? 0 : data.pauWeight || 0.2,
+      // La ponderación PAU solo existe en Bachillerato, aunque el formulario
+      // mande otra cosa (ESO y Universidad no preparan PAU).
+      pauWeight: course.stage === 'BACHILLERATO' ? data.pauWeight || 0.2 : 0,
       currentGrade: 7.5,
       targetGrade: 9.5,
     },

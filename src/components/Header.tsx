@@ -6,6 +6,7 @@ import { getOptionalUser } from '@/lib/auth';
 import { safeDb } from '@/lib/dbTimeout';
 import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
 import { resolveCourse } from '@/lib/courseCatalog';
+import { getStageConfig } from '@/lib/stages';
 import PwaRegister from './PwaRegister';
 import AppReadySignal from './AppReadySignal';
 
@@ -88,7 +89,8 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
   const targetGrade = user?.targetGradePau ?? 13.5;
   const mode = user?.studyMode ?? 'athlete';
   const course = resolveCourse(user?.modality);
-  const isEso = course.stage === 'ESO';
+  const stage = getStageConfig({ stage: user?.stage, modality: user?.modality });
+  const hasPau = stage.scale.hasPau;
 
   return (
     <div className="flex items-center justify-between gap-2">
@@ -107,7 +109,7 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
             </span>
           </h2>
           <p className="text-[11px] text-slate-400 hidden sm:block">
-            {isEso ? course.curriculum : user?.modality ?? course.label}
+            {course.stage === 'BACHILLERATO' ? user?.modality ?? course.label : course.curriculum}
           </p>
         </div>
       </div>
@@ -120,10 +122,16 @@ function HeaderChrome({ user, authOn }: { user: HeaderUser; authOn: boolean }) {
           <span>{streak} días</span>
         </div>
 
-        {/* Nota objetivo PAU: en ESO no aplica, se cambia por el curso real. */}
+        {/* Nota objetivo: PAU /14 solo en Bachillerato; en el resto, el curso. */}
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono">
           <Target className="w-4 h-4 text-blue-400" />
-          <span>{isEso ? `${course.label} · LOMLOE` : `PAU: ${targetGrade.toFixed(2)}/14`}</span>
+          <span>
+            {hasPau
+              ? `PAU: ${targetGrade.toFixed(2)}/14`
+              : course.stage === 'ESO'
+                ? `${course.label} · LOMLOE`
+                : course.label}
+          </span>
         </div>
 
         {/* Modo de Estudio */}
