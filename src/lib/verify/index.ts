@@ -16,6 +16,8 @@
 
 import { normalizeLatex } from './latex';
 import { closeEnough, equivalent, numericValue, parseExpression, variablesOf } from './cas';
+import { checkBalance, looksLikeEquation } from './chemistry';
+import { checkQuantityEquality } from './units';
 
 export type VerificationStatus = 'ok' | 'fail' | 'no_verificable';
 
@@ -274,6 +276,44 @@ export function summarizeChecks(checks: VerificationCheck[]): BlockVerification 
   return { status, checks };
 }
 
+/**
+ * Ecuaciones químicas del texto. Solo se devuelven las que el motor ha podido
+ * decidir (`ok` o `fail`): un intento de lectura fallido no ensucia el informe.
+ */
+function chemistryChecks(text: string): VerificationCheck[] {
+  const segments = new Set<string>();
+
+  for (const span of mathSpans(text)) {
+    if (/(->|→|⟶)/.test(span)) segments.add(span);
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const clean = line.replace(/^[\s>*-]+/, '').trim();
+    if (/(->|→|⟶)/.test(clean)) segments.add(clean);
+  }
+
+  const checks: VerificationCheck[] = [];
+  for (const segment of segments) {
+    if (!looksLikeEquation(segment)) continue;
+    const result = checkBalance(segment);
+    if (result.status === 'no_verificable') continue;
+    checks.push({ kind: 'balanceo', status: result.status, detail: result.detail });
+  }
+  return checks;
+}
+
+/** Homogeneidad y conversión de unidades en las igualdades del texto. */
+function unitChecks(text: string): VerificationCheck[] {
+  const checks: VerificationCheck[] = [];
+
+  for (const equality of equalitiesIn(text)) {
+    const result = checkQuantityEquality(equality.left, equality.right);
+    if (!result) continue;
+    checks.push({ kind: result.kind, status: result.status, detail: result.detail });
+  }
+
+  return checks;
+}
+
 export interface VerifyBlockInput {
   /** Materia del bloque; decide qué comprobaciones tienen sentido. */
   subjectName?: string | null;
@@ -292,6 +332,9 @@ export function verifyBlock(input: VerifyBlockInput): BlockVerification {
     if (input.expected && input.expected.trim() && answer.trim()) {
       checks.push(expectedCheck(input.expected, answer));
     }
+
+    checks.push(...chemistryChecks(answer));
+    checks.push(...unitChecks(answer));
 
     for (const equality of equalitiesIn(answer)) {
       const check = arithmeticCheck(equality);

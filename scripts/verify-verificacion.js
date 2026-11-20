@@ -47,6 +47,8 @@ execFileSync(
 
 const latex = require(path.join(outDir, 'latex.js'));
 const cas = require(path.join(outDir, 'cas.js'));
+const units = require(path.join(outDir, 'units.js'));
+const chemistry = require(path.join(outDir, 'chemistry.js'));
 const verify = require(path.join(outDir, 'index.js'));
 
 /* ------------------------------------------------------------------ */
@@ -110,7 +112,7 @@ check('suma y producto', evalText('2+3*4') === 14);
 check('potencia antes que producto', evalText('2*3^2') === 18);
 check('menos unario con potencia: -x^2 = -(x^2)', evalText('-2^2') === -4);
 check('paréntesis', evalText('(2+3)*4') === 20);
-check('multiplicación implícita 2x', evalText('2*pi') !== null);
+check('multiplicación implícita 3(2)', evalText('3(2)') === 6);
 check('división', evalText('10/4') === 2.5);
 check('coma ya normalizada', evalText('0.5+0.25') === 0.75);
 check('notación científica', evalText('1.5e-3') === 0.0015);
@@ -136,6 +138,180 @@ check('equivalencia con dominio recortado (muestreo)', e.ok && f.ok && cas.equiv
 check('diferencia relativa tolerante', cas.closeEnough(1, 1 + 1e-12));
 check('diferencia real no es tolerante', !cas.closeEnough(1, 1.01));
 check('NaN nunca es equivalente', !cas.closeEnough(Number.NaN, Number.NaN));
+
+/* ------------------------------------------------------------------ */
+/* Unidades                                                            */
+/* ------------------------------------------------------------------ */
+
+console.log('\nUnidades: dimensiones y conversiones');
+
+const newton = units.parseUnit('N');
+check(
+  'N es kg·m/s²',
+  newton.ok && units.dimensionLabel(newton.unit.dim) === 'kg·m·s^-2',
+  newton.ok ? units.dimensionLabel(newton.unit.dim) : newton.reason
+);
+
+const joule = units.parseUnit('J');
+check(
+  'J es kg·m²/s²',
+  joule.ok && units.dimensionLabel(joule.unit.dim) === 'kg·m^2·s^-2',
+  joule.ok ? units.dimensionLabel(joule.unit.dim) : joule.reason
+);
+
+const acceleration = units.parseUnit('m/s^2');
+check(
+  'm/s² es m·s⁻²',
+  acceleration.ok && units.dimensionLabel(acceleration.unit.dim) === 'm·s^-2',
+  acceleration.ok ? units.dimensionLabel(acceleration.unit.dim) : acceleration.reason
+);
+
+const speed = units.parseUnit('km/h');
+check(
+  'km/h se convierte a 0,2778 m/s',
+  speed.ok && Math.abs(speed.unit.factor - 1000 / 3600) < 1e-12,
+  speed.ok ? speed.unit.factor : speed.reason
+);
+
+const square = units.parseUnit('m²');
+check('superíndice de unidad', square.ok && units.dimensionLabel(square.unit.dim) === 'm^2');
+check('mmHg reconocido', units.parseUnit('mmHg').ok);
+check('unidad inventada rechazada', !units.parseUnit('foo').ok);
+check('temperatura con offset fuera de alcance', !units.parseUnit('ºC').ok);
+
+const kmh = units.parseUnit('km/h');
+const ms = units.parseUnit('m/s');
+const converted = kmh.ok && ms.ok ? units.convert(36, kmh.unit, ms.unit) : null;
+check('36 km/h = 10 m/s', converted !== null && Math.abs(converted - 10) < 1e-9, converted);
+
+const sameUnit = units.checkQuantityEquality('1 km', '1000 m');
+check('1 km = 1000 m', sameUnit && sameUnit.status === 'ok', sameUnit && sameUnit.status);
+
+const derivedUnit = units.checkQuantityEquality('3.6*10^6 N/C', '3.6*10^6 V/m');
+check(
+  'N/C y V/m son homogéneas',
+  derivedUnit && derivedUnit.status === 'ok' && derivedUnit.kind === 'conversion',
+  derivedUnit && derivedUnit.status
+);
+
+const wrongDimension = units.checkQuantityEquality('5 m', '5 s');
+check(
+  'sumar metros y segundos se marca',
+  wrongDimension && wrongDimension.status === 'fail' && wrongDimension.kind === 'dimensiones',
+  wrongDimension && wrongDimension.status
+);
+
+const wrongConversion = units.checkQuantityEquality('1 km', '900 m');
+check(
+  'una conversión falsa se marca',
+  wrongConversion && wrongConversion.status === 'fail' && wrongConversion.kind === 'conversion',
+  wrongConversion && wrongConversion.status
+);
+
+check('sin unidad no se pronuncia', units.checkQuantityEquality('25', '25') === null);
+
+/* ------------------------------------------------------------------ */
+/* Química                                                             */
+/* ------------------------------------------------------------------ */
+
+console.log('\nQuímica: masas, cargas y ajuste');
+
+const near = (value, target, tolerance = 0.05) =>
+  value !== null && Math.abs(value - target) <= tolerance;
+
+check('H2O ≈ 18,02 g/mol', near(chemistry.molarMass('H2O'), 18.015, 0.01));
+check('Ca(OH)2 ≈ 74,09 g/mol', near(chemistry.molarMass('Ca(OH)2'), 74.093, 0.01));
+check('CuSO4·5H2O ≈ 249,68 g/mol', near(chemistry.molarMass('CuSO4·5H2O'), 249.677, 0.05));
+check('Fe2(SO4)3 ≈ 399,86 g/mol', near(chemistry.molarMass('Fe2(SO4)3'), 399.858, 0.05));
+
+const nitrate = chemistry.parseFormula('NO3-');
+check(
+  'NO3⁻: 3 oxígenos y carga −1',
+  nitrate.ok && nitrate.formula.charge === -1 && nitrate.formula.counts.O === 3,
+  nitrate.ok ? JSON.stringify(nitrate.formula) : nitrate.reason
+);
+
+const iron = chemistry.parseFormula('Fe3+');
+check(
+  'Fe³⁺: un hierro y carga +3',
+  iron.ok && iron.formula.charge === 3 && iron.formula.counts.Fe === 1,
+  iron.ok ? JSON.stringify(iron.formula) : iron.reason
+);
+
+const ammonium = chemistry.parseFormula('NH4+');
+check(
+  'NH4⁺: 4 hidrógenos y carga +1',
+  ammonium.ok && ammonium.formula.charge === 1 && ammonium.formula.counts.H === 4,
+  ammonium.ok ? JSON.stringify(ammonium.formula) : ammonium.reason
+);
+
+const sulfate = chemistry.parseFormula('SO4^2-');
+check('SO4²⁻ con caret', sulfate.ok && sulfate.formula.charge === -2);
+check('elemento inexistente se rechaza', !chemistry.parseFormula('Xx2').ok);
+check('paréntesis desemparejados se rechazan', !chemistry.parseFormula('Ca(OH2').ok);
+
+check(
+  '2H2 + O2 → 2H2O está ajustada',
+  chemistry.checkBalance('2H2 + O2 -> 2H2O').status === 'ok'
+);
+check(
+  'CH4 + 2O2 → CO2 + 2H2O está ajustada',
+  chemistry.checkBalance('CH4 + 2O2 -> CO2 + 2H2O').status === 'ok'
+);
+check(
+  'Na+ + Cl- → NaCl está ajustada (carga incluida)',
+  chemistry.checkBalance('Na+ + Cl- -> NaCl').status === 'ok'
+);
+check(
+  'redox con electrones ajustada',
+  chemistry.checkBalance('MnO4^- + 8H+ + 5e- -> Mn^2+ + 4H2O').status === 'ok'
+);
+
+const unbalanced = chemistry.checkBalance('H2 + O2 -> H2O');
+check('H2 + O2 → H2O se marca sin ajustar', unbalanced.status === 'fail', unbalanced.status);
+check(
+  'el ajuste propuesto es 2, 1, 2',
+  Array.isArray(unbalanced.coefficients) && unbalanced.coefficients.join(',') === '2,1,2',
+  unbalanced.coefficients
+);
+
+const rust = chemistry.checkBalance('Fe + O2 -> Fe2O3');
+check(
+  'Fe + O2 → Fe2O3 se ajusta como 4, 3, 2',
+  rust.status === 'fail' && Array.isArray(rust.coefficients) && rust.coefficients.join(',') === '4,3,2',
+  rust.coefficients
+);
+
+check(
+  'una ecuación con dos ajustes posibles no se inventa',
+  chemistry.checkBalance('H2 + O2 -> H2O + H2O2').status === 'no_verificable'
+);
+
+const stoich = chemistry.limitingReagent('2H2 + O2 -> 2H2O', {
+  H2: { moles: 2 },
+  O2: { moles: 1 },
+});
+check('reactivo limitante reconocido', stoich.ok && stoich.result.limiting === 'H2', stoich.ok ? stoich.result.limiting : stoich.reason);
+check('se forman 2 mol de agua', stoich.ok && Math.abs(stoich.result.products[0].moles - 2) < 1e-9);
+check(
+  'se forman ≈ 36,03 g de agua',
+  stoich.ok && near(stoich.result.products[0].grams, 36.03, 0.02),
+  stoich.ok ? stoich.result.products[0].grams : '-'
+);
+
+const byMass = chemistry.limitingReagent('2H2 + O2 -> 2H2O', {
+  H2: { grams: 4 },
+  O2: { grams: 32 },
+});
+check(
+  'con gramos, el limitante es el hidrógeno',
+  byMass.ok && byMass.result.limiting === 'H2',
+  byMass.ok ? byMass.result.limiting : byMass.reason
+);
+check(
+  'una ecuación sin ajustar no calcula estequiometría',
+  !chemistry.limitingReagent('H2 + O2 -> H2O', { H2: { moles: 2 } }).ok
+);
 
 /* ------------------------------------------------------------------ */
 /* Contrato de marcado                                                 */
@@ -174,6 +350,29 @@ check('igualdad aritmética incorrecta', arithmeticFail.status === 'fail', arith
 
 const symbolicOnly = verify.verifyBlock({ answer: 'Sea $x^2-1=(x-1)(x+1)$.' });
 check('una identidad simbólica se comprueba', symbolicOnly.status === 'ok', symbolicOnly.status);
+
+const chemistryFail = verify.verifyBlock({
+  subjectName: 'Química',
+  answer: 'La reacción es $H2 + O2 → H2O$.',
+});
+check(
+  'una ecuación sin ajustar se marca en el bloque',
+  chemistryFail.status === 'fail' && chemistryFail.checks.some((item) => item.kind === 'balanceo'),
+  chemistryFail.status
+);
+
+const chemistryOk = verify.verifyBlock({ subjectName: 'Química', answer: 'Ajustada: $2H2 + O2 → 2H2O$.' });
+check('una ecuación ajustada se marca correcta', chemistryOk.status === 'ok', chemistryOk.status);
+
+const unitsMismatch = verify.verifyBlock({ subjectName: 'Física', answer: 'Así que $5 m = 5 s$.' });
+check(
+  'unidades no homogéneas se marcan en el bloque',
+  unitsMismatch.status === 'fail' && unitsMismatch.checks.some((item) => item.kind === 'dimensiones'),
+  unitsMismatch.status
+);
+
+const conversionOk = verify.verifyBlock({ subjectName: 'Física', answer: '$36 km/h = 10 m/s$.' });
+check('una conversión correcta se marca', conversionOk.status === 'ok', conversionOk.status);
 
 const nothing = verify.verifyBlock({ answer: 'Comentario de texto sin cuentas.' });
 check('sin cuentas es no_verificable', nothing.status === 'no_verificable', nothing.status);
