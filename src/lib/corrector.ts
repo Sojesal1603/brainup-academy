@@ -127,6 +127,7 @@ export async function gradeWithRubricMedian(params: {
       subjectName: params.subjectName,
       prompt: block.prompt,
       answer: params.answers[index] ?? '',
+      expected: block.expected ?? null,
     })
   );
 

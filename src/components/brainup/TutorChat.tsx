@@ -37,6 +37,7 @@ import NoteSplitPanel, {
   type SplitNote,
 } from './NoteSplitPanel';
 import type { NoteProposal } from '@/lib/apuntesIa';
+import type { BlockVerification } from '@/lib/verify';
 import { FOCUS_SESSION_STORAGE_KEY } from '@/lib/focusLock';
 import { registerTutorTime } from '@/lib/focusActions';
 import {
@@ -62,6 +63,38 @@ import {
 const CHAT_TIMEOUT_MS = 60_000;
 /** Redactar un apunte es la llamada más cara del sistema: más margen. */
 const NOTES_TIMEOUT_MS = 180_000;
+
+/** Sello del botón «Comprobar cálculo» (motor determinista del Paso 12). */
+const CALC_STATUS_STYLE: Record<
+  BlockVerification['status'],
+  { label: string; box: string; text: string }
+> = {
+  ok: {
+    label: 'Cálculo comprobado',
+    box: 'border-emerald-500/25 bg-emerald-500/[0.05]',
+    text: 'text-emerald-300',
+  },
+  fail: {
+    label: 'El cálculo no cuadra',
+    box: 'border-rose-500/30 bg-rose-500/[0.06]',
+    text: 'text-rose-300',
+  },
+  mixed: {
+    label: 'Cálculo con fallos',
+    box: 'border-amber-500/30 bg-amber-500/[0.06]',
+    text: 'text-amber-300',
+  },
+  no_verificable: {
+    label: 'Sin cuentas que verificar',
+    box: 'border-white/10 bg-white/[0.02]',
+    text: 'text-stone-400',
+  },
+};
+
+/** ¿Merece la pena ofrecer la comprobación en este mensaje? */
+function looksCalculable(content: string): boolean {
+  return /\$|→|->|=\s*-?\d/.test(content);
+}
 
 /** Un error HTTP con su estado, para poder decidir si merece la pena reintentar. */
 class HttpStatusError extends Error {
@@ -768,6 +801,10 @@ export default function TutorChat({
   const [panelSaving, setPanelSaving] = useState(false);
   /** Chat a todo el ancho, texto Markdown o folio PDF digital. */
   const [panelMode, setPanelMode] = useState<PanelMode>('chat');
+  /** Comprobación determinista por mensaje: cargando, error o informe. */
+  const [calcChecks, setCalcChecks] = useState<
+    Record<string, { loading?: boolean; error?: string; report?: BlockVerification }>
+  >({});
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -775,6 +812,36 @@ export default function TutorChat({
   const nearBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+
+  /**
+   * Comprueba las cuentas de una respuesta con el motor del servidor. No reescribe
+   * el mensaje ni pide otra llamada al modelo: solo enseña qué cuadra.
+   */
+  const checkCalculations = async (message: ChatMessage) => {
+    setCalcChecks((previous) => ({ ...previous, [message.id]: { loading: true } }));
+    try {
+      const response = await fetch('/api/verificar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: message.content, subjectName: agent.subject.name }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; verification?: BlockVerification; error?: string }
+        | null;
+      const report = payload?.verification;
+      if (!response.ok || !payload?.ok || !report) {
+        throw new Error(payload?.error ?? 'No se pudo comprobar el cálculo.');
+      }
+      setCalcChecks((previous) => ({ ...previous, [message.id]: { report } }));
+    } catch (caught) {
+      setCalcChecks((previous) => ({
+        ...previous,
+        [message.id]: {
+          error: caught instanceof Error ? caught.message : 'No se pudo comprobar el cálculo.',
+        },
+      }));
+    }
+  };
   /** Adjuntos que el alumno ha quitado mientras subían (hay que borrarlos del servidor). */
   const removedRef = useRef<Set<string>>(new Set());
 
@@ -1874,6 +1941,7 @@ export default function TutorChat({
         {messages.map((message) => {
           const isUser = message.role === 'user';
           const stageMeta = message.stage ? STAGE_META[message.stage] : null;
+          const calcReport = calcChecks[message.id]?.report;
 
           if (isUser) {
             return (
@@ -1938,11 +2006,63 @@ export default function TutorChat({
                       Abrir documento
                     </button>
                   )}
+                  {looksCalculable(message.content) && (
+                    <button
+                      onClick={() => void checkCalculations(message)}
+                      disabled={calcChecks[message.id]?.loading}
+                      title="Comprobar las cuentas con el motor del servidor, sin volver a preguntar al modelo"
+                      className="flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-stone-300 transition-colors hover:border-emerald-400/40 hover:text-emerald-200 disabled:opacity-60"
+                    >
+                      {calcChecks[message.id]?.loading ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Ruler className="h-3 w-3" />
+                      )}
+                      {calcChecks[message.id]?.loading ? 'Comprobando…' : 'Comprobar cálculo'}
+                    </button>
+                  )}
                 </div>
 
                 <div className="text-[15px] leading-7 text-stone-200/90">
                   <MarkdownMessage content={message.content} />
                 </div>
+
+                {/* Verificación determinista de las cuentas de la respuesta. */}
+                {calcReport && (
+                  <div
+                    className={`space-y-1.5 rounded-xl border p-3 ${
+                      CALC_STATUS_STYLE[calcReport.status].box
+                    }`}
+                  >
+                    <p
+                      className={`text-[10px] font-semibold uppercase tracking-wider ${
+                        CALC_STATUS_STYLE[calcReport.status].text
+                      }`}
+                    >
+                      {CALC_STATUS_STYLE[calcReport.status].label}
+                    </p>
+                    {calcReport.checks.length === 0 ? (
+                      <p className="text-[11px] leading-relaxed text-stone-400">
+                        No hay igualdades, unidades ni ecuaciones que comprobar en esta respuesta.
+                      </p>
+                    ) : (
+                      <ul className="space-y-1">
+                        {calcReport.checks.map((check, checkIndex) => (
+                          <li key={`${check.kind}-${checkIndex}`} className="text-[11px] leading-relaxed text-stone-300">
+                            <MarkdownMessage content={check.detail} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="text-[10px] text-stone-500">
+                      Cuentas del servidor, no del modelo. No cambia la respuesta ni la nota.
+                    </p>
+                  </div>
+                )}
+
+                {calcChecks[message.id]?.error && (
+                  <p className="text-[11px] text-rose-300">{calcChecks[message.id].error}</p>
+                )}
 
                 {/* El catedrático te ofrece unos apuntes: tú decides. */}
                 {message.noteProposal && (

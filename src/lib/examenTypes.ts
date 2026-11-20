@@ -13,6 +13,11 @@ export interface ExamBlock {
   points: number;
   /** Desglose visible del bloque: «a) …», «b) …». */
   apartados?: string[];
+  /**
+   * Solución final de referencia, en LaTeX. **Solo servidor**: se guarda en
+   * `questionsJson` y se quita antes de enviar los bloques al navegador.
+   */
+  expected?: string;
 }
 
 export interface ExamPackage {

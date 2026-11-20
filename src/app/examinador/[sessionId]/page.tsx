@@ -29,6 +29,13 @@ export default async function PauSessionPage({
   }
 
   const pkg = JSON.parse(session.questionsJson) as ExamPackage;
+  // La solución de referencia (`expected`) es solo del servidor: no viaja al
+  // navegador ni antes ni después de corregir. Se quita antes de renderizar.
+  const publicBlocks = pkg.blocks.map((block) => {
+    const copy = { ...block };
+    delete copy.expected;
+    return copy;
+  });
   const answers = session.answersJson ? (JSON.parse(session.answersJson) as string[]) : [];
   const grade =
     session.isCompleted && session.rubricFeedback
@@ -40,7 +47,7 @@ export default async function PauSessionPage({
       {grade ? (
         <ExamResults
           subjectName={session.subjectName}
-          blocks={pkg.blocks}
+          blocks={publicBlocks}
           grade={grade}
           answers={answers}
           elapsedMinutes={session.elapsedMinutes}
@@ -51,7 +58,7 @@ export default async function PauSessionPage({
           subjectName={session.subjectName}
           timedMinutes={session.timedMinutes}
           startedAtIso={session.createdAt.toISOString()}
-          blocks={pkg.blocks}
+          blocks={publicBlocks}
           source={pkg.source}
           model={pkg.model ?? null}
           initialAnswers={answers}

@@ -254,8 +254,9 @@ export async function buildExamPackage(userId: string, subjectId: string): Promi
     'En el campo "topic" de cada bloque usa EXACTAMENTE uno de los títulos anteriores, copiado carácter a carácter (sin abreviar ni inventar títulos nuevos).',
     'Escribe las expresiones matemáticas en LaTeX simple entre $...$ (por ejemplo: $\\frac{1}{2}mv^2$).',
     'Español de España, tono de examen oficial, sin soluciones ni pistas.',
+    'Además del enunciado, incluye en el campo "expected" la solución final de referencia, solo el resultado en LaTeX y sin pasos (por ejemplo: $2\\,m/s^2$ o $x=2$). Ese campo no se enseña al alumno: sirve para comprobar su respuesta. Si el bloque es de comentario o teoría, déjalo vacío.',
     'Devuelve EXCLUSIVAMENTE un JSON con este esquema exacto:',
-    '{"blocks":[{"topic":"título del tema","prompt":"enunciado completo del bloque","points":2.5}]}',
+    '{"blocks":[{"topic":"título del tema","prompt":"enunciado completo del bloque","points":2.5,"expected":"resultado final en LaTeX"}]}',
     'Nada de texto fuera del JSON.',
   ].join('\n');
 
@@ -284,6 +285,7 @@ export async function buildExamPackage(userId: string, subjectId: string): Promi
           topicTitle,
           prompt,
           points: clamp(entry.points, 0.5, 4) ?? BLOCK_POINTS,
+          expected: asString(entry.expected).slice(0, 500) || undefined,
         });
       }
     }

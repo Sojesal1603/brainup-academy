@@ -238,7 +238,8 @@ export async function buildEbauPackage(
     'Cada bloque debe tener 2 o 3 apartados concretos (a, b, c) y valer lo que marca la estructura.',
     'Usa EXACTAMENTE los títulos de tema recibidos, copiados carácter a carácter.',
     'Escribe las expresiones matemáticas en LaTeX simple entre $...$.',
-    'Español de España, tono de examen oficial, sin soluciones ni pistas.',
+    'Español de España, tono de examen oficial, sin soluciones ni pistas en el enunciado.',
+    'Añade en "expected" la solución final de referencia, solo el resultado en LaTeX y sin pasos. No se enseña al alumno: sirve para comprobar su respuesta. En bloques de teoría o comentario, déjalo vacío.',
     ...(focus ? [`El alumno ha pedido reforzar: «${focus}».`] : []),
     ...topics
       .filter((topic) => topic.teacherMethod)
@@ -248,7 +249,7 @@ export async function buildEbauPackage(
           `Método exigido por su profesor en «${topic.title}»: ${topic.teacherMethod}.`
       ),
     'Devuelve EXCLUSIVAMENTE un JSON válido con este esquema:',
-    '{"blocks":[{"topic":"título exacto","prompt":"enunciado completo","apartados":["a) ...","b) ..."],"points":2.5}]}',
+    '{"blocks":[{"topic":"título exacto","prompt":"enunciado completo","apartados":["a) ...","b) ..."],"points":2.5,"expected":"resultado final en LaTeX"}]}',
     'Nada de texto fuera del JSON.',
   ].join('\n');
 
@@ -281,6 +282,7 @@ export async function buildEbauPackage(
           apartados: apartados.length > 0 ? apartados : undefined,
           points:
             clamp(entry.points, 0.5, 4) ?? community.pointsPerBlock,
+          expected: asString(entry.expected).slice(0, 500) || undefined,
         });
       }
     }
@@ -340,6 +342,7 @@ export async function gradeEbauWithRubric(
       subjectName: input.subjectName,
       prompt: block.prompt,
       answer: input.answers[index] ?? '',
+      expected: block.expected ?? null,
     })
   );
 

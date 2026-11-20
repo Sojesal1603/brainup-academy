@@ -432,6 +432,34 @@ check(
 check('el tipo del bloque admite la verificación', /verification\?:\s*BlockVerification/.test(typesSource));
 check('la interfaz pinta el resultado', /result\.verification/.test(resultsSource));
 
+const examinadorSource = readSource(path.join('src', 'lib', 'examinador.ts'));
+const pageSource = readSource(
+  path.join('src', 'app', 'examinador', '[sessionId]', 'page.tsx')
+);
+const verificarRoute = readSource(path.join('src', 'app', 'api', 'verificar', 'route.ts'));
+
+check(
+  'la generación pide y guarda la solución de referencia',
+  /"expected"/.test(examinadorSource) && /expected: asString\(entry\.expected\)/.test(examinadorSource)
+);
+check(
+  'la generación EBAU también guarda la referencia',
+  /expected: asString\(entry\.expected\)/.test(ebauSource)
+);
+check(
+  'la página quita expected antes de enviarla al navegador',
+  /delete copy\.expected/.test(pageSource) && /blocks=\{publicBlocks\}/.test(pageSource)
+);
+check(
+  'la página ya no manda los bloques crudos',
+  !/blocks=\{pkg\.blocks\}/.test(pageSource)
+);
+check('el endpoint de comprobación exige sesión', /await requireUser\(\)/.test(verificarRoute));
+check(
+  'el endpoint no llama a ningún modelo',
+  !/runAiText|aiEngine|ensureAiAccess/.test(verificarRoute)
+);
+
 /* ------------------------------------------------------------------ */
 
 fs.rmSync(outDir, { recursive: true, force: true });
