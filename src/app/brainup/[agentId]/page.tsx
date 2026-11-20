@@ -14,7 +14,9 @@ const TutorChat = nextDynamic(() => import('@/components/brainup/TutorChat'), {
   loading: () => <ChatSkeleton />,
 });
 import SessionClosePanel from '@/components/brainup/SessionClosePanel';
-import { getConfiguredModelLabel, parseTutorReply, type TutorStage } from '@/lib/tutor';
+import { getConfiguredModelLabel, parseTutorReply, type TutorStage } from '@/lib/tutor';import { normalizeSubjectMode } from '@/lib/subjects/modes';
+
+
 import type { NoteProposal } from '@/lib/apuntesIa';
 import { getConfiguredEngines } from '@/lib/aiEngine';
 import { resolveAllAiCredentials, runWithAiCredentials } from '@/lib/ai/credentials';
@@ -51,11 +53,17 @@ function daysUntil(date: Date): number {
 
 export default async function TutorPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ agentId: string }>;
+  searchParams: Promise<{ mode?: string | string[] }>;
 }) {
   const { user, tenant: prisma } = await currentTenant();
   const { agentId } = await params;
+  const query = await searchParams;
+  const initialMode = normalizeSubjectMode(
+    Array.isArray(query.mode) ? query.mode[0] : query.mode
+  );
   // El rótulo del motor se lee con las credenciales de ESTA cuenta: la página no
   // debe anunciar la clave de plataforma si el usuario no tiene la suya.
   const aiCredentials = await resolveAllAiCredentials(user.id, { tolerateVaultErrors: true });
@@ -284,6 +292,7 @@ export default async function TutorPage({
             },
           }}
           model={modelLabel}
+          initialMode={initialMode}
           initialConversationId={conversation?.id ?? null}
           initialMessages={initialMessages}
           opening={{

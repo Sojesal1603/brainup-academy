@@ -42,6 +42,7 @@ import {
   type SharedNote,
 } from './tutorNotes';
 import { buildCategoryLayer, subjectCategoryOf } from './subjects/category';
+import { buildModeLayer, type SubjectMode } from './subjects/modes';
 
 export {
   getConfiguredModelLabel,
@@ -99,6 +100,8 @@ export interface TutorAgentInfo {
 export interface TutorContext {
   studentName: string;
   modality: string;
+  /** Modo de trabajo elegido para este turno (Paso 14). Sin él, prompt de antes. */
+  mode?: SubjectMode | null;
   /**
    * Unidades con nivel MEDIDO de verdad (autoevaluación, diagnóstico, sesión o
    * simulacro). El catedrático solo puede hablar de estas: el resto no se sabe.
@@ -242,6 +245,12 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
   if (categoryLayer.length > 0) {
     lines.push('');
     lines.push(...categoryLayer);
+  }
+
+  // Capa 5: modo de trabajo del turno (ortogonal a la categoría).
+  const modeLayer = buildModeLayer(ctx.mode);
+  if (modeLayer.length > 0) {
+    lines.push(...modeLayer);
   }
 
   // Paso 11: pedagogía activa elegida por reglas (determinista, sin IA).

@@ -24,6 +24,7 @@ import {
 import clsx from 'clsx';
 import Link from 'next/link';
 import SubjectSolarSystem from '@/components/brainup/SubjectSolarSystem';
+import ModeShortcuts from '@/components/brainup/ModeShortcuts';
 
 export const dynamic = 'force-dynamic';
 
@@ -221,7 +222,7 @@ export default async function BrainUpHubPage() {
                 )}
               </div>
 
-              <div className="pt-3 border-t border-white/10">
+              <div className="space-y-2 pt-3 border-t border-white/10">
                 <Link
                   href={`/brainup/${agentSlug(agent.subject.name)}`}
                   className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-3 py-2.5 text-xs font-bold text-white shadow-lg shadow-purple-950/40 transition-all hover:from-blue-500 hover:to-purple-500 hover:shadow-purple-600/30 hover:scale-[1.02]"
@@ -229,6 +230,7 @@ export default async function BrainUpHubPage() {
                   <span>Consultar Catedrático</span>
                   <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
                 </Link>
+                <ModeShortcuts href={`/brainup/${agentSlug(agent.subject.name)}`} />
               </div>
             </article>
           );

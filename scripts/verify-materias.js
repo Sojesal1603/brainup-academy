@@ -32,6 +32,7 @@ execFileSync(
   [
     require.resolve('typescript/bin/tsc'),
     path.join('src', 'lib', 'subjects', 'category.ts'),
+    path.join('src', 'lib', 'subjects', 'modes.ts'),
     path.join('src', 'lib', 'studyTools.ts'),
     '--outDir',
     '.tmp-verify-materias',
@@ -51,6 +52,7 @@ execFileSync(
 
 const C = require(path.join(outDir, 'subjects', 'category.js'));
 const T = require(path.join(outDir, 'studyTools.js'));
+const M = require(path.join(outDir, 'subjects', 'modes.js'));
 
 /* ------------------------------------------------------------------ */
 /* Inferencia                                                          */
@@ -156,6 +158,38 @@ check('LABORATORIO empieza por laboratorio', C.SUBJECT_CATEGORY_META.LABORATORIO
 check('COMENTARIO empieza por comentario', C.SUBJECT_CATEGORY_META.COMENTARIO.tools[0] === 'comentario');
 check('IDIOMA empieza por idioma', C.SUBJECT_CATEGORY_META.IDIOMA.tools[0] === 'idioma');
 check('una herramienta base sigue disponible', C.categorySupportsTool('COMENTARIO', 'test'));
+
+/* ------------------------------------------------------------------ */
+/* Modos de trabajo                                                    */
+/* ------------------------------------------------------------------ */
+
+console.log('\nModos: eje ortogonal, sin modo no cambia nada');
+
+check('hay cinco modos', M.SUBJECT_MODES.length === 5, M.SUBJECT_MODES);
+check(
+  'todos tienen metadatos',
+  M.SUBJECT_MODES.every((mode) => Boolean(M.SUBJECT_MODE_META[mode]))
+);
+check('sin modo no hay capa', M.buildModeLayer(null).length === 0);
+check('un modo inválido no pasa', M.normalizeSubjectMode('ESTUDIAR') === null);
+check('un modo válido se conserva', M.normalizeSubjectMode('simulacro') === 'SIMULACRO');
+
+const modeMarkers = {
+  DIAGNOSTICAR: /diagnostic/i,
+  ENTRENAR: /practica/i,
+  SIMULACRO: /examen real|sin ayudas/i,
+  CORREGIR: /rúbrica/i,
+  PREPARAR: /plan|sesiones/i,
+};
+
+for (const [mode, pattern] of Object.entries(modeMarkers)) {
+  const layer = M.buildModeLayer(mode).join(' ');
+  check(`${mode} declara su trabajo`, pattern.test(layer), layer.slice(0, 80));
+  check(`${mode} no habla de PAU`, !/PAU|EBAU|nota de corte/i.test(layer));
+}
+
+const modeLayers = M.SUBJECT_MODES.map((mode) => M.buildModeLayer(mode).join(' '));
+check('cada modo tiene una capa distinta', new Set(modeLayers).size === modeLayers.length);
 
 /* ------------------------------------------------------------------ */
 /* Herramientas de estudio: orden y lenguaje                          */
@@ -280,6 +314,25 @@ check(
 check('el formulario deja elegir categoría', /newSubjectForm.category/.test(notion) && /AUTO/.test(notion));
 check('Ajustes muestra el panel', /SubjectCategoriesPanel/.test(ajustes));
 check('el panel escribe con la acción', /setSubjectCategory/.test(panel));
+check('el prompt añade la capa de modo', /buildModeLayer\(ctx\.mode\)/.test(tutor));
+check(
+  'el modo entra tras la categoría',
+  tutor.search(/buildCategoryLayer\(/) < tutor.search(/buildModeLayer\(ctx\.mode\)/)
+);
+check('la ruta normaliza el modo', /normalizeSubjectMode\(body\.mode\)/.test(tutorRoute));
+check('la ruta pasa el modo al contexto', /\bmode,\s+measuredTopics/.test(tutorRoute));
+check('el chat envía el modo', /shareNotes,\s*mode,/.test(chat));
+check('el chat deja elegir el modo', /SUBJECT_MODES\.map/.test(chat));
+check(
+  'la página acepta ?mode=',
+  /searchParams/.test(agentPage) && /normalizeSubjectMode\(/.test(agentPage) && /initialMode=/.test(agentPage)
+);
+check(
+  'el hub ofrece entrar en un modo',
+  /ModeShortcuts/.test(read('src', 'app', 'brainup', 'page.tsx')) &&
+    /\?mode=/.test(read('src', 'components', 'brainup', 'ModeShortcuts.tsx'))
+);
+
 check(
   'las materias creadas por curso se infieren igual',
   /category:\s*inferSubjectCategory/.test(read('src', 'lib', 'courseApply.ts')) &&

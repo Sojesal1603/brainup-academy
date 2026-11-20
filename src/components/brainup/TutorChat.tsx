@@ -31,6 +31,11 @@ import clsx from 'clsx';
 import MarkdownMessage from './MarkdownMessage';
 import StudyToolPanel from './StudyToolPanel';
 import type { SubjectCategory } from '@/lib/subjects/category';
+import {
+  SUBJECT_MODES,
+  SUBJECT_MODE_META,
+  type SubjectMode,
+} from '@/lib/subjects/modes';
 import NoteSplitPanel, {
   type EngineOption,
   type NoteVariant,
@@ -315,6 +320,8 @@ interface TutorChatProps {
   model: string;
   initialConversationId: string | null;
   initialMessages: ChatMessage[];
+  /** Modo de trabajo inicial, si se entra desde un enlace con ?mode=. */
+  initialMode?: SubjectMode | null;
   opening: TutorOpeningContext;
   /** Cuántos apuntes tiene de esta materia, para el interruptor de compartir. */
   notes: { total: number; titles: string[] };
@@ -773,11 +780,13 @@ export default function TutorChat({
   model,
   initialConversationId,
   initialMessages,
+  initialMode = null,
   opening,
   notes,
   engines,
 }: TutorChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [mode, setMode] = useState<SubjectMode | null>(initialMode);
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
   const [activeModel, setActiveModel] = useState(model);
   const [input, setInput] = useState('');
@@ -947,6 +956,7 @@ export default function TutorChat({
           conversationId,
           message: text,
           shareNotes,
+          mode,
           // De cada archivo viaja solo su id: los bytes ya están en el disco del
           // servidor, que es donde se le saca el texto al documento. Esto es lo
           // que permite subir un tema de 200 MB sin que quepa en un JSON.
@@ -1802,6 +1812,26 @@ export default function TutorChat({
             {' · '}
             {activeModel.startsWith('auto') ? 'mejor modelo' : activeModel}
           </span>
+          <label className="ml-1 flex items-center gap-1.5 text-[10px] text-stone-500">
+            <span className="hidden sm:inline">Modo</span>
+            <select
+              value={mode ?? ''}
+              disabled={isSending}
+              onChange={(event) => {
+                const next = event.target.value;
+                setMode(next === '' ? null : (next as SubjectMode));
+              }}
+              title={mode ? SUBJECT_MODE_META[mode].description : 'Sin modo: respuesta normal'}
+              className="rounded-md border border-white/10 bg-[#0c0c0e] px-1.5 py-1 text-[10px] text-stone-300 outline-none focus:border-emerald-500/50 disabled:opacity-50"
+            >
+              <option value="">Libre</option>
+              {SUBJECT_MODES.map((id) => (
+                <option key={id} value={id}>
+                  {SUBJECT_MODE_META[id].short}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">

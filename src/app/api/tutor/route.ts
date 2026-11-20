@@ -15,6 +15,7 @@ import {
   type TutorReply,
 } from '@/lib/tutor';
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
+import { normalizeSubjectMode } from '@/lib/subjects/modes';
 import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
 import { providerLabel as providerDisplayName } from '@/lib/ai/credentials';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
@@ -68,6 +69,8 @@ interface TutorRequestBody {
    * servidor continúa la última conversación: recargar no parte el hilo.
    */
   fresh?: unknown;
+  /** Modo de trabajo del turno (Paso 14): diagnostico, entrenar, simulacro… */
+  mode?: unknown;
 }
 
 interface StoredAttachmentRow {
@@ -222,6 +225,7 @@ export async function POST(request: Request) {
       ? body.conversationId
       : null;
   const freshConversation = body.fresh === true;
+  const mode = normalizeSubjectMode(body.mode);
   // Por defecto los apuntes se comparten: es justo lo que el alumno ha pedido.
   const shareNotes = body.shareNotes === undefined ? true : body.shareNotes !== false;
 
@@ -529,6 +533,7 @@ export async function POST(request: Request) {
       {
         studentName: student?.name ?? 'Estudiante',
         modality: student?.modality ?? '1º de Bachillerato',
+        mode,
         measuredTopics: measuredTopics.map((topic) => ({
           title: topic.title,
           masteryLevel: topic.masteryLevel,
