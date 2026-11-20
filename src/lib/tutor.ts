@@ -21,6 +21,14 @@ import {
 import { buildStudentLevelLines, LEVEL_TAG_INSTRUCTION, parseLevelTag } from './knowledge';
 import { resolveCourse } from './courseCatalog';
 import {
+  BASE_PEDAGOGY_LAYER,
+  WEAK_MASTERY,
+  buildActivePedagogyLayer,
+  buildStagePromptLayer,
+  buildSubjectLayer,
+  getStageConfig,
+} from './stages';
+import {
   NOTE_PROPOSAL_TAG_INSTRUCTION,
   parseNoteOpenRequest,
   parseNoteProposal,
@@ -200,35 +208,48 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
   lines.push(`Eres ${agent.name}, ${agent.specialty}.`);
   lines.push(agent.systemPrompt.trim());
   lines.push('');
-  lines.push(
-    'NÚCLEO AUTÓNOMO (identidad y disciplina): eres el responsable de que apruebe, no un asistente que espera órdenes. La agenda la lleva el Planificador, pero dentro de esta materia mandas tú: diagnosticas, exiges y no dejas cabos sueltos.'
-  );
-  lines.push(
-    'ADAPTACIÓN TOTAL: no sigas plantillas fijas. Si pide una tabla, un debate, un esquema puro, un caso práctico o una explicación desde cero, se lo das con ese formato exacto, con rigor de examen y sin cambiarle la petición por la que tú preferirías.'
-  );
-  lines.push(
-    'NIVEL CERO (PEDAGOGÍA OBLIGATORIA): explica SIEMPRE como si el alumno no supiera nada del concepto, aunque creas que ya lo sabe. Empieza por la idea más básica y concreta (qué es, para qué sirve, con un ejemplo cotidiano), define cada término la primera vez que lo usas y sube en escalones: base → mecanismo → caso formal → cómo lo pregunta el examen. No des por sabido ningún prerrequisito: si hace falta, recuérdalo en una línea. Al final de cada escalón, comprueba con una pregunta corta que lo ha entendido y no avances hasta que lo demuestre; si falla, vuelve al escalón anterior con OTRA explicación, no repitas la misma frase. Sube de nivel hasta que resuelva solo un caso completo.'
-  );
-  lines.push(
-    'HERRAMIENTAS DE ESTUDIO BAJO DEMANDA: si pide flashcards, un test interactivo, un mapa mental o una guía de estudio, no lo mandes a otra pantalla ni se lo expliques de pasada. Dile en una frase que justo debajo tiene el panel «Herramientas de estudio» y qué botón pulsar (Flashcards, Test, Mapa o Guía), y ofrécele el foco exacto (unidad y apartado). Puedes adelantar dos o tres preguntas de muestra; el material completo lo genera el panel.'
-  );
-  lines.push(
-    'BUCLE CERRADO: la jornada no se da por terminada con tareas obligatorias pendientes. Si intenta cerrar el día, saltarse un bloque o dejarlo «para mañana» sin motivo, no lo aceptes: pídele la razón, dile exactamente qué queda y recuérdale que lo pendiente se reprograma con penalización de prioridad. No negocies el mínimo ni le felicites por trabajo que no ha hecho.'
-  );
-  lines.push(
-    'TONO: directo, analítico y estructurado, de preparador de alto rendimiento. Exigente sin humillar, sin discursos largos y sin relleno. Cuando pida explicación directa, obedece el MODO OBEDIENTE de abajo: la disciplina no es negarle lo que pide.'
-  );
+
+  // Capa 1: base pedagógica (igual en todas las etapas).
+  lines.push(...BASE_PEDAGOGY_LAYER);
   lines.push('');
+
   const course = resolveCourse(ctx.modality);
+  const stageConfig = getStageConfig({ modality: ctx.modality });
   lines.push(`Alumno: ${ctx.studentName}. Curso real: ${course.label} (${course.curriculum}).`);
-  if (course.stage === 'ESO') {
-    lines.push(
-      `NIVEL PEDAGÓGICO: está en ${course.label}. Ajusta el vocabulario, los ejemplos, los prerrequisitos y la profundidad al currículo ${course.curriculum}; nada de contenidos de Bachillerato, PAU ni notas sobre 14. Preparas las pruebas reales de su curso y su centro.`
-    );
-  } else {
-    lines.push('Preparando los exámenes reales de su curso y su centro.');
-  }
-  lines.push(`Asignatura: ${agent.subject.name}.`);
+
+  // Capa 2: etapa educativa (ESO / Bachillerato / Universidad).
+  lines.push(
+    ...buildStagePromptLayer({
+      stage: course.stage,
+      label: course.label,
+      curriculum: course.curriculum,
+      scaleLabel: stageConfig.scale.label,
+      hasPau: stageConfig.scale.hasPau,
+    })
+  );
+
+  // Capa 3: materia concreta.
+  lines.push(...buildSubjectLayer(agent.subject.name));
+
+  // Paso 11: pedagogía activa elegida por reglas (determinista, sin IA).
+  const weakUnits = ctx.measuredTopics.filter((topic) => topic.masteryLevel < WEAK_MASTERY).length;
+  const planMinutes = (ctx.todayPlan ?? [])
+    .filter((session) => !session.done && session.subjectName === agent.subject.name)
+    .reduce((total, session) => total + session.minutes, 0);
+  lines.push('');
+  lines.push(
+    ...buildActivePedagogyLayer({
+      stage: course.stage,
+      subjectName: agent.subject.name,
+      pendingErrors: ctx.pendingErrors,
+      weakUnits,
+      hasUpcomingExam: ctx.upcomingExams.some((exam) => {
+        const days = daysUntil(exam.examDate);
+        return days >= 0 && days <= 7;
+      }),
+      minutes: planMinutes > 0 ? planMinutes : null,
+    })
+  );
 
   // Expediente honesto: solo entra lo medido; lo demás se declara desconocido.
   lines.push(

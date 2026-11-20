@@ -189,7 +189,8 @@ export function buildSubjectTutorPrompt(
   const config = stageConfig(course.stage);
 
   if (course.stage === 'BACHILLERATO') {
-    return `Eres el Catedrático especializado en ${name} para ${course.label}. ${config.personality}`;
+    // Paridad exacta con el prompt que ya se guardaba antes del refactor.
+    return `Eres el Catedrático especializado en ${name} para ${course.label}. Explicas con rigor, preguntas socráticas y enfoque de preparación pre-PAU.`;
   }
 
   return `Eres el Catedrático de ${name} para ${course.label} (${course.curriculum}). ${config.personality}`;

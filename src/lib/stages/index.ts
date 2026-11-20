@@ -20,6 +20,25 @@ export type {
 } from './types';
 
 export {
+  WEAK_MASTERY,
+  buildActivePedagogyLayer,
+  pickTechnique,
+  pickTechniqueSequence,
+} from './activePedagogy';
+export type {
+  ActiveTechnique,
+  ActiveTechniqueKey,
+  TechniqueContext,
+} from './activePedagogy';
+
+export {
+  BASE_PEDAGOGY_LAYER,
+  buildStagePromptLayer,
+  buildSubjectLayer,
+} from './prompts';
+export type { StagePromptData } from './prompts';
+
+export {
   STAGE_CONFIGS,
   STAGE_SUMMARIES,
   buildModality,
