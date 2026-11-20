@@ -208,12 +208,29 @@ model PushSubscription {
   @@index([userId])
 }
 
+/// Categoría didáctica de la materia (Paso 14, B7). Decide el método del
+/// catedrático y el orden de las herramientas. Nullable a propósito: los
+/// perfiles anteriores se resuelven por inferencia hasta que se ejecute el
+/// backfill opcional.
+enum SubjectCategory {
+  PROBLEMAS
+  LABORATORIO
+  COMENTARIO
+  IDIOMA
+  EXPOSICION
+  TECNICA
+  GENERAL
+}
+
 // 2. Asignaturas y Ponderaciones PAU
 model Subject {
   id               String            @id @default(uuid())
   userId           String            @default("user_default")
   user             UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade)
   name             String // "Matemáticas I", "Física y Química", "Tecnología e Ingeniería I", etc.
+  // Null = sin decidir: `subjectCategoryOf` infiere desde `name` y no rompe
+  // ninguna materia existente. El alumno puede corregirla y se guarda.
+  category         SubjectCategory?
   color            String            @default("#10b981") // HEX
   pauWeight        Float             @default(0.2) // 0.2, 0.1 o 0
   isPhaseGeneral   Boolean           @default(true)
