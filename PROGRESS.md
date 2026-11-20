@@ -22,12 +22,46 @@ Estados: `pendiente`, `en curso`, `bloqueado`, `hecho`.
 | 11. B3 pedagogía activa | hecho | `8343bdd`, `1b969cb`, este commit | Etapas ESO 1º–4º, Bachillerato 1º–2º y Universidad (5 ramas, cursos 1º–5º, titulación editable, ECTS y convocatorias) en `src/lib/stages/`; migración `20261120120000_education_stage` **expand-only, no aplicada a producción**; backfill con `--dry-run` por defecto; cabecera, barra lateral, Ajustes, Estadísticas y prompts dejan de asumir PAU/14. Pedagogía activa determinista (`pickTechnique`) declarada en la capa de etapa y conectada con el cierre del Paso 10 sin tocar `sessionClose.ts`. `verify:stages` (66), `verify:corrector` (29), `check`, `lint` y `build` en verde. `verify:cierre` queda **bloqueado a propósito** hasta aplicar la migración: la base de producción aún no tiene `stage` y el test crea perfiles reales. | La migración y el backfill se ejecutan a mano en Supabase (SQL abajo). El recorrido visual de Ajustes/Universidad con sesión real queda como prueba manual. |
 | 12. Verificación SymPy/unidades/química | hecho | `0dfd504`, `49c5dc6`, este commit | `docs/ENCARGO.md` §3.7 cerrado **sin SymPy**: el despliegue es Node puro (no hay `Dockerfile` ni `render.yaml`; `netlify.toml:26-33` y `runtime = 'nodejs'`) y `python3` local no trae la librería. Motor determinista en `src/lib/verify/`: LaTeX → expresión, CAS acotado, unidades SI y química (masas molares IUPAC, ajuste por eliminación gaussiana con carga, reactivo limitante). Se adjunta como evidencia en `BlockResult.verification`, se le da al corrector y se pinta en `ExamResults`; **no toca la nota ni `notationPenalty`**. `verify:verificacion` 103 comprobaciones. Solución de referencia `expected` privada en `questionsJson` (se quita antes de renderizar) y botón «Comprobar cálculo» en el catedrático contra `/api/verificar`, determinista y con sesión. | Queda el recorrido visual con sesión real: un simulacro corregido y el botón del catedrático. |
 | 13. Proactividad diaria | hecho | `4d95c28`, `a2ca8f3`, `b9a785b`, este commit | Motor puro `src/lib/proactivity.ts` con ranking fijo (examen → repaso vencido → errores → racha → siguiente bloque) y honestidad sin mediciones. Tarjeta `ProactiveCard` encima de «Hoy toca esto», con enlaces profundos y descarte «Hoy no» por día en `localStorage` (sin migración). Silencio local 22:00–08:00 validado al guardar el aviso y al enviarlo, con zona horaria del alumno. El saludo del catedrático recibe una línea por reglas adaptada con `getStageConfig` (ESO, Bachillerato, Universidad), sin IA. **No escribe `StudyBlock`.** `verify:proactividad` 71 comprobaciones. | El envío push en producción depende de un cron externo; la ventana de silencio es fija y no configurable; el descarte es por dispositivo; no se ha recorrido la tarjeta en navegador con sesión real. |
-| 14. B7 modos por materia | pendiente | — | — | — |
+| 14. B7 modos por materia | hecho | `ed730ea`, `a7558df`, `4978e30`, `00ba64a`, `a7ff2a6` | Dos ejes ortogonales: categoría de materia (`Subject.category`, enum de 7 valores con inferencia por nombre) y modo de trabajo por turno (diagnosticar, entrenar, simulacro, corregir, preparar). Categoría nullable + migración **expand-only** `20261120160000_subject_category` (aplicada solo en local; ver SQL abajo). La categoría entra como capa dinámica del prompt y el modo viaja en `/api/tutor`; GENERAL y «Libre» no añaden capa, así que los perfiles viejos conservan el prompt anterior. Herramientas nucleares `problemas` (con `verifyBlock`), `laboratorio`, `comentario` e `idioma` con parser estricto y vista propia; el panel ordena por categoría sin ocultar ninguna. Selector de modo en el chat y atajo en el hub, panel de categorías en Ajustes y select «Automática» al crear materia. `npm run verify:materias` **113/113** en verde; `verify:stages`, `verify:corrector`, `verify:verificacion`, `verify:proactividad`, `check` y `lint` 0; `npm run build` 0. | La migración **no se ha aplicado a producción** (prohibido en esta ejecución) y el backfill es opcional. Idioma es text-only (sin audio) y la técnica no ejecuta código. `codigo` y `exposicion` quedan como herramientas dedicadas para un pulido posterior. `verify:cierre` sigue bloqueado por la migración `stage` del Paso 11 y `P1001` en este entorno. |
 | 15. Fase 0 de seguridad | en curso (parte segura) | este commit | RLS activo en 30/30 tablas de `public` (incluida `PushSubscription`); `anon` y `authenticated` sin privilegios (0 filas en `information_schema.role_table_grants`); anon recibe HTTP 401/42501 en las 6 tablas probadas. TLS con CA de Supabase y `sslaccept=strict`. | Defaults de `supabase_admin` siguen abiertos (requiere SQL como ese rol); faltan `prisma_app`, secretos Moodle y retry de lecturas. |
 | 16. Soporte 1º ESO | hecho | `8a45b15` | `UserProfile.modality` sigue siendo la única fuente del curso; `src/lib/courseCatalog.ts` la normaliza a curso + currículo y define las nueve materias base de 1º ESO (Lengua Castellana y Literatura, Matemáticas, Geografía e Historia, Biología y Geología, Inglés, Tecnología y Digitalización, Educación Física, Música y Educación Plástica). `/ajustes` permite elegir el curso y, al activar 1º ESO, `courseApply.ts` crea de forma idempotente las materias que falten con su Catedrático IA en LOMLOE 1º ESO; cambiar de curso no borra nada. La cabecera y la barra lateral reciben el curso real y en ESO ocultan el objetivo PAU y el Examinador PAU; el coordinador de la puesta a punto y los Catedráticos IA reciben `1º ESO (LOMLOE 1º ESO)` para ajustar nivel y prerrequisitos. `tsc`, `eslint` y `npm run build` en verde. | La creación de materias al cambiar de curso y el ocultado del menú requieren una sesión real en el navegador para recorrerse a mano; la lógica está compilada y cubierta por los tipos. |
 | 17. Modo apaisado / tablet | hecho | este commit | `public/manifest.json` pasa a `"orientation": "any"`. La barra lateral muestra la navegación completa con etiquetas desde `md` (768 px) con 240 px de ancho, en vez del rail de iconos que esperaba a `xl`; el contenido principal usa `xl:p-8` y 1600 px de ancho máximo, de modo que una tablet apaisada de 1024 px no pierde columnas. Las rejillas de estadísticas, retos, repaso y la puesta a punto pasan a dos columnas desde `md`; el Cuartel añade `landscape:grid-cols-2` para pantallas apaisadas. `tsc`, `eslint` y `npm run build` en verde. | La comprobación visual en tablet real no se ha hecho en este entorno; los cortes se verifican por las clases y el build, no con captura. |
 
 Despliegue, publicación y `git push`: **fuera de alcance** del modo autónomo.
+
+## Paso 14: categorías y modos por materia (2026-11-20)
+
+- **Qué se separó.** La etapa (Paso 11) dice el nivel; la **categoría** dice cómo se trabaja esa asignatura (problemas, laboratorio, comentario, idioma, exposición, técnica o general); el **modo** dice qué se hace en la consulta de hoy (diagnosticar, entrenar, simulacro, corregir o preparar). Categoría y modo son ortogonales: una materia de problemas se puede entrenar o simular.
+- **Sin sorpresas para los perfiles viejos.** `Subject.category` es nullable. `subjectCategoryOf` usa la columna si existe y, si no, infiere del nombre; `GENERAL` no añade capa de prompt. El modo por defecto es «Libre», que tampoco añade capa. El `systemPrompt` guardado del agente no se reescribe: la categoría se aplica al construir cada turno, así que corregirla en Ajustes surte efecto en el turno siguiente.
+- **Herramientas.** `problemas` exige enunciado, al menos dos pasos y solución; la ruta la comprueba con `verifyBlock` antes de entregarla. `laboratorio` exige hipótesis, procedimiento y conclusión; `comentario`, al menos dos secciones con pruebas; `idioma`, tarea y respuesta modelo con correcciones o vocabulario. Las herramientas siguen a la categoría en el panel pero todas están accesibles.
+- **Límites asumidos.** Idioma es text-only: no hay audio ni pronunciación. La técnica muestra diseño y código sin ejecutarlo en el servidor. No hay herramientas dedicadas `codigo` ni `exposicion`; se reutilizan `guia`, `mapa`, `problemas` y `test`.
+- **Verificación.** `npm run verify:materias` compila los módulos puros y comprueba inferencia, paridad de GENERAL, capas de prompt, orden de herramientas, parsers, migración expand-only, backfill y cableado de ruta/UI. Sin IA y sin tocar la base.
+
+### SQL de despliegue (aplicar antes del build)
+
+```sql
+CREATE TYPE "SubjectCategory" AS ENUM (
+  'PROBLEMAS',
+  'LABORATORIO',
+  'COMENTARIO',
+  'IDIOMA',
+  'EXPOSICION',
+  'TECNICA',
+  'GENERAL'
+);
+
+ALTER TABLE "Subject"
+  ADD COLUMN "category" "SubjectCategory";
+```
+
+### Orden de despliegue
+
+1. Aplicar la migración `20261120160000_subject_category` en Supabase (es expand-only: no borra, renombra ni cambia tipos). También vale `npx prisma migrate deploy` con `DIRECT_URL`.
+2. Desplegar el build. La app funciona sin rellenar la columna: infiere la categoría del nombre.
+3. Opcional: `npm run backfill:materias` (simulación; imprime el reparto) y después `node scripts/backfill-subject-category.js --apply` para guardar la inferencia solo en filas con `category IS NULL`. No pisa categorías elegidas a mano.
+4. Revisar en Ajustes → «Cómo se trabaja cada materia» y corregir lo que la inferencia haya acertado a medias.
+
+**Vuelta atrás:** al ser expand-only, el build anterior sigue funcionando con la columna nueva. Si hiciera falta retirarla: `ALTER TABLE "Subject" DROP COLUMN "category"; DROP TYPE "SubjectCategory";` (no ejecutado).
 
 ## Base de datos
 
