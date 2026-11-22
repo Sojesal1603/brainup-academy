@@ -3,6 +3,7 @@ import { MoodleError } from '@/lib/moodleWs';
 import { connectMoodleAnyWay } from '@/lib/moodleSync';
 import { disconnectMoodle, getMoodleStatus } from '@/lib/moodleWsSync';
 import { requireUser } from '@/lib/auth';
+import { VaultError } from '@/lib/security/vault';
 
 /**
  * Conectar y desconectar Moodle.
@@ -15,7 +16,8 @@ import { requireUser } from '@/lib/auth';
  *     sus datos de siempre (`login/token.php`); si su centro no deja, se entra
  *     **por sesión web** con esos mismos datos (la puerta del navegador). Con
  *     `savePassword: false` no se guarda la contraseña y habrá que repetirla otro
- *     día; por defecto se guarda **cifrada** con la clave local del equipo.
+ *     día; por defecto se guarda **cifrada** con la caja fuerte de la app
+ *     (contexto por cuenta, no una clave del disco).
  *
  * Ni la clave ni la contraseña salen de aquí: la respuesta solo devuelve el
  * nombre del sitio, tu usuario, cuántas funciones trae la clave (si se ha podido
@@ -83,6 +85,23 @@ export async function POST(request: Request) {
       status,
     });
   } catch (error) {
+    // El vault sin `SECRETS_KEY_V1` no es un fallo de Moodle: la conexión ha
+    // podido hacerse, pero la contraseña no se ha guardado. Se dice tal cual para
+    // que el alumno pueda desmarcar «guardar» o avisar al administrador.
+    if (error instanceof VaultError) {
+      console.error('[moodle] contraseña no guardada:', error.code);
+      return NextResponse.json(
+        {
+          error:
+            'Se ha conectado con Moodle, pero no se ha podido guardar la contraseña: ' +
+            'falta la clave de cifrado del servidor. Desmarca «guardar contraseña» ' +
+            'o avisa al administrador.',
+          code: error.code,
+        },
+        { status: 503 }
+      );
+    }
+
     const message = error instanceof Error ? error.message : 'Error inesperado al conectar con Moodle.';
     const code = error instanceof MoodleError ? error.code : 'unknown';
     // Nunca se registra la contraseña: solo el motivo.

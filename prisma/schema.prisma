@@ -106,9 +106,11 @@ model UserProfile {
   // del vigilante.
   moodleAuthMode       String    @default("token") // "token" | "sesion"
   moodleUsername       String? // El usuario con el que entra (solo en «sesion»)
-  // La contraseña, cifrada con la clave local del equipo (`localSecrets.ts`),
-  // para poder reconectar solo cada mañana. En claro no se guarda jamás; y si el
-  // alumno pulsa «desconectar», esto se borra con el resto.
+  // La contraseña, cifrada con la caja fuerte de la app (`moodleSecrets.ts`:
+  // AES-256-GCM y contexto `<userId>:moodle`), para poder reconectar solo cada
+  // mañana. En claro no se guarda jamás; y si el alumno pulsa «desconectar», esto
+  // se borra con el resto. Los valores del cifrador local anterior se leen y se
+  // vuelven a guardar ya migrados al usarlos.
   moodlePasswordSealed String?
   moodleSessionAt      DateTime? // Última vez que se abrió una sesión web de verdad
   // Estado **comprobado** de esa clave y cuándo se comprobó. Lo escribe el

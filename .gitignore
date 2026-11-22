@@ -10,6 +10,10 @@ out/
 # Secretos: las claves de IA y de Moodle viven solo aquí, nunca en el repositorio.
 .env
 .env.local
+# Clave del cifrador local antiguo (antes del Paso 15). Estuvo versionada por
+# error: se retiró del índice, pero sigue en el historial de git, así que hay
+# que tratar las contraseñas de Moodle guardadas con ella como expuestas.
+data/.clave-local
 
 # Datos y registros locales (tu base, tus apuntes, los logs del vigilante)
 prisma/dev.db

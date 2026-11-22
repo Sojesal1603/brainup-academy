@@ -746,7 +746,7 @@ function startFakeMoodle() {
       check('La dirección se queda limpia (sin /login ni barras de más)', row.moodleBaseUrl === 'https://moodle.micentro.es', row.moodleBaseUrl);
       check('El usuario se guarda sin espacios de más', row.moodleUsername === 'maria.ojeda', row.moodleUsername);
       check('La contraseña NO está en claro en la base', !String(row.moodlePasswordSealed ?? '').includes(SECRET), 'comprobado');
-      check('Se guarda en el formato del cifrador', String(row.moodlePasswordSealed ?? '').startsWith('v1:'), String(row.moodlePasswordSealed ?? '').slice(0, 8));
+      check('Se guarda en el formato del vault (v1.iv.tag.ct)', /^v1\.[^.]+\.[^.]+\.[^.]+$/.test(String(row.moodlePasswordSealed ?? '')), String(row.moodlePasswordSealed ?? '').slice(0, 8));
       check('La vía queda marcada como sesión', row.moodleAuthMode === 'sesion');
 
       const auth = await A.getMoodleSessionAuth();
@@ -764,7 +764,7 @@ function startFakeMoodle() {
         status.connected === true && status.authMode === 'sesion' && status.username === 'maria.ojeda' && status.passwordSaved === true,
         `${status.authMode} · ${status.username}`
       );
-      check('El estado público no lleva la contraseña cifrada', !JSON.stringify(status).includes('v1:'), 'comprobado');
+      check('El estado público no lleva la contraseña cifrada', !JSON.stringify(status).includes('v1.'), 'comprobado');
 
       /* --- Manipular el archivo guardado no sirve de nada --- */
       // Dos formas de tocar el valor guardado: añadirle basura al final (que el

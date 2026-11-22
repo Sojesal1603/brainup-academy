@@ -4,6 +4,7 @@ import { checkMoodleAnyWay, syncMoodleAnyWay } from './moodleSync';
 import { MoodleSessionNotConnectedError } from './moodleSessionSync';
 import { MoodleNotConnectedError } from './moodleWsSync';
 import type { MoodleAuthMode } from './moodleAuth';
+import { readMoodlePassword } from './moodleSecrets';
 
 /**
  * Cuidar la conexión de Moodle: comprobar las credenciales y volver a sincronizar.
@@ -131,7 +132,10 @@ export async function readMoodleHealth(userId: string, now: Date = new Date()): 
   // Por sesión hace falta el usuario **y** la contraseña guardada: es lo que
   // permite entrar solo. Sin contraseña guardada, la app no puede comprobar nada
   // sin el alumno, y decir «conectado» sería mentira.
-  const bySession = Boolean((user?.moodleUsername ?? '').trim() && user?.moodlePasswordSealed);
+  const bySession = Boolean(
+    (user?.moodleUsername ?? '').trim() &&
+      readMoodlePassword(userId, user?.moodlePasswordSealed).password
+  );
   const connected = Boolean(baseUrl) && (mode === 'sesion' ? bySession : byToken);
   const tokenState = tokenStateOf(user?.moodleTokenState, connected);
 

@@ -12,7 +12,12 @@
  *   · `db(userId).$transaction` fija `app.user_id` con `set_config(..., true)`
  *     antes del callback (y como primera consulta en la forma de lote);
  *   · el reintento de Prisma solo contiene lecturas (ni `upsert` ni escrituras);
- *   · el runtime prefiere `PRISMA_APP_DATABASE_URL` y la normaliza al pooler.
+ *   · el runtime prefiere `PRISMA_APP_DATABASE_URL` y la normaliza al pooler;
+ *   · la contraseña de Moodle se cifra con el vault y contexto por cuenta, el
+ *     formato antiguo del cifrador local se detecta para re-cifrarlo y la app
+ *     ya no escribe secretos con la clave del equipo;
+ *   · el SQL de `supabase_admin` cierra sus default privileges (se ejecuta
+ *     aparte, como ese rol).
  *
  * Modo base de datos (Postgres local o una copia, NUNCA producción):
  *   BRAINUP_SECURITY_TEST_URL="postgresql://postgres:...@localhost:55433/brainup_test" \
@@ -206,6 +211,87 @@ async function verifyStatic() {
   await ok('el cliente acotado no reintenta dentro de una transacción', () => {
     assert.match(prismaSource, /const NO_RETRIES: readonly number\[\] = \[\]/);
     assert.match(prismaSource, /isInTransaction\(\) \? NO_RETRIES : DB_RETRY_DELAYS_MS/);
+  });
+
+  section('Secretos de Moodle');
+
+  await ok('la contraseña de Moodle se cifra con el vault y contexto por cuenta', () => {
+    const outDir = compilaTs('moodleSecrets', '.tmp-verify-security-moodle');
+    const secrets = require(path.join(outDir, 'moodleSecrets.js'));
+    const previous = process.env.SECRETS_KEY_V1;
+    process.env.SECRETS_KEY_V1 = Buffer.alloc(32, 0x2a).toString('base64');
+
+    try {
+      const password = 'ClaveDelInstituto-2026!';
+      const sealed = secrets.sealMoodlePassword(TENANT_A, password);
+      assert.match(sealed, /^v1\./);
+      assert.notStrictEqual(
+        sealed,
+        secrets.sealMoodlePassword(TENANT_A, password),
+        'el IV debe ser aleatorio'
+      );
+
+      const own = secrets.readMoodlePassword(TENANT_A, sealed);
+      assert.strictEqual(own.password, password);
+      assert.strictEqual(own.needsReseal, false);
+
+      const other = secrets.readMoodlePassword(TENANT_B, sealed);
+      assert.strictEqual(other.password, null, 'otra cuenta no debe poder leerlo');
+      assert.strictEqual(other.unreadable, true);
+
+      const tampered = `${sealed.slice(0, -4)}AAAA`;
+      assert.strictEqual(secrets.readMoodlePassword(TENANT_A, tampered).password, null);
+    } finally {
+      if (previous === undefined) delete process.env.SECRETS_KEY_V1;
+      else process.env.SECRETS_KEY_V1 = previous;
+    }
+  });
+
+  await ok('el formato antiguo se detecta para re-cifrarlo', () => {
+    const outDir = compilaTs('moodleSecrets', '.tmp-verify-security-moodle');
+    const secrets = require(path.join(outDir, 'moodleSecrets.js'));
+
+    assert.strictEqual(secrets.sealedFormat('v1.a.b.c'), 'vault');
+    assert.strictEqual(secrets.sealedFormat('v1:aaaa:bbbb:cccc'), 'legacy');
+    assert.strictEqual(secrets.sealedFormat('sin-formato'), 'unknown');
+    assert.strictEqual(secrets.sealedFormat(null), 'unknown');
+
+    // Un valor antiguo ilegible no rompe nada: se trata como «no hay».
+    const garbage = secrets.readMoodlePassword(TENANT_A, 'v1:aaaa:bbbb:cccc');
+    assert.strictEqual(garbage.password, null);
+    assert.strictEqual(garbage.unreadable, true);
+    assert.strictEqual(garbage.needsReseal, false);
+  });
+
+  await ok('la app ya no escribe secretos con la clave del equipo', () => {
+    const localSource = read(path.join(ROOT, 'src', 'lib', 'localSecrets.ts'));
+    const authSource = read(path.join(ROOT, 'src', 'lib', 'moodleAuth.ts'));
+
+    assert.doesNotMatch(localSource, /export function sealSecret/);
+    assert.doesNotMatch(localSource, /writeFileSync/);
+    assert.match(localSource, /export function openLegacySecret/);
+
+    assert.match(authSource, /sealMoodlePassword/);
+    assert.match(authSource, /readMoodlePassword/);
+    assert.doesNotMatch(authSource, /sealSecret|openSecret\b/);
+
+    // La clave del cifrador antiguo estuvo versionada por error: no puede
+    // volver al índice de git.
+    const gitignore = read(path.join(ROOT, '.gitignore'));
+    assert.match(gitignore, /data\/\.clave-local/, 'la clave local debe estar ignorada');
+  });
+
+  await ok('el SQL de supabase_admin cierra sus default privileges', () => {
+    const sql = read(path.join(ROOT, 'prisma', 'sql', 'supabase_admin_defaults.sql'));
+
+    assert.match(
+      sql,
+      /ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE ALL ON TABLES FROM %I/
+    );
+    assert.match(sql, /pg_has_role\(current_user, 'supabase_admin', 'MEMBER'\)/);
+    assert.doesNotMatch(sentencias(sql), /GRANT ALL/);
+    assert.doesNotMatch(sentencias(sql), /\bTRUNCATE\b/);
+    assert.doesNotMatch(sentencias(sql), /\bDELETE FROM\b/);
   });
 
   section('URL de runtime');

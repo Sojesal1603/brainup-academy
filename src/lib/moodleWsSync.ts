@@ -15,6 +15,7 @@ import {
   requestMoodleToken,
   type MoodleSiteInfo,
 } from './moodleWs';
+import { readMoodlePassword } from './moodleSecrets';
 
 /**
  * Conexión real con Moodle (Web Services) y volcado a la base local.
@@ -79,7 +80,7 @@ export interface MoodlePublicStatus {
   authMode: 'token' | 'sesion';
   /** El usuario con el que entra (solo en la vía de sesión). */
   username: string | null;
-  /** Hay contraseña guardada, cifrada con la clave de este equipo. */
+  /** Hay contraseña guardada y descifrable, cifrada con la caja fuerte de la app. */
   passwordSaved: boolean;
   siteName: string | null;
   baseUrl: string | null;
@@ -110,7 +111,7 @@ export async function getMoodleStatus(userId: string): Promise<MoodlePublicStatu
   const tokenSaved = Boolean((user?.moodleToken ?? '').trim());
   const authMode = user?.moodleAuthMode === 'sesion' ? 'sesion' : 'token';
   const username = (user?.moodleUsername ?? '').trim() || null;
-  const passwordSaved = Boolean(user?.moodlePasswordSealed);
+  const passwordSaved = readMoodlePassword(userId, user?.moodlePasswordSealed).password !== null;
   const baseUrl = (user?.moodleBaseUrl ?? '').trim() || null;
 
   return {
