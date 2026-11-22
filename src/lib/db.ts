@@ -40,6 +40,37 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
+/**
+ * Ajuste de PostgreSQL en el que `db(userId).$transaction` fija la cuenta.
+ *
+ * La migración `20261121120000_security_rls_policies` crea las políticas que
+ * lo leen con `current_setting('app.user_id', true)`. Se fija con
+ * `set_config(..., true)`, así que es **local a la transacción**: al terminar
+ * vuelve a estar vacío y no se queda pegado a la conexión del pooler.
+ */
+export const TENANT_SETTING = 'app.user_id';
+
+type RawTransactionClient = {
+  $executeRawUnsafe: (query: string, ...values: unknown[]) => unknown;
+};
+
+/**
+ * Fija la cuenta de la transacción actual para RLS.
+ *
+ * Es la segunda capa: `scopeOperation` ya inyecta el dueño en cada consulta de
+ * Prisma. Esta capa cubre lo que la extensión no ve —`$queryRaw*`,
+ * `$executeRaw*` y cualquier SQL escrito a mano dentro de la transacción— y
+ * hace que una fila de otra cuenta no se pueda leer ni escribir aunque el
+ * llamador se equivoque.
+ */
+async function setTenantContext(client: unknown, ownerId: string): Promise<void> {
+  const executor = client as RawTransactionClient;
+  await executor.$executeRawUnsafe(
+    `SELECT set_config('${TENANT_SETTING}', $1, true)`,
+    ownerId
+  );
+}
+
 /** Modelos que se aíslan por `userId` (todos los de contenido). */
 const TENANT_MODELS: ReadonlySet<string> = new Set([
   'Subject',
@@ -328,14 +359,28 @@ export function db(userId: string) {
                 run: (tx: unknown) => unknown,
                 opts?: unknown
               ) => Promise<unknown>).bind(target);
-              return start(input as (tx: unknown) => unknown, options);
+
+              // La cuenta se fija antes del callback: sus consultas, incluidas
+              // las de `$queryRaw`, ven el ajuste desde la primera sentencia.
+              return start(async (tx) => {
+                await setTenantContext(tx, ownerId);
+                return (input as (tx: unknown) => unknown)(tx);
+              }, options);
             }
 
             const start = (target.$transaction as unknown as (
               queries: unknown,
               opts?: unknown
             ) => Promise<unknown>).bind(target);
-            return start(input, options);
+
+            // En la forma de lote, el `set_config` va como primera consulta de
+            // la misma transacción. Prisma las ejecuta en orden y todas ven el
+            // ajuste local.
+            const context = (target as unknown as RawTransactionClient).$executeRawUnsafe(
+              `SELECT set_config('${TENANT_SETTING}', $1, true)`,
+              ownerId
+            );
+            return start([context, ...(input as unknown[])], options);
           });
       }
 

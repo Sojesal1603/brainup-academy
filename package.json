@@ -47,6 +47,7 @@
     "verify:verificacion": "node scripts/verify-verificacion.js",
     "verify:proactividad": "node scripts/verify-proactividad.js",
     "verify:materias": "node scripts/verify-materias.js",
+    "verify:security": "node scripts/verify-security.js",
     "backfill:materias": "node scripts/backfill-subject-category.js",
     "exam:mae": "node scripts/exam-mae.js",
     "verify:moodle": "node scripts/verify-moodle-sync.js",

@@ -28,12 +28,15 @@ import { DB_QUERY_TIMEOUT_MS, withDbTimeout } from './dbTimeout';
  */
 
 /**
- * Operaciones que se pueden repetir sin cambiar el resultado.
+ * Operaciones que se pueden repetir sin cambiar el resultado: **solo lecturas**.
  *
- * `upsert` está porque su `where` es único: repetirlo no crea una segunda fila.
- * No están `create`, `createMany`, `update`, `updateMany`, `delete`,
- * `deleteMany` ni las operaciones `$executeRaw*`: si la red se corta después de
- * que PostgreSQL haya confirmado, repetirlas duplica o pisa datos.
+ * No está `upsert` aunque su `where` sea único: el `update` puede llevar un
+ * `increment`, un `push` o cualquier otra escritura, y repetirlo después de que
+ * PostgreSQL haya confirmado el primer intento la aplicaría dos veces. Tampoco
+ * están `create`, `createMany`, `update`, `updateMany`, `delete`, `deleteMany`
+ * ni las operaciones `$executeRaw*`. Si la red se corta después del COMMIT, el
+ * reintento no puede saber si la escritura llegó: se propaga el error y decide
+ * el llamador.
  */
 const RETRYABLE_OPERATIONS: ReadonlySet<string> = new Set([
   'findUnique',
@@ -44,7 +47,6 @@ const RETRYABLE_OPERATIONS: ReadonlySet<string> = new Set([
   'count',
   'aggregate',
   'groupBy',
-  'upsert',
 ]);
 
 /** Sin reintentos: se usa dentro de una transacción abierta. */
