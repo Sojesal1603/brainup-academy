@@ -30,7 +30,13 @@ export interface CourseApplyResult {
 export async function applyCourseToProfile(
   prisma: TenantPrisma,
   userId: string,
-  modality: string
+  modality: string,
+  /**
+   * Materias extra que el alumno ha dicho que tiene además de las del curso
+   * (una optativa, una materia de su centro…). Se crean si faltan, nunca se
+   * borra ninguna: quitar materias es una acción aparte y confirmada.
+   */
+  extraSubjects: readonly string[] = []
 ): Promise<CourseApplyResult> {
   const course = resolveCourse(modality);
   const config = stageConfig(course.stage);
@@ -46,7 +52,17 @@ export async function applyCourseToProfile(
     },
   });
 
-  const baseSubjects = baseSubjectsFor(course);
+  const baseSubjects = [
+    ...baseSubjectsFor(course).map((base) => ({
+      name: base.name,
+      color: base.color,
+      credits: base.credits,
+    })),
+    ...extraSubjects
+      .map((name) => String(name ?? '').replace(/\s+/g, ' ').trim())
+      .filter((name) => name.length > 0 && name.length <= 80)
+      .map((name) => ({ name, color: '#10b981', credits: undefined as number | undefined })),
+  ];
   if (baseSubjects.length === 0) return { course, created: [] };
 
   const existing = await prisma.subject.findMany({ select: { name: true, order: true } });

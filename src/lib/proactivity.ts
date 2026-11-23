@@ -9,7 +9,19 @@
  *
  * Principio de honestidad: si no hay mediciones, no se inventa un riesgo. Se
  * propone medir o se calla.
+ *
+ * Blindaje: las fechas se convierten con `toDate` antes de tocarlas y cada
+ * función exportada pasa por `selfHealing`. Motivo real: `unstable_cache`
+ * devuelve JSON, así que un `examDate` declarado `Date` llega como `string` y
+ * `getFullYear()` sobre él tiraba la página con `TypeError`.
  */
+
+import {
+  selfHealing,
+  toDate,
+  toFiniteNumber,
+  type DateLike,
+} from './selfHealing';
 
 export type ProactiveKind =
   | 'examen'
@@ -39,8 +51,20 @@ export interface ProactiveLocalClock {
  * Reloj local del alumno. En Netlify/Render el proceso corre en UTC: usar la
  * hora del servidor cambiaría el día y la franja de silencio.
  */
-export function localClock(now: Date, timeZone?: string | null): ProactiveLocalClock {
-  const zone = (timeZone ?? '').trim() || 'Europe/Madrid';
+/** Reloj sin `Intl`: último recurso si la zona es inválida o el formato falla. */
+function plainClock(at: Date): ProactiveLocalClock {
+  return {
+    dayKey: `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(
+      at.getDate()
+    ).padStart(2, '0')}`,
+    minutes: at.getHours() * 60 + at.getMinutes(),
+  };
+}
+
+function localClockUnsafe(now: DateLike, timeZone?: string | null): ProactiveLocalClock {
+  const at = toDate(now, new Date(), 'proactivity.localClock');
+  const zone =
+    typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : 'Europe/Madrid';
 
   const read = (candidate: string): ProactiveLocalClock | null => {
     try {
@@ -52,13 +76,17 @@ export function localClock(now: Date, timeZone?: string | null): ProactiveLocalC
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
-      }).formatToParts(now);
+      }).formatToParts(at);
       const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+      const year = get('year');
+      const month = get('month');
+      const day = get('day');
       const hour = Number(get('hour'));
       const minute = Number(get('minute'));
+      if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month) || !/^\d{2}$/.test(day)) return null;
       if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
       return {
-        dayKey: `${get('year')}-${get('month')}-${get('day')}`,
+        dayKey: `${year}-${month}-${day}`,
         minutes: hour * 60 + minute,
       };
     } catch {
@@ -66,30 +94,42 @@ export function localClock(now: Date, timeZone?: string | null): ProactiveLocalC
     }
   };
 
-  return (
-    read(zone) ??
-    read('Europe/Madrid') ?? {
-      dayKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-        now.getDate()
-      ).padStart(2, '0')}`,
-      minutes: now.getHours() * 60 + now.getMinutes(),
-    }
-  );
+  return read(zone) ?? read('Europe/Madrid') ?? plainClock(at);
 }
 
-export function dayKeyFor(now: Date, timeZone?: string | null): string {
+export const localClock = selfHealing('proactivity.localClock', localClockUnsafe, () =>
+  plainClock(new Date())
+);
+
+function dayKeyForUnsafe(now: DateLike, timeZone?: string | null): string {
   return localClock(now, timeZone).dayKey;
 }
+
+export const dayKeyFor = selfHealing('proactivity.dayKeyFor', dayKeyForUnsafe, () =>
+  plainClock(new Date()).dayKey
+);
 
 /**
  * Días de calendario entre dos instantes en la zona del alumno. Un examen a las
  * 23:30 de hoy sigue siendo «mañana» si en su zona ya es el día siguiente.
  */
-export function localDaysBetween(from: Date, to: Date, timeZone?: string | null): number {
+function localDaysBetweenUnsafe(
+  from: DateLike,
+  to: DateLike,
+  timeZone?: string | null
+): number {
   const start = Date.parse(`${dayKeyFor(from, timeZone)}T00:00:00Z`);
   const end = Date.parse(`${dayKeyFor(to, timeZone)}T00:00:00Z`);
+  // Fecha ilegible: 0 («no lo sé») y la tarjeta no acusa un examen inexistente.
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
   return Math.round((end - start) / 86_400_000);
 }
+
+export const localDaysBetween = selfHealing(
+  'proactivity.localDaysBetween',
+  localDaysBetweenUnsafe,
+  0
+);
 
 /** ¿Estos minutos locales caen en la franja de silencio? */
 export function isQuietMinutes(minutes: number): boolean {
@@ -97,9 +137,12 @@ export function isQuietMinutes(minutes: number): boolean {
 }
 
 /** ¿Ahora es hora de silencio en la zona del alumno? */
-export function isQuietHour(now: Date, timeZone?: string | null): boolean {
+function isQuietHourUnsafe(now: DateLike, timeZone?: string | null): boolean {
   return isQuietMinutes(localClock(now, timeZone).minutes);
 }
+
+// Si el reloj no se puede leer, se elige silencio: no molestar es el fallo seguro.
+export const isQuietHour = selfHealing('proactivity.isQuietHour', isQuietHourUnsafe, true);
 
 /**
  * Valida la hora de un aviso. No se puede guardar una hora que el motor luego
@@ -159,7 +202,8 @@ export interface ProactiveExam {
 }
 
 export interface ProactiveInput {
-  now: Date;
+  /** Acepta Date, ISO o milisegundos: la caché devuelve strings. */
+  now: DateLike;
   timezone?: string | null;
   stage?: ProactiveStage | string | null;
   plan: ProactivePlan | null;
@@ -205,9 +249,9 @@ function daysLabel(days: number): string {
 }
 
 function nextLiveSession(plan: ProactivePlan | null): ProactivePlanSession | null {
-  if (!plan) return null;
+  if (!plan || !Array.isArray(plan.sessions)) return null;
   const live = plan.sessions.filter(
-    (session) => !session.isCompleted && session.status !== 'abandonada'
+    (session) => session && !session.isCompleted && session.status !== 'abandonada'
   );
   if (live.length === 0) return null;
   return live.find((session) => session.status === 'parcial') ?? live[0];
@@ -227,36 +271,59 @@ function sessionHref(): string {
  * siguiente bloque del plan. «Medir» queda al final y nunca se presenta como
  * riesgo: es una invitación a tener datos, no una acusación.
  */
-export function buildProactiveProposal(input: ProactiveInput): ProactiveDecision {
-  const clock = localClock(input.now, input.timezone);
+function buildProactiveProposalUnsafe(input: ProactiveInput): ProactiveDecision {
+  // La caché y los JSON pueden entregar `null` donde el tipo promete un objeto.
+  const source = (input ?? {}) as ProactiveInput;
+  const clock = localClock(source.now, source.timezone);
   const quiet = isQuietMinutes(clock.minutes);
-  const dismissed = new Set(input.dismissedKinds ?? []);
-  const plan = input.plan;
+  const dismissed = new Set(
+    Array.isArray(source.dismissedKinds) ? source.dismissedKinds : []
+  );
+  const plan =
+    source.plan && typeof source.plan === 'object' ? source.plan : null;
   const nextSession = nextLiveSession(plan);
-  const dueReviews = Math.max(0, plan?.dueReviews ?? 0);
-  const openErrors = Math.max(0, plan?.errorsOpen ?? 0);
-  const measuredUnits = Math.max(0, input.measuredUnits ?? 0);
-  const streak = input.streak ?? null;
-  const exam = input.nextExam ?? null;
+  const dueReviews = Math.max(0, toFiniteNumber(plan?.dueReviews, 0, 'proactivity.repasos'));
+  const openErrors = Math.max(0, toFiniteNumber(plan?.errorsOpen, 0, 'proactivity.errores'));
+  const measuredUnits = Math.max(
+    0,
+    toFiniteNumber(source.measuredUnits, 0, 'proactivity.medidas')
+  );
+  const streak =
+    source.streak && typeof source.streak === 'object' ? source.streak : null;
+  const streakDays = streak
+    ? toFiniteNumber(streak.current, 0, 'proactivity.racha')
+    : 0;
+  const exam =
+    source.nextExam && typeof source.nextExam === 'object' ? source.nextExam : null;
+  const examDays = exam
+    ? toFiniteNumber(exam.days, Number.NaN, 'proactivity.examen')
+    : Number.NaN;
 
   const candidates: ProactiveProposal[] = [];
 
   // 1. Examen próximo: una fecha real, no una predicción.
-  if (exam && Number.isFinite(exam.days) && exam.days >= 0 && exam.days <= 14) {
-    const near = exam.days <= 7;
+  if (exam && Number.isFinite(examDays) && examDays >= 0 && examDays <= 14) {
+    const near = examDays <= 7;
+    const examTitle =
+      typeof exam.title === 'string' && exam.title.trim() ? exam.title.trim() : 'Examen';
+    const examWeight = toFiniteNumber(exam.weight, 0, 'proactivity.peso');
+    const examSubject =
+      typeof exam.subjectName === 'string' && exam.subjectName.trim()
+        ? exam.subjectName.trim()
+        : null;
     candidates.push({
       kind: 'examen',
-      title: `${exam.title} ${daysLabel(exam.days)}`,
+      title: `${examTitle} ${daysLabel(examDays)}`,
       detail: near
         ? 'El plan ya coloca esta materia arriba. Hoy conviene asegurar lo que más pondera, no empezar un tema nuevo.'
         : 'Todavía hay margen, pero el examen ya tiene fecha. Un bloque hoy evita que se junte con la semana anterior.',
       action: { label: 'Ver el examen', href: '/examenes' },
       evidence: [
-        exam.subjectName ? `Materia: ${exam.subjectName}` : null,
-        exam.days <= 0 ? 'Es hoy' : `${plural(exam.days, 'día', 'días')} restantes`,
-        typeof exam.weight === 'number' && exam.weight > 0 ? `Peso ${exam.weight}` : null,
+        examSubject ? `Materia: ${examSubject}` : null,
+        examDays <= 0 ? 'Es hoy' : `${plural(examDays, 'día', 'días')} restantes`,
+        examWeight > 0 ? `Peso ${examWeight}` : null,
       ].filter((item): item is string => Boolean(item)),
-      urgency: near ? 90 - exam.days * 2 : 55,
+      urgency: near ? 90 - examDays * 2 : 55,
     });
   }
 
@@ -293,10 +360,15 @@ export function buildProactiveProposal(input: ProactiveInput): ProactiveDecision
   }
 
   // 4. Racha en riesgo: solo a partir de las 18:00 y con racha viva.
-  if (streak && streak.current > 0 && !streak.studiedToday && clock.minutes >= 18 * 60) {
+  if (
+    streak &&
+    streakDays > 0 &&
+    streak.studiedToday !== true &&
+    clock.minutes >= 18 * 60
+  ) {
     candidates.push({
       kind: 'racha',
-      title: `Tu racha de ${streak.current} ${streak.current === 1 ? 'día' : 'días'} sigue viva`,
+      title: `Tu racha de ${streakDays} ${streakDays === 1 ? 'día' : 'días'} sigue viva`,
       detail:
         'No hace falta una sesión larga: un bloque corto hoy mantiene la cadena sin convertir la noche en una obligación.',
       action: nextSession
@@ -306,23 +378,37 @@ export function buildProactiveProposal(input: ProactiveInput): ProactiveDecision
         'Todavía no has registrado estudio hoy',
         nextSession ? `Siguiente: ${nextSession.topicTitle}` : 'Sin bloque pendiente en el plan',
       ],
-      urgency: 40 + Math.min(10, streak.current),
+      urgency: 40 + Math.min(10, streakDays),
     });
   }
 
   // 5. El siguiente bloque del plan: la propuesta más honesta si no hay riesgo.
   if (nextSession) {
-    const minutes = nextSession.durationMinutes ?? 0;
+    const minutes = toFiniteNumber(
+      nextSession.durationMinutes,
+      0,
+      'proactivity.duracion'
+    );
+    const sessionTitle =
+      typeof nextSession.topicTitle === 'string' && nextSession.topicTitle.trim()
+        ? nextSession.topicTitle.trim()
+        : 'tu siguiente bloque';
+    const sessionReason = nextSession.reason?.trim?.() ?? '';
+    const sessionObjective = nextSession.objective?.trim?.() ?? '';
+    const sessionSubject =
+      typeof nextSession.subjectName === 'string' && nextSession.subjectName.trim()
+        ? nextSession.subjectName.trim()
+        : null;
     candidates.push({
       kind: 'empezar',
-      title: `Ahora: ${nextSession.topicTitle}`,
+      title: `Ahora: ${sessionTitle}`,
       detail:
-        nextSession.reason?.trim() ||
-        nextSession.objective?.trim() ||
+        sessionReason ||
+        sessionObjective ||
         'Es el siguiente bloque que el plan ha decidido para hoy.',
       action: { label: 'Empezar', href: sessionHref() },
       evidence: [
-        nextSession.subjectName,
+        sessionSubject,
         minutes > 0 ? `${minutes} min` : null,
       ].filter((item): item is string => Boolean(item)),
       urgency: 35,
@@ -367,6 +453,23 @@ export function buildProactiveProposal(input: ProactiveInput): ProactiveDecision
     reason: null,
   };
 }
+
+/**
+ * La proactividad nunca puede tumbar el Cuartel: si algo se sale de lo previsto,
+ * se devuelve «sin propuesta» con el motivo, que la tarjeta ya sabe pintar.
+ */
+export const buildProactiveProposal = selfHealing(
+  'proactivity.buildProactiveProposal',
+  buildProactiveProposalUnsafe,
+  (): ProactiveDecision => ({
+    primary: null,
+    secondary: [],
+    quiet: true,
+    dayKey: plainClock(new Date()).dayKey,
+    reason:
+      'No he podido leer el reloj o el plan de hoy. El plan sigue disponible en «Hoy toca esto».',
+  })
+);
 
 /** Clave de localStorage para los descartes de un día concreto. */
 export function dismissalStorageKey(dayKey: string): string {

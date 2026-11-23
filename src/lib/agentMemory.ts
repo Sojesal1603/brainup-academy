@@ -1,3 +1,5 @@
+import { toDate, type DateLike } from './selfHealing';
+
 /**
  * La memoria entre días de la IA.
  *
@@ -66,10 +68,11 @@ export interface DayMemory {
 /* ------------------------------------------------------------------ */
 
 /** El día del alumno (hora local), como clave estable de la memoria. */
-export function dayKey(date: Date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+export function dayKey(date: DateLike = new Date()): string {
+  const at = toDate(date, new Date(), 'agentMemory.dayKey');
+  const year = at.getFullYear();
+  const month = String(at.getMonth() + 1).padStart(2, '0');
+  const day = String(at.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 

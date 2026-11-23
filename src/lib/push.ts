@@ -2,7 +2,8 @@ import webpush from 'web-push';
 import { db } from './db';
 import { prisma } from './prisma';
 import { computeDayPlan } from './dayPlan';
-import { isQuietMinutes } from './proactivity';
+import { isQuietMinutes, localClock } from './proactivity';
+import type { DateLike } from './selfHealing';
 
 /**
  * Aviso diario del plan por Web Push.
@@ -47,25 +48,6 @@ function ensureVapid(): boolean {
   return true;
 }
 
-/** Día y hora locales del alumno, sin depender de la zona del servidor. */
-function localClock(now: Date, timeZone: string): { dayKey: string; minutes: number } {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).formatToParts(now);
-
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
-  return {
-    dayKey: `${get('year')}-${get('month')}-${get('day')}`,
-    minutes: Number(get('hour')) * 60 + Number(get('minute')),
-  };
-}
-
 function clockMinutes(value: string | null): number | null {
   if (!value || !/^\d{2}:\d{2}$/.test(value)) return null;
   const [hour, minute] = value.split(':').map(Number);
@@ -79,7 +61,7 @@ function clockMinutes(value: string | null): number | null {
  * Ventana de 3 minutos para que un cron que arranca un poco tarde no se salte
  * la hora; el `lastNotifiedDay` evita duplicados dentro de la ventana.
  */
-export async function sendDueReminders(now: Date = new Date()): Promise<PushResult> {
+export async function sendDueReminders(now: DateLike = new Date()): Promise<PushResult> {
   const result: PushResult = {
     configured: false,
     due: 0,

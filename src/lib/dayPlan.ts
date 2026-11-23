@@ -27,6 +27,7 @@ import {
   type SessionStage,
 } from './sessionEngine';
 import type { StudyMode } from './types';
+import { toDate, type DateLike } from './selfHealing';
 import { parseStoredConstraints } from './planner/constraintStore';
 import {
   maxMinutesFromConstraints,
@@ -893,7 +894,12 @@ function isoDay(date: Date): string {
 }
 
 /** Lee el plan guardado de hoy y lo completa con el contexto vivo. */
-export async function computeDayPlan(userId: string, now: Date = new Date()): Promise<DayPlan> {
+export async function computeDayPlan(
+  userId: string,
+  nowInput: DateLike = new Date()
+): Promise<DayPlan> {
+  // Frontera de datos: un cron o una caché pueden entregar la fecha como string.
+  const now = toDate(nowInput, new Date(), 'dayPlan.computeDayPlan');
   const prisma = db(userId);
   const ctx = await loadPlanningContext(userId, now);
   const todayStart = startOfDay(now);

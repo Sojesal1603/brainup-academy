@@ -1009,7 +1009,13 @@ export function buildSetupSystemPrompt(
    * Auditoría real ejecutada justo antes de este turno (texto del sistema).
    * El modelo no la calcula: la recibe hecha y solo la cuenta.
    */
-  audit = ''
+  audit = '',
+  /**
+   * Catálogo de herramientas con ejecución real (borrar materia, aplicar
+   * currículo, purgar huérfanas). Va cerca del final para que sobreviva al
+   * recorte del prompt: sin él, el modelo promete acciones que no puede emitir.
+   */
+  tools = ''
 ): string {
   const lines: string[] = [];
 
@@ -1085,6 +1091,11 @@ export function buildSetupSystemPrompt(
   lines.push(
     'TERMINA SIEMPRE con UNA sola pregunta: la que toca DESPUÉS de lo que acabas de anotar. Nunca repitas la que él acaba de contestar ni vuelvas a pedir un dato ya guardado; si dudas de si está guardado, míralo en el ESTADO REAL del sistema.'
   );
+
+  if (tools.trim().length > 0) {
+    lines.push('');
+    lines.push(tools.trim());
+  }
 
   /**
    * La auditoría va AL FINAL A PROPÓSITO.

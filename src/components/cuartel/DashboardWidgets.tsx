@@ -86,7 +86,11 @@ const loadTodayBlocks = cache((userId: string) =>
 interface ExamPreview {
   id: string;
   title: string;
-  examDate: Date;
+  /**
+   * `unstable_cache` serializa a JSON: en runtime esto es un string ISO aunque
+   * Prisma lo declare `Date`. Nunca se le llaman métodos de Date directamente.
+   */
+  examDate: Date | string;
   subject: { name: string; color: string; pauWeight: number };
 }
 

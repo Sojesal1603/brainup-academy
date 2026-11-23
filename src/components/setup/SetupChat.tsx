@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import MarkdownMessage from '@/components/brainup/MarkdownMessage';
+import SetupToolCard from '@/components/setup/SetupToolCard';
+import type { SetupToolApiResponse, SetupToolProposal } from '@/lib/setupToolTypes';
 import { type ChecklistItem, type SetupChecklist, type SetupSnapshot } from '@/lib/setup';
 import {
   clearSetupConversation,
@@ -30,6 +32,8 @@ export interface SetupMessage {
   /** Lo que esa respuesta dejó anotado en el sistema. */
   applied?: string[];
   problems?: string[];
+  /** Acciones que el coordinador propone y el alumno confirma con un botón. */
+  tools?: SetupToolProposal[];
 }
 
 interface SetupChatProps {
@@ -46,6 +50,7 @@ interface ApiResponse {
   blocks: number;
   applied: string[];
   problems: string[];
+  tools?: SetupToolProposal[];
   checklist: SetupChecklist;
   snapshot: SetupSnapshot;
   reply: { id: string; content: string; createdAt: string };
@@ -196,6 +201,7 @@ export default function SetupChat({
           content: data.reply.content,
           applied: data.applied,
           problems: data.problems,
+          tools: data.tools,
         },
       ]);
       if (data.changed) router.refresh();
@@ -301,6 +307,36 @@ export default function SetupChat({
                           <Check className="h-2.5 w-2.5" />
                           {item}
                         </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {(message.tools?.length ?? 0) > 0 && (
+                    <div className="space-y-2">
+                      {message.tools!.map((proposal) => (
+                        <SetupToolCard
+                          key={proposal.id}
+                          proposal={proposal}
+                          onExecuted={(result: SetupToolApiResponse) => {
+                            // El resultado se apunta en la misma burbuja: la
+                            // tarjeta mantiene su estado (hecho/cancelado) y el
+                            // chat queda con la traza de lo que se aplicó.
+                            setMessages((previous) =>
+                              previous.map((row) =>
+                                row.id === message.id
+                                  ? {
+                                      ...row,
+                                      applied: [...(row.applied ?? []), ...result.applied],
+                                      problems: [
+                                        ...(row.problems ?? []),
+                                        ...result.problems,
+                                      ].filter((item, index, all) => all.indexOf(item) === index),
+                                    }
+                                  : row
+                              )
+                            );
+                          }}
+                        />
                       ))}
                     </div>
                   )}

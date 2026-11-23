@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { toDate, type DateLike } from '../selfHealing';
 
 /**
  * Estado del plan diario.
@@ -10,20 +11,29 @@ import { db } from '../db';
  */
 
 /** Clave YYYY-MM-DD en la zona del alumno (nunca la del servidor). */
-export function dayKeyInZone(date: Date, timeZone: string): string {
+export function dayKeyInZone(date: DateLike, timeZone?: string | null): string {
+  const at = toDate(date, new Date(), 'planner.dayKeyInZone');
+  const zone = typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : 'Europe/Madrid';
+
   try {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone,
+    const key = new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(date);
+    }).format(at);
+    return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : localKey(at);
   } catch {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return localKey(at);
   }
+}
+
+/** Respaldo sin zona: día local del proceso, nunca una fecha inventada. */
+function localKey(at: Date): string {
+  const year = at.getFullYear();
+  const month = String(at.getMonth() + 1).padStart(2, '0');
+  const day = String(at.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /** Medianoche UTC del día local, que es lo que guarda `PlanState.day`. */
@@ -32,7 +42,7 @@ export function planDayFromKey(dayKey: string): Date {
   return new Date(Date.UTC(year, month - 1, day));
 }
 
-async function planDayFor(userId: string, now: Date): Promise<Date> {
+async function planDayFor(userId: string, now: DateLike): Promise<Date> {
   const profile = await db(userId).userProfile.findUnique({
     where: { id: userId },
     select: { timezone: true },

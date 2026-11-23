@@ -15,6 +15,13 @@ import {
   type ChatMessage,
 } from '@/lib/aiEngine';
 import { buildSetupSystemPrompt, parseSetupTags, SETUP_CONVERSATION_TITLE } from '@/lib/setup';
+import {
+  detectToolIntent,
+  parseSetupToolCalls,
+  previewSetupTool,
+  SETUP_TOOLS_PROMPT,
+} from '@/lib/setupTools';
+import type { SetupToolProposal } from '@/lib/setupToolTypes';
 import { armPendingReplace, hasReplaceIntent, matchSubjectInMessage } from '@/lib/setupReplaceIntent';
 import { applySetupActions, getSetupState, undoLastSetupChange } from '@/lib/setupApply';
 import { auditSetup } from '@/lib/setupAudit';
@@ -164,7 +171,8 @@ export async function POST(request: Request) {
       state.snapshot,
       state.checklist,
       memoryBlock,
-      [undoNote, audit?.summary ?? ''].filter(Boolean).join('\n\n')
+      [undoNote, audit?.summary ?? ''].filter(Boolean).join('\n\n'),
+      SETUP_TOOLS_PROMPT
     );
     const recent = trimHistory(historyRows);
 
@@ -237,6 +245,37 @@ export async function POST(request: Request) {
       degraded = true;
     }
 
+    /**
+     * HERRAMIENTAS: el modelo las PROPONE, el alumno las confirma.
+     *
+     * Se separan del texto antes de parsear las etiquetas de datos para que el
+     * alumno no vea nunca el JSON. Y no se ejecutan aquí: se validan contra la
+     * base (propiedad incluida) y se devuelven como tarjetas. Si el modelo no
+     * emite ninguna pero el alumno ha pedido un borrado con sus palabras, se
+     * propone igual (`detectToolIntent`): obedecer no puede depender del modelo.
+     */
+    const toolParsed = parseSetupToolCalls(replyText);
+    if (toolParsed.text.length > 0) replyText = toolParsed.text;
+
+    const toolProblems: string[] = [];
+    const toolProposals: SetupToolProposal[] = [];
+    const toolCalls =
+      toolParsed.calls.length > 0
+        ? toolParsed.calls
+        : detectToolIntent(message, state.snapshot.subjects);
+    const seenTools = new Set<string>();
+    for (const call of toolCalls.slice(0, 3)) {
+      const key = `${call.tool}#${JSON.stringify(call.input)}`;
+      if (seenTools.has(key)) continue;
+      seenTools.add(key);
+      const preview = await previewSetupTool(tenant, authUser.id, call).catch((error) => {
+        console.error('[puesta-a-punto] no se ha podido validar una herramienta:', error);
+        return null;
+      });
+      if (preview?.proposal) toolProposals.push(preview.proposal);
+      else if (preview?.problem) toolProblems.push(preview.problem);
+    }
+
     // Etiquetas → acciones reales. Nada se aplica si el modelo no lo ha anotado…
     // salvo el reemplazo que el alumno ha pedido: si ha traído la lista y el
     // modelo solo ha emitido las unidades (sin [[sustituir:…]]), se antepone el
@@ -304,7 +343,9 @@ export async function POST(request: Request) {
         ? parsed.text
         : applied.applied.length > 0
           ? `Anotado: ${applied.applied.join(' · ')}`
-          : 'Entendido. Dime cuál es el siguiente dato y lo anoto.';
+          : toolProposals.length > 0
+            ? 'Te dejo la tarjeta aquí abajo. Revísala y confírmala tú: así no se borra nada por error ni se queda a medias.'
+            : 'Entendido. Dime cuál es el siguiente dato y lo anoto.';
     /**
      * La revisión REAL se le enseña siempre, la haya pedido el alumno (auditoría
      * ejecutada antes del modelo) o el modelo ([[revisar:…]]).
@@ -403,8 +444,11 @@ export async function POST(request: Request) {
               } de este mensaje. Dímelo otra vez con tus palabras y lo guardo.`,
             ]
           : []),
+        ...toolProblems,
         ...(degradeReason ? [`Modo local: ${degradeReason}`] : []),
       ],
+      /** Acciones pendientes de confirmación: el cliente las pinta como tarjetas. */
+      tools: toolProposals,
       /** Auditoría real de este turno (si la ha habido). */
       audit: audit?.summary ?? applied.report ?? null,
       checklist: applied.checklist,
