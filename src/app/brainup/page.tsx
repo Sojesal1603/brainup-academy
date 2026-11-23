@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { currentTenant } from '@/lib/tenantContext';
+import type { TenantPrisma } from '@/lib/db';
 import { agentSlug } from '@/lib/agentSlug';
 import {
   Sparkles,
@@ -52,15 +53,9 @@ function subjectIcon(name: string) {
   return GraduationCap;
 }
 
-/**
- * Hub de catedráticos: una tarjeta de cristal por materia, con el avatar teñido
- * del color de la asignatura y un badge que dice en qué punto está el temario
- * («En curso», «Examen en 4 d»…). El badge no es decorativo: sale del estado
- * real de las unidades y de la fecha del próximo examen.
- */
-export default async function BrainUpHubPage() {
-  const { tenant: prisma } = await currentTenant();
-  const agents = await prisma.aiAgent.findMany({
+/** El catálogo de catedráticos con lo justo para pintar cada tarjeta. */
+function loadCatalog(prisma: TenantPrisma) {
+  return prisma.aiAgent.findMany({
     include: {
       subject: {
         include: {
@@ -78,6 +73,35 @@ export default async function BrainUpHubPage() {
     },
     orderBy: { subject: { order: 'asc' } },
   });
+}
+
+/**
+ * Hub de catedráticos: una tarjeta de cristal por materia, con el avatar teñido
+ * del color de la asignatura y un badge que dice en qué punto está el temario
+ * («En curso», «Examen en 4 d»…). El badge no es decorativo: sale del estado
+ * real de las unidades y de la fecha del próximo examen.
+ */
+export default async function BrainUpHubPage() {
+  const { tenant: prisma } = await currentTenant();
+
+  // La base remota tiene un solo hueco de conexión y este catálogo es la consulta
+  // más pesada de la vista: cuando el pooler va lento se pasa de los 4,5 s y, sin
+  // este margen, el fallo tumbaba TODA la página con un #441 opaco que obligaba a
+  // recargar. Un timeout se degrada a «catálogo no disponible»; cualquier otro
+  // error (esquema desincronizado, permisos) se propaga para que se vea y se
+  // registre: esconderlo sería tapar el problema de verdad.
+  let agents: Awaited<ReturnType<typeof loadCatalog>> = [];
+  let catalogTimedOut = false;
+  try {
+    agents = await loadCatalog(prisma);
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code !== 'P1008') throw error;
+    catalogTimedOut = true;
+    console.error(
+      '[brainup] el catálogo no ha llegado a tiempo; se pinta la vista sin materias:',
+      error instanceof Error ? error.message : error
+    );
+  }
 
   const now = Date.now();
 
@@ -111,6 +135,22 @@ export default async function BrainUpHubPage() {
           </p>
         </div>
       </div>
+
+      {catalogTimedOut && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+          <p className="text-xs leading-relaxed text-amber-100">
+            El catálogo de catedráticos no ha llegado a tiempo: la base está lenta en este momento.
+            No se ha perdido nada.
+          </p>
+          <Link
+            href="/brainup"
+            prefetch={false}
+            className="shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-bold text-amber-200 hover:bg-amber-500/25"
+          >
+            Reintentar
+          </Link>
+        </div>
+      )}
 
       {/* Sistema solar de materias: la vista de mundos antes del listado. */}
       <SubjectSolarSystem
