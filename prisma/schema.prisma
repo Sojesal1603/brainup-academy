@@ -56,9 +56,9 @@ enum EducationStage {
 }
 
 model UserProfile {
-  id                   String    @id @default("user_default")
-  name                 String    @default("Estudiante")
-  modality             String    @default("1º de Bachillerato (Ciencias y Tecnología)")
+  id                   String         @id @default("user_default")
+  name                 String         @default("Estudiante")
+  modality             String         @default("1º de Bachillerato (Ciencias y Tecnología)")
   // Derivados de `modality` para no repetir condicionales por toda la app.
   stage                EducationStage @default(BACHILLERATO)
   gradeLevel           String? // "1º ESO", "2º Bachillerato", "3º curso"
@@ -66,29 +66,29 @@ model UserProfile {
   degreeName           String? // "Grado en Ingeniería Mecánica" (solo Universidad)
   // Comunidad autónoma del alumno: decide la estructura del simulacro EBAU
   // (duración, opciones, peso de la notación). Se puede cambiar en el examinador.
-  community            String    @default("madrid")
+  community            String         @default("madrid")
   // Zona horaria IANA del alumno. Todo lo que depende del día (rachas, hábitos,
   // cierre nocturno, «hoy» del plan) se calcula con esta zona, no con la del
   // servidor: en Netlify el proceso corre en UTC y un alumno en Madrid vería el
   // cambio de día a las 02:00. Por defecto, Europe/Madrid.
-  timezone             String    @default("Europe/Madrid")
+  timezone             String         @default("Europe/Madrid")
   // Aviso diario del plan: hora local del alumno y si lo quiere activo.
-  reminderEnabled      Boolean   @default(false)
+  reminderEnabled      Boolean        @default(false)
   reminderTime         String? // "HH:MM" en su zona; null = sin aviso
-  targetGradePau       Float     @default(13.5) // Nota objetivo sobre 14
-  weeklyHoursCap       Float     @default(25.0) // Horas disponibles a la semana
-  weeklyHoursDeclared  Boolean   @default(false) // ¿Las ha dicho él? (si no, es un valor de partida)
+  targetGradePau       Float          @default(13.5) // Nota objetivo sobre 14
+  weeklyHoursCap       Float          @default(25.0) // Horas disponibles a la semana
+  weeklyHoursDeclared  Boolean        @default(false) // ¿Las ha dicho él? (si no, es un valor de partida)
   setupCompletedAt     DateTime? // Cuándo cerró la puesta a punto guiada por la IA
   // ¿Ha repasado el horario entero (los cinco días) con el coordinador? Sin esta
   // confirmación, un horario a medias parece completo y el plan se construye a
   // ciegas: es lo que preguntaba el alumno cuando decía «me falta una clase».
-  timetableComplete    Boolean   @default(false)
-  studyMode            String    @default("athlete") // "comfort" o "athlete"
-  streakCurrent        Int       @default(0)
-  streakBest           Int       @default(0)
+  timetableComplete    Boolean        @default(false)
+  studyMode            String         @default("athlete") // "comfort" o "athlete"
+  streakCurrent        Int            @default(0)
+  streakBest           Int            @default(0)
   // Experiencia acumulada de los retos semanales (se deriva el nivel, no se
   // guarda aparte: así no puede desincronizarse).
-  challengeXp          Int       @default(0)
+  challengeXp          Int            @default(0)
   lastStudyDate        DateTime?
   moodleFeedUrl        String? // URL privada de suscripción iCal de Moodle
   lastMoodleSync       DateTime? // Fecha de última sincronización
@@ -104,7 +104,7 @@ model UserProfile {
   // contraseña, entrando como el navegador) para los centros que no dejan crear
   // claves al alumnado. Decide qué vía usa la sincronización, la de a mano y la
   // del vigilante.
-  moodleAuthMode       String    @default("token") // "token" | "sesion"
+  moodleAuthMode       String         @default("token") // "token" | "sesion"
   moodleUsername       String? // El usuario con el que entra (solo en «sesion»)
   // La contraseña, cifrada con la caja fuerte de la app (`moodleSecrets.ts`:
   // AES-256-GCM y contexto `<userId>:moodle`), para poder reconectar solo cada
@@ -117,10 +117,10 @@ model UserProfile {
   // vigilante (`moodleSelfHeal.ts`), no el alumno: así la app puede avisar de que
   // la clave ha dejado de valer en vez de seguir enseñando datos de hace dos
   // semanas como si fueran de hoy. «ok» | «caducado» | «sin_comprobar».
-  moodleTokenState     String?   @default("sin_comprobar")
+  moodleTokenState     String?        @default("sin_comprobar")
   moodleCheckedAt      DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   // Relaciones inversas: borrar la cuenta borra en cascada todo lo suyo.
   subjects          Subject[]
@@ -153,6 +153,11 @@ model UserProfile {
   pushSubscriptions PushSubscription[]
   aiKeys            UserAiKey[]
   aiKeyAttempts     AiKeyAttempt[]
+  // Fase 16: fuentes persistentes y apuntes modulares.
+  sourceDocuments   SourceDocument[]
+  noteSections      NoteSection[]
+  noteBlocks        NoteBlock[]
+  studyJobs         StudyJob[]
 }
 
 // Clave de IA propia de un usuario, cifrada con AES-256-GCM.
@@ -532,24 +537,27 @@ model PauExamSession {
 
 // 11. Cuaderno de Apuntes y Base de Datos tipo Notion
 model Note {
-  id                   String       @id @default(uuid())
-  userId               String       @default("user_default")
-  user                 UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String        @id @default(uuid())
+  userId               String        @default("user_default")
+  user                 UserProfile   @relation(fields: [userId], references: [id], onDelete: Cascade)
   topicId              String
-  topic                Topic        @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  topic                Topic         @relation(fields: [topicId], references: [id], onDelete: Cascade)
   title                String
   content              String // Markdown estructurado con bloques, toggles de active recall y fórmulas
-  tags                 String?      @default("apuntes,resumen")
-  isPinned             Boolean      @default(false)
+  tags                 String?       @default("apuntes,resumen")
+  isPinned             Boolean       @default(false)
   // Quién ha escrito el apunte: tú, o un catedrático IA con su agente y la
   // consulta en la que nació (así siempre se sabe de dónde sale).
-  author               String       @default("alumno") // "alumno" | "catedratico"
+  author               String        @default("alumno") // "alumno" | "catedratico"
   agentId              String?
-  agent                AiAgent?     @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agent                AiAgent?      @relation(fields: [agentId], references: [id], onDelete: SetNull)
   sourceConversationId String?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
   reviewCards          ReviewCard[]
+  // Lienzo Outline-First (Fase 16). `content` sigue siendo la proyección
+  // Markdown de solo lectura de este árbol para todo lo que ya lo consume.
+  sections             NoteSection[]
 
   @@index([userId, topicId])
 }
@@ -877,4 +885,221 @@ model TutorSessionOutcome {
   @@index([userId, createdAt])
   @@index([userId, topicId])
   @@index([planId])
+}
+
+// ===========================================================================
+// Fase 16 — Fuentes persistentes, contrato de citas y apuntes modulares
+// ===========================================================================
+//
+// Lo que resuelve, en una frase: los documentos dejan de vivir en el disco
+// efímero del servidor y cada párrafo del apunte puede atarse a un trozo real
+// de una fuente. `Note.content` no desaparece: pasa a ser la proyección
+// Markdown de este árbol.
+
+/// Cómo entró una fuente. El valor no decide nada por sí solo (el extractor
+/// mira MIME y firma), pero permite filtrar y explicar en la interfaz.
+enum SourceKind {
+  PDF
+  DOCX
+  PPTX
+  XLSX
+  ODT
+  IMAGE
+  TEXT
+  WEB
+  MOODLE
+  OTHER
+}
+
+/// Estado de la ingesta. Un documento solo se usa para citar cuando está READY;
+/// el resto de estados se enseñan tal cual (no se finge que está listo).
+enum SourceStatus {
+  UPLOADING
+  QUEUED
+  EXTRACTING
+  CHUNKING
+  READY
+  FAILED
+}
+
+/// Estado de un apartado del esquema. `SKIPPED` es una decisión del alumno, no
+/// un error: se conserva para que el esquema no se regenere solo.
+enum NoteSectionStatus {
+  PENDING
+  GENERATING
+  COMPLETED
+  SKIPPED
+}
+
+/// Tipo de bloque. `EVIDENCE` es una cita textual de la fuente; los demás son
+/// redacción propia del catedrático (o del alumno).
+enum NoteBlockType {
+  TEXT
+  FORMULA
+  DEFINITION
+  EXAMPLE
+  EVIDENCE
+  QUESTION
+}
+
+/// Resultado del validador determinista de citas.
+///   · NONE       → el bloque no afirma nada que haya que citar.
+///   · VERIFIED   → el `chunkId` es de la cuenta y la cita está en su texto.
+///   · UNVERIFIED → el trozo existe, pero la cita no aparece en él.
+///   · ERROR      → el trozo no existe, es de otra cuenta o la cita está vacía.
+enum QuoteStatus {
+  NONE
+  VERIFIED
+  UNVERIFIED
+  ERROR
+}
+
+/// Un documento del alumno, ya fuera del disco efímero.
+///
+/// `sha256` es único **por cuenta**: subir dos veces el mismo PDF reutiliza la
+/// fila (y no vuelve a pagar extracción ni embeddings). `subjectId`/`topicId`
+/// son escalares a propósito: una fuente puede servir a varias unidades y no
+/// queremos que borrar un tema borre el libro.
+model SourceDocument {
+  id             String       @id @default(uuid())
+  userId         String
+  user           UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  title          String
+  kind           SourceKind   @default(OTHER)
+  mimeType       String
+  sizeBytes      Int          @default(0)
+  pages          Int          @default(0)
+  chars          Int          @default(0)
+  /// Huella del contenido original (no del nombre): deduplicación idempotente.
+  sha256         String
+  /// Clave del binario en el almacén de objetos (`<userId>/sources/…`).
+  storageKey     String
+  /// Clave del texto extraído, si el documento tiene capa de texto.
+  textKey        String?
+  subjectId      String?
+  topicId        String?
+  status         SourceStatus @default(QUEUED)
+  /// «texto» | «imagen» | «sin_texto»: lo que de verdad se pudo leer.
+  mode           String       @default("texto")
+  /// Avisos honestos de la extracción (páginas escaneadas, ZIP ilegible…).
+  notesJson      String?
+  error          String?
+  /// Modelo con el que se calcularon los vectores, o `null` si aún no hay.
+  embeddingModel String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  chunks DocumentChunk[]
+
+  @@unique([userId, sha256])
+  @@index([userId, subjectId])
+  @@index([userId, topicId])
+  @@index([userId, status])
+}
+
+/// Un trozo del documento: la unidad que se le enseña al modelo y que se cita.
+///
+/// `embedding` queda como `Unsupported` porque Prisma no consulta vectores:
+/// se escribe y se busca con `$queryRaw`. La migración crea `vector(768)` si
+/// pgvector está disponible y un array de dobles si no, para que la columna
+/// exista siempre y el resto del sistema no dependa de la extensión.
+model DocumentChunk {
+  id             String                      @id @default(uuid())
+  userId         String
+  documentId     String
+  document       SourceDocument              @relation(fields: [documentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  order          Int
+  pageFrom       Int?
+  pageTo         Int?
+  label          String                      @default("")
+  text           String
+  charCount      Int                         @default(0)
+  embedding      Unsupported("vector(768)")?
+  embeddingModel String?
+  createdAt      DateTime                    @default(now())
+
+  @@unique([documentId, order])
+  @@index([userId, documentId])
+}
+
+/// Un apartado del esquema del apunte. Es lo que se genera en segundos, antes
+/// de redactar una sola línea: el alumno lo reordena, lo omite o lo amplía.
+model NoteSection {
+  id        String            @id @default(uuid())
+  userId    String
+  user      UserProfile       @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  noteId    String
+  note      Note              @relation(fields: [noteId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  title     String
+  /// Para qué sirve el apartado, en una frase (guía el desarrollo).
+  purpose   String            @default("")
+  order     Int               @default(0)
+  status    NoteSectionStatus @default(PENDING)
+  /// Rango de páginas de las fuentes que cubren este apartado (si se sabe).
+  pageFrom  Int?
+  pageTo    Int?
+  /// Cobertura inicial de fuentes (0-1), calculada al proponer el esquema.
+  coverage  Float?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  blocks NoteBlock[]
+
+  @@unique([noteId, order])
+  @@index([userId, noteId])
+}
+
+/// Un bloque de contenido. Puede colgar de otro (máximo dos niveles) para las
+/// variantes «más sencillo», «un ejemplo» o «más profundo».
+model NoteBlock {
+  id            String        @id @default(uuid())
+  userId        String
+  user          UserProfile   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  noteId        String
+  sectionId     String
+  section       NoteSection   @relation(fields: [sectionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  parentId      String?
+  parent        NoteBlock?    @relation("BlockVariants", fields: [parentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  children      NoteBlock[]   @relation("BlockVariants")
+  type          NoteBlockType @default(TEXT)
+  /// Markdown con KaTeX (`$…$`, `$$…$$`). Nunca HTML: la proyección y el
+  /// renderizador existente esperan exactamente esto.
+  content       String
+  order         Int           @default(0)
+  isAiGenerated Boolean       @default(true)
+  /// Si el alumno lo ha tocado, la regeneración **nunca** lo sobrescribe.
+  isEdited      Boolean       @default(false)
+  /// Trozo exacto que sostiene el bloque (si el bloque afirma algo).
+  chunkId       String?
+  /// Cita textual, tal y como se comprobó contra el trozo.
+  quote         String?
+  quoteStatus   QuoteStatus   @default(NONE)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([userId, noteId])
+  @@index([sectionId, order])
+  @@index([parentId])
+}
+
+/// Trabajo largo (desarrollar un tema entero) que sobrevive a un reinicio.
+/// No hay worker: `POST /api/study/jobs/[id]/tick` avanza **un** paso por
+/// llamada y el estado queda en la fila, así que dos ticks no duplican trabajo.
+model StudyJob {
+  id         String      @id @default(uuid())
+  userId     String
+  user       UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  noteId     String?
+  kind       String      @default("note_sections")
+  status     String      @default("queued") // queued | running | done | failed
+  step       Int         @default(0)
+  totalSteps Int         @default(0)
+  inputJson  String?
+  resultJson String?
+  error      String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
 }

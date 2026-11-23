@@ -349,7 +349,7 @@ export async function POST(request: Request) {
    * claro en vez de redactar otra cosa distinta que él no ha aprobado.
    */
   if (draftToken) {
-    const draft = takeNoteDraft(draftToken);
+    const draft = takeNoteDraft(authUser.id, draftToken);
     if (!draft) {
       return NextResponse.json(
         {
@@ -772,6 +772,7 @@ export async function POST(request: Request) {
      */
     if (preview) {
       const token = rememberNoteDraft({
+        userId: authUser.id,
         agentId: agent.id,
         topicId: unit.id,
         conversationId,

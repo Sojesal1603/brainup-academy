@@ -1,9 +1,21 @@
-import { prisma, withTransactionFlag } from './prisma';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { isInTransaction, prisma, withTransactionFlag } from './prisma';
+import { TENANT_SETTING } from './tenantSetting';
 import {
   NestedTenantWriteError,
   parseTenantId,
   TenantScopeError,
 } from './tenantValidation';
+
+/**
+ * Ajuste de PostgreSQL en el que se fija la cuenta de la transacción.
+ *
+ * Las políticas RLS lo leen con `current_setting('app.user_id', true)`. Se fija
+ * con `set_config(..., true)`, así que es **local a la transacción**: al terminar
+ * vuelve a estar vacío y no se queda pegado a la conexión del pooler. Eso es lo
+ * que impide que la conexión de un usuario atienda a otro con el rol antiguo.
+ */
+export { TENANT_SETTING };
 
 /**
  * `db(userId)`: el único camino permitido a los datos de una cuenta.
@@ -36,19 +48,40 @@ import {
  *   5. `$transaction` se envuelve para marcar la transacción como abierta: dentro
  *      de ella no hay reintentos ni se cierra el pool. Se puede usar tanto la
  *      forma interactiva (callback) como la de lote.
+ *
+ * Modo estricto (`TENANT_RLS_STRICT=1`): cada consulta se ejecuta dentro de una
+ * transacción con `SET LOCAL app.user_id`, no solo las que abren `$transaction`.
+ * Es el requisito para que las políticas de `prisma/sql/rls_strict_tenant.sql`
+ * sean obligatorias (sin el ajuste niegan todo) y no una red decorativa. Sin el
+ * flag, el comportamiento es el de siempre: manda el filtro de la extensión y
+ * las políticas siguen siendo permisivas cuando no hay ajuste.
  */
 
 type JsonObject = Record<string, unknown>;
 
 /**
- * Ajuste de PostgreSQL en el que `db(userId).$transaction` fija la cuenta.
+ * Modo estricto de RLS: fija `app.user_id` en **cada** consulta acotada.
  *
- * La migración `20261121120000_security_rls_policies` crea las políticas que
- * lo leen con `current_setting('app.user_id', true)`. Se fija con
- * `set_config(..., true)`, así que es **local a la transacción**: al terminar
- * vuelve a estar vacío y no se queda pegado a la conexión del pooler.
+ * Se activa junto con `prisma/sql/rls_strict_tenant.sql` (ver el encabezado de
+ * ese archivo). Apagado, cada consulta suelta no fija el ajuste y las políticas
+ * permisivas dejan pasar: el aislamiento depende solo de la extensión de Prisma.
  */
-export const TENANT_SETTING = 'app.user_id';
+export const TENANT_RLS_STRICT = (process.env.TENANT_RLS_STRICT ?? '').trim() === '1';
+
+interface AmbientTenantTransaction {
+  ownerId: string;
+  client: unknown;
+}
+
+/**
+ * Transacción de una cuenta abierta en esta cadena asíncrona.
+ *
+ * Sirve para que un `db(mismo usuario)` llamado dentro de una transacción se
+ * una a ella en vez de abrir otra: con `connection_limit=1` la segunda se
+ * quedaría esperando a la primera hasta agotar el tiempo. Y un `db(otra cuenta)`
+ * dentro de una transacción es un error de programación, no una consulta más.
+ */
+const ambientTenantTransaction = new AsyncLocalStorage<AmbientTenantTransaction>();
 
 type RawTransactionClient = {
   $executeRawUnsafe: (query: string, ...values: unknown[]) => unknown;
@@ -103,6 +136,14 @@ const TENANT_MODELS: ReadonlySet<string> = new Set([
   'PushSubscription',
   'UserAiKey',
   'AiKeyAttempt',
+  // Fase 16: fuentes persistentes y apuntes modulares. Sin estas entradas, una
+  // consulta a `noteSection`/`noteBlock` no llevaría el dueño y el RLS sería la
+  // única defensa (y con `app.user_id` sin fijar, no habría ninguna).
+  'SourceDocument',
+  'DocumentChunk',
+  'NoteSection',
+  'NoteBlock',
+  'StudyJob',
 ]);
 
 /** Operaciones de lectura: se les añade el dueño al `where`. */
@@ -312,6 +353,30 @@ function scopeOperation(
 }
 
 /**
+ * Envuelve el cliente de una transacción para poder pasarlo a `db()`.
+ *
+ * Abrir otra transacción desde dentro de una abierta no tiene sentido (y con el
+ * pooler puede bloquearse), así que `$transaction` se sustituye por un error
+ * claro en vez de dejar que Prisma intente lo imposible.
+ */
+function transactionClientProxy(tx: unknown): unknown {
+  return new Proxy(tx as object, {
+    get(target, prop) {
+      if (prop === '$transaction') {
+        return () => {
+          throw new TenantScopeError(
+            'Dentro de una transacción de db(userId) se usa el `tx` que recibe el callback: no se abre otra.',
+            'TENANT_SCOPE_VIOLATION'
+          );
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+/**
  * Cliente de Prisma acotado a una cuenta.
  *
  * Devuelve un cliente extendido normal (se usan sus métodos como siempre), pero
@@ -326,13 +391,54 @@ function scopeOperation(
 export function db(userId: string) {
   const ownerId = parseTenantId(userId);
 
+  // Ya hay una transacción de esta cuenta en la cadena asíncrona: se reutiliza.
+  const ambient = ambientTenantTransaction.getStore();
+  if (ambient) {
+    if (ambient.ownerId !== ownerId) {
+      throw new TenantScopeError(
+        'Dentro de la transacción de una cuenta no se puede consultar otra cuenta.',
+        'TENANT_SCOPE_VIOLATION'
+      );
+    }
+    // El cliente de la transacción trae las mismas extensiones (incluido el
+    // filtro por cuenta), así que su forma es la del cliente acotado.
+    return ambient.client as typeof scoped;
+  }
+
   const scoped = prisma.$extends({
     name: 'brainup-tenant-scope',
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
           const scopedArgs = scopeOperation(model, operation, args, ownerId);
-          return query(scopedArgs as typeof args);
+
+          // Fuera del modo estricto, o dentro de una transacción que ya fijó el
+          // ajuste, la consulta se ejecuta tal cual sobre su conexión.
+          if (!TENANT_RLS_STRICT || isInTransaction()) {
+            return query(scopedArgs as typeof args);
+          }
+
+          // Modo estricto: el ajuste tiene que ir en la MISMA transacción y en la
+          // MISMA conexión que la consulta. Por eso se envía en un lote con
+          // `set_config(..., true)` delante: al confirmar, la conexión vuelve al
+          // pool sin la cuenta anterior pegada.
+          const delegate = (
+            prisma as unknown as Record<string, Record<string, (arg: unknown) => unknown>>
+          )[model];
+          const runBatch = prisma.$transaction as unknown as (
+            queries: unknown[]
+          ) => Promise<unknown[]>;
+
+          return withTransactionFlag(async () => {
+            const [, result] = await runBatch([
+              prisma.$executeRawUnsafe(
+                `SELECT set_config('${TENANT_SETTING}', $1, true)`,
+                ownerId
+              ),
+              delegate[operation](scopedArgs),
+            ]);
+            return result as never;
+          });
         },
       },
     },
@@ -364,7 +470,10 @@ export function db(userId: string) {
               // las de `$queryRaw`, ven el ajuste desde la primera sentencia.
               return start(async (tx) => {
                 await setTenantContext(tx, ownerId);
-                return (input as (tx: unknown) => unknown)(tx);
+                const scopedTx = transactionClientProxy(tx);
+                return ambientTenantTransaction.run({ ownerId, client: scopedTx }, () =>
+                  (input as (tx: unknown) => unknown)(scopedTx)
+                );
               }, options);
             }
 

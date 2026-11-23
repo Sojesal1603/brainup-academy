@@ -36,6 +36,7 @@ import {
 import { DocumentPageLimitError, readDocument, type DocReadMode } from './docRead';
 import { buildDocumentIndex, type IndexedDoc } from './docContext';
 import { signatureMatches, signatureMismatchMessage, sniffSignature } from './fileSignature';
+import { buildObjectKey, deleteObject, getObject, objectStorageConfigured, putObject } from './storage/objectStore';
 
 /**
  * Carpeta local de las subidas (fuera del control de versiones).
@@ -107,6 +108,84 @@ function indexPath(userId: string, id: string): string {
 }
 function metaPath(userId: string, id: string): string {
   return path.join(userDir(userId), `${id}.json`);
+}
+
+/**
+ * Espejo en el almacén de objetos: el disco pasa a ser **caché**.
+ *
+ * Se sube lo que haya en la carpeta de la subida (binario, texto, índice y
+ * metadato) con la misma clave relativa, para poder restaurarlo tal cual en
+ * otra instancia o después de un despliegue. Si el bucket no está configurado,
+ * no se hace nada: en desarrollo todo sigue siendo local.
+ */
+const MIRROR_SUFFIXES = ['bin', 'txt', 'index.json', 'json'] as const;
+
+function mirrorKey(userId: string, id: string, suffix: string): string {
+  return buildObjectKey(userId, 'uploads', `${id}.${suffix}`);
+}
+
+async function mirrorUpload(userId: string, id: string): Promise<void> {
+  if (!objectStorageConfigured()) return;
+  for (const suffix of MIRROR_SUFFIXES) {
+    let body: Buffer;
+    try {
+      body = await readFile(
+        suffix === 'bin'
+          ? binPath(userId, id)
+          : suffix === 'txt'
+            ? textPath(userId, id)
+            : suffix === 'index.json'
+              ? indexPath(userId, id)
+              : metaPath(userId, id)
+      );
+    } catch {
+      continue; // Ese archivo no existe (una imagen no tiene .txt, por ejemplo).
+    }
+    await putObject({
+      userId,
+      key: mirrorKey(userId, id, suffix),
+      body,
+      contentType:
+        suffix === 'bin'
+          ? undefined
+          : suffix === 'json' || suffix === 'index.json'
+            ? 'application/json'
+            : 'text/plain; charset=utf-8',
+    });
+  }
+}
+
+/**
+ * Restaura un archivo del espejo al disco (caché) si aquí no está. Devuelve si
+ * el archivo ya se puede leer en local.
+ */
+async function restoreFromMirror(userId: string, id: string, suffix: string): Promise<boolean> {
+  const target =
+    suffix === 'bin'
+      ? binPath(userId, id)
+      : suffix === 'txt'
+        ? textPath(userId, id)
+        : suffix === 'index.json'
+          ? indexPath(userId, id)
+          : metaPath(userId, id);
+
+  try {
+    await readFile(target);
+    return true;
+  } catch {
+    // No está en esta instancia: se pide al almacén.
+  }
+
+  if (!objectStorageConfigured()) return false;
+  try {
+    const bytes = await getObject(userId, mirrorKey(userId, id, suffix));
+    if (!bytes) return false;
+    await mkdir(userDir(userId), { recursive: true });
+    await writeFile(target, bytes);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Los primeros bytes bastan para la firma; no se carga un archivo enorme. */
@@ -318,6 +397,16 @@ export async function saveUploadFromStream(
     return { ok: false, code: 'disco', error: 'El archivo se ha subido, pero no se ha podido anotar en el índice de subidas.' };
   }
 
+  // El espejo va después de responder «guardado»: si el bucket falla, el alumno
+  // no pierde la subida en esta instancia, pero queda el aviso en el registro.
+  await mirrorUpload(userId, id).catch((error) => {
+    console.warn(
+      `[subidas] no se ha podido copiar ${id} al almacén: ${
+        error instanceof Error ? error.message : 'error desconocido'
+      }`
+    );
+  });
+
   return { ok: true, upload };
 }
 
@@ -332,7 +421,16 @@ export async function readUpload(userId: string, id: string): Promise<StoredUplo
       'index'
     > & { userId?: string };
   } catch {
-    return null;
+    // Puede ser otra instancia (disco efímero): se recupera del almacén.
+    if (!(await restoreFromMirror(userId, id, 'json'))) return null;
+    try {
+      stored = JSON.parse(await readFile(metaPath(userId, id), 'utf8')) as Omit<
+        StoredUpload,
+        'index'
+      > & { userId?: string };
+    } catch {
+      return null;
+    }
   }
 
   // El metadato debe pertenecer a ESTA cuenta. La carpeta ya lo impide, pero un
@@ -344,12 +442,19 @@ export async function readUpload(userId: string, id: string): Promise<StoredUplo
   try {
     index = JSON.parse(await readFile(indexPath(userId, id), 'utf8')) as IndexedDoc;
   } catch {
-    // Sin índice (o ilegible): el documento sigue estando, solo se puede leer
-    // peor. Se dice tal cual en vez de fingir que no existe.
-    index = null;
+    // Sin índice en esta instancia: se intenta recuperar antes de rendirse.
+    if (await restoreFromMirror(userId, id, 'index.json')) {
+      try {
+        index = JSON.parse(await readFile(indexPath(userId, id), 'utf8')) as IndexedDoc;
+      } catch {
+        index = null;
+      }
+    }
   }
 
-  return { ...meta, index };
+  // La ruta guardada apunta al disco de la instancia donde se subió: se
+  // devuelve la de esta, que es la que el extractor y el chat pueden abrir.
+  return { ...meta, path: binPath(userId, id), index };
 }
 
 /** El texto extraído de una subida, o `null` si no tiene capa de texto. */
@@ -359,7 +464,13 @@ export async function readUploadText(userId: string, id: string): Promise<string
     const text = await readFile(textPath(userId, id), 'utf8');
     return text.trim().length > 0 ? text : null;
   } catch {
-    return null;
+    if (!(await restoreFromMirror(userId, id, 'txt'))) return null;
+    try {
+      const text = await readFile(textPath(userId, id), 'utf8');
+      return text.trim().length > 0 ? text : null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -369,7 +480,12 @@ export async function readUploadBytes(userId: string, id: string): Promise<Buffe
   try {
     return await readFile(binPath(userId, id));
   } catch {
-    return null;
+    if (!(await restoreFromMirror(userId, id, 'bin'))) return null;
+    try {
+      return await readFile(binPath(userId, id));
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -391,6 +507,16 @@ export async function deleteUpload(userId: string, id: string): Promise<boolean>
     rm(indexPath(userId, id), { force: true }).catch(() => {}),
     rm(metaPath(userId, id), { force: true }).catch(() => {}),
   ]);
+
+  // El espejo también se borra: un objeto huérfano seguiría ocupando y, peor,
+  // podría volver a restaurarse como si la subida no se hubiera eliminado.
+  if (objectStorageConfigured()) {
+    await Promise.all(
+      MIRROR_SUFFIXES.map((suffix) =>
+        deleteObject(userId, mirrorKey(userId, id, suffix)).catch(() => {})
+      )
+    );
+  }
 
   return existed;
 }

@@ -340,7 +340,7 @@ export async function POST(request: Request) {
           },
         });
         return [userMessage, assistant] as const;
-      });
+      }, { tenantId: authUser.id });
       assistantId = assistantMessage.id;
       assistantCreatedAt = assistantMessage.createdAt;
     } catch (persistError) {

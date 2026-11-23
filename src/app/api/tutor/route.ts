@@ -854,7 +854,7 @@ export async function POST(request: Request) {
       })
 
       return [user, assistant] as const;
-    });
+    }, { tenantId: authUser.id });
 
     // Medición real que aporta el catedrático: [[nivel:U4=55]] al final del
     // mensaje. Se anota como nivel diagnosticado, nunca como valor de fábrica.

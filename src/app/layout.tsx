@@ -4,6 +4,8 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import SplashScreen from '@/components/SplashScreen';
 import AppErrorReporter from '@/components/AppErrorReporter';
+import SessionStorageGuard from '@/components/SessionStorageGuard';
+import { getOptionalUser } from '@/lib/auth';
 import { getViewerCourse } from '@/lib/viewerCourse';
 
 // La app entera depende de PostgreSQL en tiempo de petición. Sin esto, Next
@@ -60,12 +62,18 @@ export default async function RootLayout({
   // La navegación necesita la etapa para ocultar las herramientas que no
   // aplican (PAU en ESO y Universidad). Sin perfil se pinta la normal.
   const course = await getViewerCourse();
+  // Solo se usa para saber si el navegador sigue siendo del mismo dueño que
+  // escribió lo que hay en `localStorage` (el id es público para el propio
+  // usuario; no se pinta nada con él).
+  const user = await getOptionalUser();
 
   return (
     <html lang="es" className="dark">
       <body className="bg-[#0a0a0c] text-slate-100 min-h-screen flex antialiased selection:bg-emerald-500 selection:text-slate-950">
         {/* Tapa la app hasta que el perfil de la cabecera está resuelto. */}
         <SplashScreen />
+        {/* Estado del navegador (Enfoque, borradores, descartes) atado a la cuenta. */}
+        <SessionStorageGuard userId={user?.id ?? null} />
         {/* Sin JavaScript no hay quien retire la splash: se oculta por CSS. */}
         <noscript>
           <style>{'#brainup-splash{display:none !important}'}</style>

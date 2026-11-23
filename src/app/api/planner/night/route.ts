@@ -259,7 +259,7 @@ export async function POST(request: Request) {
         },
         update: { summary, factsJson, writtenBy: 'reglas' },
       });
-    });
+    }, { tenantId: user.id });
 
     return NextResponse.json({
       ok: true,

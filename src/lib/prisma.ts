@@ -3,6 +3,8 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { databaseTarget, resolveRuntimeDatabaseUrl } from './databaseDiagnostics';
 import { DB_RETRY_DELAYS_MS, needsFreshConnection, withDbRetry } from './prismaRetry';
 import { DB_QUERY_TIMEOUT_MS, withDbTimeout } from './dbTimeout';
+import { TENANT_SETTING } from './tenantSetting';
+import { parseTenantId } from './tenantValidation';
 
 /**
  * El cliente de Prisma, UNO SOLO por proceso.
@@ -272,13 +274,21 @@ globalForPrisma.prisma = prisma;
  *
  * Para datos de una cuenta se usa `db(userId).$transaction(...)` (el cliente
  * acotado aplica el filtro también a la transacción). Esta función es para el
- * código de infraestructura que aún trabaja con el cliente global (por ejemplo,
- * cierres nocturnos y migraciones de datos).
+ * código que trabaja con el cliente global, y solo es segura con datos de una
+ * cuenta si se declara el dueño en `tenantId`.
+ *
+ * `tenantId` fija `app.user_id` con `set_config(..., true)` dentro de ESTA
+ * transacción. Es obligatorio cuando el bloque toca tablas con RLS estricto
+ * (`prisma/sql/rls_strict_tenant.sql`): sin el ajuste, las políticas niegan la
+ * fila. Las escrituras llevan el `userId` en el `where`/`data`, pero eso no
+ * sustituye a la política: es la política la que impide que una consulta mal
+ * escrita alcance a otra cuenta.
  */
 export async function withTransaction<T>(
   run: (tx: Prisma.TransactionClient) => Promise<T>,
-  options: { maxWait?: number; timeout?: number } = {}
+  options: { maxWait?: number; timeout?: number; tenantId?: string } = {}
 ): Promise<T> {
+  const tenantId = options.tenantId === undefined ? null : parseTenantId(options.tenantId);
   const current = transactionContext.getStore();
   if (current) return run(current);
 
@@ -301,7 +311,15 @@ export async function withTransaction<T>(
         // ese tipo para que las consultas de dentro sigan viendo la extensión.
         const client = tx as unknown as Prisma.TransactionClient;
         return transactionScope.run(true, () =>
-          transactionContext.run(client, () => run(client))
+          transactionContext.run(client, async () => {
+            if (tenantId) {
+              await tx.$executeRawUnsafe(
+                `SELECT set_config('${TENANT_SETTING}', $1, true)`,
+                tenantId
+              );
+            }
+            return run(client);
+          })
         );
       },
       options
@@ -323,9 +341,29 @@ if (process.env.NODE_ENV === 'development') {
         'Define la cadena del rol prisma_app (DML sin DDL, con statement_timeout=8s).'
     );
   }
-} else if (!process.env.PRISMA_APP_DATABASE_URL) {
-  console.warn(
-    '[prisma] PRISMA_APP_DATABASE_URL no está definida: runtime usando DATABASE_URL. ' +
-      'El rol de runtime prisma_app es el que limita DDL y tiempo de sentencia.'
-  );
+} else {
+  if (!process.env.PRISMA_APP_DATABASE_URL) {
+    console.warn(
+      '[prisma] PRISMA_APP_DATABASE_URL no está definida: runtime usando DATABASE_URL. ' +
+        'El rol de runtime prisma_app es el que limita DDL y tiempo de sentencia.'
+    );
+  }
+
+  /*
+   * RLS estricto sin rol de runtime = RLS apagada.
+   *
+   * Las políticas se crean `TO prisma_app`. Si la app conecta con el dueño de
+   * las tablas (o con `postgres`, que es superusuario), esas políticas no se
+   * aplican y el aislamiento que promete `rls_strict_tenant.sql` no existe. Un
+   * aviso en el log no basta: se niega a arrancar.
+   */
+  if (
+    (process.env.TENANT_RLS_STRICT ?? '').trim() === '1' &&
+    !process.env.PRISMA_APP_DATABASE_URL
+  ) {
+    throw new Error(
+      '[prisma] TENANT_RLS_STRICT=1 exige PRISMA_APP_DATABASE_URL: las políticas RLS ' +
+        'están creadas para el rol prisma_app y no protegen una conexión con el rol dueño.'
+    );
+  }
 }

@@ -21,6 +21,15 @@ import { randomUUID } from 'node:crypto';
 
 export interface NoteDraft {
   /** Id del catedrático que los ha escrito (para colgarlos de su asignatura). */
+  /**
+   * Cuenta que ha pedido el borrador.
+   *
+   * El vale viaja al navegador y vuelve en la petición de guardado. Sin el dueño
+   * aquí, un vale filtrado (logs, historial, una pestaña compartida) permitiría a
+   * otra cuenta guardar el apunte con SU userId: el contenido sería de la
+   * primera cuenta y la fila de la segunda.
+   */
+  userId: string;
   agentId: string;
   /** Id de la unidad del temario a la que pertenecen. */
   topicId: string;
@@ -66,15 +75,23 @@ export function rememberNoteDraft(draft: Omit<NoteDraft, 'at'>): string {
   return token;
 }
 
-/** Recupera un borrador (sin gastarlo) para poder enseñarlo o guardarlo. */
-export function peekNoteDraft(token: string): NoteDraft | null {
+/**
+ * Recupera un borrador (sin gastarlo) para poder enseñarlo o guardarlo.
+ *
+ * Exige el `userId` de la sesión: un vale de otra cuenta se comporta como si no
+ * existiera. No se distingue «caducado» de «de otra cuenta» a propósito, para no
+ * confirmar que ese vale existe.
+ */
+export function peekNoteDraft(userId: string, token: string): NoteDraft | null {
   prune();
-  return drafts.get(token) ?? null;
+  const draft = drafts.get(token);
+  if (!draft || draft.userId !== userId) return null;
+  return draft;
 }
 
 /** Gasta el borrador: una vez guardado, el vale ya no vale. */
-export function takeNoteDraft(token: string): NoteDraft | null {
-  const draft = peekNoteDraft(token);
+export function takeNoteDraft(userId: string, token: string): NoteDraft | null {
+  const draft = peekNoteDraft(userId, token);
   if (draft) drafts.delete(token);
   return draft;
 }
