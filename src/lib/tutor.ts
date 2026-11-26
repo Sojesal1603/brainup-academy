@@ -43,7 +43,7 @@ import {
 } from './tutorNotes';
 import { buildCategoryLayer, subjectCategoryOf } from './subjects/category';
 import { buildModeLayer, type SubjectMode } from './subjects/modes';
-import { VISUAL_PROMPT } from './visual/prompt';
+import { VISUAL_PROMPT, VISUAL_REQUIRED_PROMPT } from './visual/prompt';
 
 export {
   getConfiguredModelLabel,
@@ -167,6 +167,12 @@ export interface TutorContext {
    * No se pinta al alumno ni se menciona como etiqueta.
    */
   coach?: string;
+  /**
+   * El turno pide un trazado, una construcción o una imagen paso a paso. Lo
+   * decide `needsVisualSpec` en la ruta antes de llamar al modelo: así el
+   * contrato visual deja de ser opcional justo cuando el alumno lo necesita.
+   */
+  visualRequired?: boolean;
   /**
    * El texto de los documentos que ha subido en este turno, ya troceado y
    * buscado por relevancia (lo arma `docContext.ts`). Un libro entero no cabe en
@@ -449,7 +455,7 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     'Instrucción especial: en asignaturas de idiomas, explica y dialoga en español, pero ejemplos, gramática y redacciones en el idioma de la materia.'
   );
   lines.push('');
-  lines.push(VISUAL_PROMPT);
+  lines.push(ctx.visualRequired ? VISUAL_REQUIRED_PROMPT : VISUAL_PROMPT);
   lines.push('');
   lines.push(
     'FORMATO OBLIGATORIO: comienza SIEMPRE tu respuesta con una única etiqueta de etapa en su propia línea, exactamente con uno de estos formatos:'

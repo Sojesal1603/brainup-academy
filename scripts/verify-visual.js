@@ -367,6 +367,47 @@ ok('el prompt solo ofrece construcciones y prohíbe SVG/HTML', () => {
   assert.ok(/no inventes coordenadas/i.test(prompt.VISUAL_PROMPT));
 });
 
+ok('detecta peticiones de trazado o imagen paso a paso', () => {
+  const pide = [
+    'explícame la traslación mediante arcos de compás',
+    'hazme la mediatriz de AB paso a paso',
+    'quiero ver imágenes paso a paso de la construcción',
+    'dibújame la bisectriz del ángulo',
+    'un esquema visual de la tangente a la circunferencia',
+  ];
+  for (const text of pide) {
+    assert.equal(prompt.needsVisualSpec(text), true, text);
+  }
+
+  const noPide = [
+    'explícame paso a paso la derivada de x al cuadrado',
+    'resume la guerra civil española',
+    'dame tres ejercicios de integrales',
+  ];
+  for (const text of noPide) {
+    assert.equal(prompt.needsVisualSpec(text), false, text);
+  }
+
+  assert.equal(prompt.needsVisualSpec('explícame el alzado', 'Dibujo Técnico'), true);
+});
+
+ok('la petición visual añade el requisito y sus ejemplos parsean con Zod', () => {
+  const text = prompt.VISUAL_REQUIRED_PROMPT;
+  assert.ok(text.includes('NO PUEDES RESPONDER SOLO CON TEXTO'));
+  assert.ok(text.includes('```visual'));
+  assert.ok(text.includes('perpendicular_bisector'));
+  assert.ok(text.includes('"primitives"'));
+
+  const examples = [...text.matchAll(/```visual\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+  assert.ok(examples.length >= 2, 'faltan ejemplos visuales en el prompt');
+  for (const example of examples) {
+    const parsed = visual.parseVisualSpec(example);
+    assert.equal(parsed.ok, true, parsed.ok ? '' : parsed.error);
+  }
+  assert.ok(examples.some((example) => example.includes('"construction"')));
+  assert.ok(examples.some((example) => example.includes('"primitives"')));
+});
+
 ok('el prompt de apuntes tecnológicos añade el contrato visual', () => {
   const tech = apuntes.buildNoteWriterInstructions('tecnologia');
   const human = apuntes.buildNoteWriterInstructions('humanidades');
@@ -385,12 +426,24 @@ ok('el chat y los apuntes montan la tarjeta, y el tutor recibe el contrato', () 
     'utf8'
   );
   const tutor = fs.readFileSync(path.join(root, 'src', 'lib', 'tutor.ts'), 'utf8');
+  const route = fs.readFileSync(
+    path.join(root, 'src', 'app', 'api', 'tutor', 'route.ts'),
+    'utf8'
+  );
 
   assert.ok(markdown.includes("startsWith('visual')"));
   assert.ok(markdown.includes('<VisualBlock'));
   assert.ok(notes.includes("startsWith('visual')"));
   assert.ok(notes.includes('<VisualBlock'));
   assert.ok(tutor.includes('VISUAL_PROMPT'));
+  assert.ok(tutor.includes('VISUAL_REQUIRED_PROMPT'));
+  assert.ok(tutor.includes('visualRequired'));
+  assert.ok(route.includes('needsVisualSpec'));
+  assert.ok(route.includes('const visualRequired'));
+  assert.ok(route.includes('visualRequired,'));
+  assert.ok(route.includes('RECORDATORIO FINAL'));
+  assert.ok(markdown.includes("import dynamic from 'next/dynamic'"));
+  assert.ok(markdown.includes('ssr: false'));
 });
 
 console.log(`\n  ${checks} comprobaciones en verde.\n`);

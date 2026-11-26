@@ -71,7 +71,13 @@ export default function PauExamRunner({
       typeof initialAnswers[index] === 'string' ? initialAnswers[index] : ''
     )
   );
-  const [now, setNow] = useState(() => Date.now());
+  /**
+   * Arranca en la hora de inicio de la sesión, no en `Date.now()`: ese valor es
+   * distinto en el servidor y en el navegador y hacía que el cronómetro se
+   * pintara con un desfase de hidratación. El efecto de abajo lo pone al día en
+   * el primer tick.
+   */
+  const [now, setNow] = useState(() => startedAt.current);
   const [submitting, setSubmitting] = useState(false);
   const [grade, setGrade] = useState<ExamGrade | null>(null);
   const [selfMode, setSelfMode] = useState<{ active: boolean; message: string }>({
@@ -123,6 +129,7 @@ export default function PauExamRunner({
 
   /* ---- Cronómetro ---- */
   useEffect(() => {
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);

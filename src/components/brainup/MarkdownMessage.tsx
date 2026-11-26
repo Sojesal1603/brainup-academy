@@ -1,11 +1,27 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
+import dynamic from 'next/dynamic';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { Check, Copy } from 'lucide-react';
 import { scanInline } from '@/lib/inlineEmphasis';
-import VisualBlock from '@/components/visual/VisualBlock';
+
+/**
+ * La figura depende del DOM, de `useId` y de `localStorage` para recordar los
+ * pasos validados. No se renderiza en el servidor: así el chat nunca compara un
+ * SVG de SSR con el de hidratación y el primer pintado no paga el parseo del
+ * `VisualSpec`. El hueco reservado evita el salto de layout.
+ */
+const VisualBlock = dynamic(() => import('@/components/visual/VisualBlock'), {
+  ssr: false,
+  loading: () => (
+    <div
+      aria-hidden="true"
+      className="my-3 h-40 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]"
+    />
+  ),
+});
 
 /**
  * Renderizador de mensajes del Tutor IA: Markdown ligero + fórmulas LaTeX.
@@ -202,7 +218,7 @@ const HEADING_SIZES: Record<number, string> = {
   6: 'text-xs font-semibold text-slate-300',
 };
 
-export default function MarkdownMessage({
+function MarkdownMessage({
   content,
   className,
 }: {
@@ -459,3 +475,10 @@ export default function MarkdownMessage({
 
   return <div className={`space-y-2.5 text-[13px] ${className ?? ''}`}>{blocks}</div>;
 }
+
+/**
+ * El historial del chat se repinta entero en cada delta del stream. Sin esta
+ * memoización, todos los mensajes viejos vuelven a recorrer Markdown y KaTeX
+ * aunque su contenido no haya cambiado; con ella, solo se repinta el que crece.
+ */
+export default memo(MarkdownMessage);

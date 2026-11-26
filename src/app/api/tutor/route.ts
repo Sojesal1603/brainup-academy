@@ -34,6 +34,7 @@ import {
   type NoteRowForTutor,
 } from '@/lib/tutorNotes';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
+import { needsVisualSpec } from '@/lib/visual/prompt';
 import { detectOpenNoteIntent, matchNoteIntent } from '@/lib/noteIntent';
 import {
   MAX_INLINE_ATTACHMENT_BYTES,
@@ -646,6 +647,10 @@ async function handleTutor(
       );
     }
 
+    // Se decide antes de construir el prompt: la petición de un trazado deja
+    // de ser una sugerencia y el modelo recibe además un recordatorio final.
+    const visualRequired = needsVisualSpec(message, agent.subject.name);
+
     let systemInstruction = buildTutorSystemPrompt(
       {
         name: agent.name,
@@ -698,6 +703,7 @@ async function handleTutor(
         requestedNote: requestedNoteHint?.key ? requestedNoteHint : null,
         memory: memoryBlock,
         coach: coachBlock,
+        visualRequired,
         documents: documentsBlock,
       }
     );
@@ -707,6 +713,10 @@ async function handleTutor(
       hasSources: retrievalPlan.chunks.length > 0,
       corpusBlocks: retrievalPlan.corpusBlocks,
     })}`;
+
+    if (visualRequired) {
+      systemInstruction += `\n\nRECORDATORIO FINAL PARA ESTE TURNO: el alumno ha pedido un trazado, una construcción o una imagen paso a paso. La respuesta DEBE incluir una valla \`\`\`visual con JSON válido antes o después del texto. No la omitas aunque la explicación sea breve.`;
+    }
 
     // Se registra si el catedrático ha recibido memoria: es la prueba de que lo
     // hablado ayer está entrando en el prompt de hoy (lo lee la verificación).
