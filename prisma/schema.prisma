@@ -84,6 +84,9 @@ model UserProfile {
   // ciegas: es lo que preguntaba el alumno cuando decía «me falta una clase».
   timetableComplete    Boolean        @default(false)
   studyMode            String         @default("athlete") // "comfort" o "athlete"
+  // Orden explícito de proveedores de IA elegido por el alumno: ["groq","gemini"].
+  // Solo afecta a SUS claves; el router nunca completa con proveedores ajenos.
+  providerOrderJson    String?
   streakCurrent        Int            @default(0)
   streakBest           Int            @default(0)
   // Experiencia acumulada de los retos semanales (se deriva el nivel, no se
@@ -171,9 +174,11 @@ model UserAiKey {
   id            String      @id @default(cuid())
   userId        String
   user          UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  provider      String      @default("gemini") // gemini | groq | openrouter | nvidia
+  provider      String      @default("gemini") // id del catálogo (gemini, groq, openai, anthropic, custom…)
   ciphertext    String
   last4         String
+  // Solo para proveedores compatibles OpenAI con endpoint propio: HTTPS validada.
+  baseUrl       String?
   // sin_comprobar | valida | invalida | sin_cuota
   status        String      @default("sin_comprobar")
   lastCheckedAt DateTime?
@@ -488,6 +493,10 @@ model AiMessage {
   // Propuesta de apunte que el catedrático deja pendiente de tu permiso
   // (JSON: { unitNumber, title, reason }).
   noteProposal   String?
+  // Cobertura y citas verificadas del turno en modo estudio (StudyAnswerMeta).
+  // Se guarda con la respuesta para que la franja sobreviva a una recarga; si
+  // el turno fue de curiosidad o una versión anterior, queda null.
+  studyMetaJson  String?
   attachments    AiAttachment[] // Capturas, PDFs y archivos que le enseñas al catedrático
   createdAt      DateTime       @default(now())
 

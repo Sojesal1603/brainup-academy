@@ -30,6 +30,12 @@ import type { StudyMode } from './types';
 import { toDate, type DateLike } from './selfHealing';
 import { parseStoredConstraints } from './planner/constraintStore';
 import {
+  buildStudentState,
+  directorReplanReason,
+  type StudentState,
+} from './director/studentState';
+import { revalidatePlanCache } from './planCache';
+import {
   maxMinutesFromConstraints,
   subjectAllowedByConstraints,
 } from './planner/constraints';
@@ -226,6 +232,7 @@ interface PlanningContext {
   daysSinceStudy: number | null;
   dueReviews: number;
   errorsOpen: number;
+  streakCurrent: number;
   hasTemario: boolean;
 }
 
@@ -514,6 +521,7 @@ async function loadPlanningContext(userId: string, now: Date): Promise<PlanningC
     daysSinceStudy,
     dueReviews,
     errorsOpen: errorsOpenTotal,
+    streakCurrent: Math.max(0, user?.streakCurrent ?? 0),
     hasTemario: candidates.length > 0,
   };
 }
@@ -886,6 +894,8 @@ export interface DayPlan {
   calibration: Record<string, number>;
   /** Reprogramación de lo que se quedó a medias hoy mismo. */
   paused: DayPlanSessionView[];
+  /** Estado compartido y decisión determinista del director (sin IA). */
+  director: StudentState;
 }
 
 function isoDay(date: Date): string {
@@ -975,6 +985,45 @@ export async function computeDayPlan(
 
   const recovery = recoveryPlan(ctx.daysSinceStudy);
   const dueCount = ctx.dueReviews;
+  const director = buildStudentState({
+    now,
+    dayKey: isoDay(todayStart),
+    timezone: ctx.timezone,
+    energy: ctx.energy,
+    energyChosen: ctx.energyChosen,
+    availableMinutes: availability.availableMinutes,
+    plannedMinutes: plannedMinutes + pendingMinutes,
+    completedMinutes,
+    studiedMinutes: ctx.studiedMinutesToday,
+    dueReviews: dueCount,
+    errorsOpen: ctx.errorsOpen,
+    streakCurrent: ctx.streakCurrent,
+    studiedToday: ctx.studiedMinutesToday > 0,
+    rescheduledBlocks: sessions.filter((session) => session.origin === 'reprogramada').length,
+    pausedBlocks: paused.length,
+    staleBlocks: 0,
+    units: ctx.candidates.map((candidate) => ({
+      id: candidate.topicId,
+      title: candidate.topicTitle,
+      subjectId: candidate.subjectId,
+      subjectName: candidate.subjectName,
+      subjectColor: candidate.subjectColor,
+      mastery: candidate.mastery,
+      measured: candidate.measured,
+      status: candidate.status,
+      errorsOpen: candidate.errorsOpen,
+      daysToExam: candidate.daysToExam,
+      examTitle: candidate.examTitle,
+    })),
+    sessions: sessions.map((session) => ({
+      id: session.id,
+      subjectId: session.subjectId,
+      topicTitle: session.topicTitle,
+      durationMinutes: session.durationMinutes,
+      isCompleted: session.isCompleted,
+      status: session.status,
+    })),
+  });
 
   const headline =
     active.length > 0
@@ -1021,6 +1070,7 @@ export async function computeDayPlan(
     emptyReason,
     calibration: ctx.calibration,
     paused,
+    director,
   };
 }
 
@@ -1091,10 +1141,30 @@ export async function ensureTodayPlan(userId: string, now: Date = new Date()): P
           },
         });
 
+        // Desviación real: bloques de días anteriores que nadie cerró. El
+        // director los devuelve a hoy si caben dentro del mismo lock; si no,
+        // `persistDayPlan` los cierra como abandonados para no acumular deuda.
+        const stale = await tx.studyBlock.count({
+          where: {
+            userId,
+            date: { lt: todayStart },
+            isCompleted: false,
+            status: { in: ['pendiente', 'parcial', 'en_curso'] },
+            objective: { not: null },
+          },
+        });
+
+        const reason = directorReplanReason({
+          planStatus: state?.status ?? null,
+          liveBlocks: live,
+          staleBlocks: stale,
+        });
+
         // Un plan invalidado se reconstruye aunque queden bloques: `persistDayPlan`
         // solo sustituye los pendientes y respeta lo empezado/hecho/abandonado.
-        if (live === 0 || state?.status === 'invalidated') {
+        if (reason) {
           await persistDayPlan(userId, { day: todayStart, now });
+          console.log(`[director] reajuste del plan: ${reason}`);
         }
 
         await tx.planState.upsert({
@@ -1109,6 +1179,9 @@ export async function ensureTodayPlan(userId: string, now: Date = new Date()): P
             status: 'active',
             decidedAt: new Date(),
             invalidatedAt: null,
+            ...(reason === 'atraso'
+              ? { invalidationReason: 'reajuste automático por bloques atrasados' }
+              : {}),
             version: { increment: 1 },
           },
         });
@@ -1127,6 +1200,9 @@ export async function ensureTodayPlan(userId: string, now: Date = new Date()): P
 /** Fuerza la regeneración de hoy (botón «Recalcular»). */
 export async function regenerateTodayPlan(userId: string, now: Date = new Date()): Promise<DayPlan> {
   await persistDayPlan(userId, { day: startOfDay(now), now, force: true });
+  // El botón «Recalcular» no pasa por `invalidatePlan`: purga aquí para que la
+  // siguiente lectura no sirva la foto anterior.
+  revalidatePlanCache();
   return computeDayPlan(userId, now);
 }
 

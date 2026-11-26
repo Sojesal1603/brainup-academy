@@ -1,8 +1,11 @@
 import { NextResponse, after } from 'next/server';
-import { withTransaction } from '@/lib/prisma';
+import { publicTutorError } from '@/lib/tutorPublicError';
+import { TUTOR_STREAM_STATUS_LINES, tutorSseFrame, type TutorStreamEvent } from '@/lib/tutorStream';
+import { turnRowId } from '@/lib/tutorTurnKey';
 import { currentTenant } from '@/lib/tenantContext';
 import { loadMemoryBlock, rememberConversation } from '@/lib/agentMemory';
 import { polishMemoryWithAi } from '@/lib/agentMemoryPolish';
+import { loadCoachPromptBlock, refreshCoachAdvice } from '@/lib/coach/store';
 import {
   TUTOR_MAX_HISTORY_MESSAGES,
   buildTutorSystemPrompt,
@@ -17,7 +20,6 @@ import {
 import { buildUserInputStep, modelSupportsVision } from '@/lib/aiEngine';
 import { normalizeSubjectMode } from '@/lib/subjects/modes';
 import { activateAiCredentials, ensureAiAccess } from '@/lib/ai/access';
-import { providerLabel as providerDisplayName } from '@/lib/ai/credentials';
 import { buildLocalTutorReply, LOCAL_TUTOR_PROVIDER } from '@/lib/tutorFallback';
 import { isLocalModeReply } from '@/lib/setupFallback';
 import {
@@ -44,6 +46,22 @@ import { buildDocumentContext, parsePageRequests, type IndexedDoc } from '@/lib/
 import { startOfDay } from '@/lib/srs';
 import { readTodayPlanConstraints } from '@/lib/planner/constraintStore';
 import { openDocument } from '@/lib/tutorDocuments';
+import { loadSourceChunksForSubject } from '@/lib/study/retrievalServer';
+import {
+  chunksFromNote,
+  chunksFromUpload,
+  isConversationalQuery,
+  normalizeRetrievalMode,
+  normalizeTutorScope,
+  selectRetrievalContext,
+} from '@/lib/study/retrieval';
+import {
+  buildStrictOutOfScopeReply,
+  buildTutorScopeLayer,
+  parseStudyMeta,
+  validateStudyAnswer,
+  type StudyAnswerMeta,
+} from '@/lib/study/answerContract';
 import {
   syncTutorWithPlanner,
   type TutorPlannerSyncResult,
@@ -71,6 +89,18 @@ interface TutorRequestBody {
   fresh?: unknown;
   /** Modo de trabajo del turno (Paso 14): diagnostico, entrenar, simulacro… */
   mode?: unknown;
+  /**
+   * Ámbito de fuentes (Fase 4): `estudio` (cerrado a su material), `curiosidad`
+   * (abierto y etiquetado) o `examen` (sin pistas). Por defecto, `estudio`.
+   */
+  scope?: unknown;
+  /**
+   * Clave idempotente que genera el navegador UNA vez por turno y reutiliza en
+   * los reintentos. Con ella, el mensaje del alumno tiene un id determinista y
+   * un reintento tras perder la conexión no duplica ni el mensaje ni la
+   * respuesta.
+   */
+  clientKey?: unknown;
 }
 
 interface StoredAttachmentRow {
@@ -187,6 +217,21 @@ function toChatMessages(messages: StoredMessage[]): ChatMessage[] {
     })
 }
 
+/** ¿El cliente pide una respuesta en streaming? */
+function wantsEventStream(request: Request): boolean {
+  return (request.headers.get('accept') ?? '').includes('text/event-stream');
+}
+
+/** Violación de clave única de Prisma (reintento idempotente). */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
+}
+
 /**
  * La ruta habla con Prisma y con los proveedores de IA: runtime de Node.
  *
@@ -197,7 +242,23 @@ function toChatMessages(messages: StoredMessage[]): ChatMessage[] {
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+/**
+ * POST /api/tutor
+ *
+ * Si el cliente manda `Accept: text/event-stream`, la respuesta es SSE: el
+ * turno empieza a contestar en el acto, con latidos mientras la IA trabaja, y
+ * el texto llega en deltas. Los clientes antiguos (y las verificaciones)
+ * siguen recibiendo JSON si no piden streaming.
+ */
 export async function POST(request: Request) {
+  if (wantsEventStream(request)) return streamTutorTurn(request);
+  return handleTutor(request);
+}
+
+async function handleTutor(
+  request: Request,
+  options: { defer?: (work: () => Promise<void>) => void } = {}
+) {
   const { user: authUser, tenant } = await currentTenant();
   // Sin clave propia (y sin estar en PLATFORM_AI_USER_IDS) no se llama al
   // motor: 402 `ai_key_required` antes de gastar ni un token.
@@ -226,8 +287,15 @@ export async function POST(request: Request) {
       : null;
   const freshConversation = body.fresh === true;
   const mode = normalizeSubjectMode(body.mode);
+  const scope = normalizeTutorScope(body.scope);
+  const retrievalMode = normalizeRetrievalMode();
   // Por defecto los apuntes se comparten: es justo lo que el alumno ha pedido.
   const shareNotes = body.shareNotes === undefined ? true : body.shareNotes !== false;
+  const rawClientKey = typeof body.clientKey === 'string' ? body.clientKey.trim() : '';
+  const clientKey = rawClientKey.length > 0 && rawClientKey.length <= 200 ? rawClientKey : null;
+  /** Ids deterministas del turno: el reintento cae en las MISMAS filas. */
+  const turnUserRowId = clientKey ? turnRowId(authUser.id, clientKey, 'user') : null;
+  const turnReplyRowId = clientKey ? turnRowId(authUser.id, clientKey, 'reply') : null;
 
   const attachments = validateAttachments(body.attachments);
   if (!attachments.ok) {
@@ -333,9 +401,16 @@ export async function POST(request: Request) {
       historyRows,
       noteRows,
       notesTotal,
+      // Corpus persistente de la materia: documentos indexados del alumno.
+      // Si la consulta falla, el chat sigue con sus notas y sus adjuntos; no se
+      // convierte un fallo de lectura en una respuesta inventada.
+      sourceChunks,
       // La memoria entre días: lo que este catedrático ya habló con él en esta
       // materia. Cadena vacía el primer día (y entonces no se añade nada al prompt).
       memoryBlock,
+      // El ajuste pedagógico que dejó el coach en segundo plano. Se lee, no se
+      // calcula aquí: este turno no espera al análisis de patrones.
+      coachBlock,
       planConstraints,
     ] = await Promise.all([
       tenant.userProfile.findUnique({ where: { id: authUser.id } }),
@@ -373,7 +448,12 @@ export async function POST(request: Request) {
         },
       }),
       tenant.aiMessage.findMany({
-        where: { conversationId: activeConversation.id },
+        where: {
+          conversationId: activeConversation.id,
+          // En un reintento, el mensaje de ESTE turno ya está guardado: no debe
+          // entrar en el historial y repetirse delante del modelo.
+          ...(turnUserRowId ? { id: { not: turnUserRowId } } : {}),
+        },
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
@@ -415,7 +495,12 @@ export async function POST(request: Request) {
             )
         : Promise.resolve([] as NoteRowForTutor[]),
       tenant.note.count({ where: { topic: { subjectId: agent.subjectId } } }),
+      loadSourceChunksForSubject(authUser.id, agent.subjectId).catch((error) => {
+        console.warn('[tutor] no se ha podido leer el corpus persistente:', error);
+        return [];
+      }),
       loadMemoryBlock(authUser.id, agent.id),
+      loadCoachPromptBlock(authUser.id, agent.subjectId),
       // Si las restricciones no se pueden leer, el chat sigue: el contexto es
       // útil, no una condición para contestar.
       readTodayPlanConstraints(authUser.id)
@@ -507,9 +592,53 @@ export async function POST(request: Request) {
           ? 'Te he dado un documento. Dime de qué va, qué es lo esencial y por dónde empezar.'
           : message;
 
-    const documentsBlock = buildDocumentContext(documentIndexes, questionForModel, {
-      ...(requestedPages.length > 0 ? { pages: requestedPages } : {}),
-    })
+    // Corpus de este turno: documentos persistidos + notas del cuaderno +
+    // documentos que acaba de subir. El filtro por dueño se repite dentro de
+    // `selectRetrievalContext` aunque todas las fuentes ya vengan acotadas.
+    const noteChunks = shareNotes
+      ? noteRows.flatMap((note) =>
+          chunksFromNote({
+            id: note.id,
+            userId: authUser.id,
+            title: note.title,
+            topicTitle: note.topicTitle,
+            content: note.content,
+          })
+        )
+      : [];
+    const uploadChunks = documentIndexes.flatMap((doc) =>
+      chunksFromUpload({ userId: authUser.id, doc })
+    );
+    // Un turno sin texto (solo adjunto) se lee en orden; un saludo no se
+    // convierte en «fuera de temario». En ambos casos no se inventa contenido.
+    const retrievalQuery = message.trim().length > 0 ? message : '';
+    const allowNoMatch = message.trim().length === 0 || isConversationalQuery(message);
+    const retrievalPlan = selectRetrievalContext({
+      userId: authUser.id,
+      chunks: [...sourceChunks, ...noteChunks, ...uploadChunks],
+      query: retrievalQuery,
+      scope,
+      mode: retrievalMode,
+      pages: requestedPages,
+      budgetChars: 30_000,
+      maxChunks: 20,
+      allowNoMatch,
+    });
+
+    // En estudio manda el contrato de citas; en curiosidad se conserva el
+    // contexto de documentos de siempre (exploración abierta).
+    const documentsBlock =
+      scope === 'estudio'
+        ? retrievalPlan.prompt
+        : buildDocumentContext(documentIndexes, questionForModel, {
+            ...(requestedPages.length > 0 ? { pages: requestedPages } : {}),
+          });
+
+    if (scope === 'estudio') {
+      console.log(
+        `[tutor] estudio: ${retrievalPlan.corpusBlocks} bloques en la materia · ${retrievalPlan.retrievedBlocks} enviados · modo ${retrievalPlan.mode}${retrievalPlan.outOfScope ? ` · fuera de ámbito (${retrievalPlan.reason})` : ''}`
+      );
+    }
 
     if (documentIndexes.length > 0) {
       console.log(
@@ -568,9 +697,16 @@ export async function POST(request: Request) {
         notesIndex: noteIndex,
         requestedNote: requestedNoteHint?.key ? requestedNoteHint : null,
         memory: memoryBlock,
+        coach: coachBlock,
         documents: documentsBlock,
       }
     );
+
+    systemInstruction += `\n\n${buildTutorScopeLayer({
+      scope,
+      hasSources: retrievalPlan.chunks.length > 0,
+      corpusBlocks: retrievalPlan.corpusBlocks,
+    })}`;
 
     // Se registra si el catedrático ha recibido memoria: es la prueba de que lo
     // hablado ayer está entrando en el prompt de hoy (lo lee la verificación).
@@ -639,6 +775,115 @@ export async function POST(request: Request) {
     }
 
     /**
+     * PERSISTENCIA ANTES DE INFERENCIA.
+     *
+     * El mensaje del alumno (y sus adjuntos) se guardan ANTES de llamar al
+     * modelo. Si la IA tarda, falla o el móvil pierde la conexión, el turno ya
+     * está en la base y el reintento con la misma `clientKey` cae en la misma
+     * fila en vez de duplicarla. Si la respuesta anterior ya existe, se devuelve
+     * tal cual: el alumno ve su contestación sin gastar otra llamada.
+     */
+    // Los adjuntos que ya estaban en disco (subida en streaming) no se reescriben:
+    // se apunta su ruta y su peso, que es lo que hace falta para reabrirlos.
+    const stored = [
+      ...(validAttachments.length > 0 ? await storeAttachments(validAttachments) : []),
+      ...uploads.map((upload) => ({
+        name: upload.name,
+        mimeType: upload.mimeType,
+        sizeBytes: upload.sizeBytes,
+        localPath: upload.path,
+      })),
+    ];
+
+    let userMessageRow = turnUserRowId
+      ? await tenant.aiMessage.findUnique({
+          where: { id: turnUserRowId },
+          select: { id: true, createdAt: true },
+        })
+      : null;
+
+    if (!userMessageRow) {
+      try {
+        userMessageRow = await tenant.aiMessage.create({
+          data: {
+            ...(turnUserRowId ? { id: turnUserRowId } : {}),
+            userId: authUser.id,
+            conversationId: activeConversation.id,
+            role: 'user',
+            content: message,
+          },
+          select: { id: true, createdAt: true },
+        });
+
+        if (stored.length > 0) {
+          await tenant.aiAttachment.createMany({
+            data: stored.map((attachment) => ({
+              userId: authUser.id,
+              messageId: userMessageRow!.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+              localPath: attachment.localPath || null,
+            })),
+          });
+        }
+      } catch (error) {
+        // Otro reintento se nos ha adelantado: se reutiliza su fila.
+        if (!turnUserRowId || !isUniqueViolation(error)) throw error;
+        userMessageRow = await tenant.aiMessage.findUnique({
+          where: { id: turnUserRowId },
+          select: { id: true, createdAt: true },
+        });
+        if (!userMessageRow) throw error;
+      }
+    }
+
+    if (turnUserRowId && turnReplyRowId) {
+      const existingReply = await tenant.aiMessage.findUnique({
+        where: { id: turnReplyRowId },
+        select: {
+          id: true,
+          content: true,
+          stepStage: true,
+          studyMetaJson: true,
+          createdAt: true,
+        },
+      });
+      if (existingReply && existingReply.content.trim().length > 0) {
+        return NextResponse.json({
+          conversationId: activeConversation.id,
+          replayed: true,
+          degraded: false,
+          measured: null,
+          attachments: stored.map((attachment) => ({
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+          })),
+          attachmentsReadable: true,
+          unreadable: [],
+          documents: [],
+          notRead: [],
+          sharedNotes: [],
+          notesTotal,
+          scope,
+          study: parseStudyMeta(existingReply.studyMetaJson),
+          plannerSync: null,
+          noteProposal: null,
+          openNote: null,
+          userMessageId: userMessageRow.id,
+          reply: {
+            id: existingReply.id,
+            role: 'assistant',
+            content: existingReply.content,
+            stage: existingReply.stepStage,
+            createdAt: existingReply.createdAt,
+          },
+        });
+      }
+    }
+
+    /**
      * EL CATEDRÁTICO NO SE QUEDA EN UN ERROR.
      *
      * Si los tres proveedores gratuitos están secos o saturados (y no hay motor
@@ -649,8 +894,39 @@ export async function POST(request: Request) {
      */
     let reply: TutorReply;
     let degraded = false;
+    let studyMeta: StudyAnswerMeta | null = null;
 
-    try {
+    if (scope === 'estudio' && retrievalPlan.outOfScope) {
+      // Degradación honesta ANTES de llamar: si no hay material o nada se parece
+      // a la pregunta, no se gasta una llamada ni se completa con conocimiento
+      // general. La UI ofrece cambiar a curiosidad.
+      reply = {
+        text: buildStrictOutOfScopeReply(retrievalPlan.reason),
+        stage: null,
+        level: null,
+        proposal: null,
+        openNote: null,
+        steps: [],
+        model: 'catedrático local',
+        provider: LOCAL_TUTOR_PROVIDER,
+      };
+      studyMeta = {
+        scope: 'estudio',
+        outOfScope: true,
+        status: 'sin_respaldo',
+        coverage: {
+          withCitation: 0,
+          total: 0,
+          ratio: 0,
+          citedBlocks: 0,
+          retrievedBlocks: 0,
+          corpusBlocks: retrievalPlan.corpusBlocks,
+        },
+        sources: [],
+        invalidCitations: 0,
+        verifiedCitations: 0,
+      };
+    } else try {
       // Se sondea antes de gastar el turno: en serverless cada instancia arranca
       // sin saber si hay modelo local, y sin esto un Ollama levantado se
       // ignoraba y el alumno recibía un «no hay IA» falso.
@@ -673,6 +949,19 @@ export async function POST(request: Request) {
         history,
       });
       reply = parseTutorResult(result);
+
+      if (scope === 'estudio') {
+        const checked = validateStudyAnswer({
+          raw: reply.text,
+          userId: authUser.id,
+          allowed: retrievalPlan.allowed,
+          meta: retrievalPlan.chunkMeta,
+          retrievedBlocks: retrievalPlan.retrievedBlocks,
+          corpusBlocks: retrievalPlan.corpusBlocks,
+        });
+        reply.text = checked.markdown;
+        studyMeta = checked.meta;
+      }
     } catch (error) {
       const recoverable =
         error instanceof TutorError &&
@@ -711,12 +1000,6 @@ export async function POST(request: Request) {
         pendingErrors,
         courseUnit: courseUnit?.title ?? null,
         noteTitles: sharedNotes.map((note) => note.title),
-        // Si el alumno tiene clave propia, el aviso nombra SU proveedor: antes
-        // decía «los modelos gratuitos están saturados» aunque la clave fuera
-        // suya, que es justo lo que confundía.
-        ownKeyProviders: ai.credentials
-          .filter((credential) => credential.source === 'usuario')
-          .map((credential) => providerDisplayName(credential.provider)),
       });
       reply = {
         text:
@@ -734,6 +1017,26 @@ export async function POST(request: Request) {
       degraded = true;
     }
 
+    // Si el turno de estudio acabó en respaldo local (sin IA), no hay citas que
+    // verificar: se declara cobertura cero en vez de dejar la interfaz muda.
+    if (scope === 'estudio' && !studyMeta) {
+      studyMeta = {
+        scope: 'estudio',
+        outOfScope: false,
+        status: 'sin_respaldo',
+        coverage: {
+          withCitation: 0,
+          total: 0,
+          ratio: 0,
+          citedBlocks: 0,
+          retrievedBlocks: retrievalPlan.retrievedBlocks,
+          corpusBlocks: retrievalPlan.corpusBlocks,
+        },
+        sources: [],
+        invalidCitations: 0,
+        verifiedCitations: 0,
+      };
+    }
 
     let resolvedProposal = reply.proposal
       ? resolveNoteUnit(subjectUnits, {
@@ -790,47 +1093,19 @@ export async function POST(request: Request) {
           }
         : null;
 
-    // Los adjuntos que ya estaban en disco (subida en streaming) no se reescriben:
-    // se apunta su ruta y su peso, que es lo que hace falta para reabrirlos.
-    const stored = [
-      ...(validAttachments.length > 0 ? await storeAttachments(validAttachments) : []),
-      ...uploads.map((upload) => ({
-        name: upload.name,
-        mimeType: upload.mimeType,
-        sizeBytes: upload.sizeBytes,
-        localPath: upload.path,
-      })),
-    ];
-
-    // El turno se guarda en una transacción interactiva y SIN reintento: son
-    // `create` y, si la conexión cae justo después de confirmar, repetirlos
-    // duplicaría el mensaje del alumno y la respuesta. La transacción se
-    // revierte entera si falla antes de confirmar.
-    const [userMessage, assistantMessage] = await withTransaction(async (tx) => {
-      const user = await tx.aiMessage.create({
+    // La respuesta se guarda con un id determinista cuando hay `clientKey`: si
+    // dos reintentos llegan a la vez, el segundo recupera la respuesta ya escrita
+    // en vez de crear un mensaje duplicado.
+    let assistantMessage: {
+      id: string;
+      content: string;
+      stepStage: string | null;
+      createdAt: Date;
+    };
+    try {
+      assistantMessage = await tenant.aiMessage.create({
         data: {
-          userId: authUser.id,
-          conversationId: activeConversation.id,
-          role: 'user',
-          content: message,
-        },
-      })
-
-      if (stored.length > 0) {
-        await tx.aiAttachment.createMany({
-          data: stored.map((attachment) => ({
-            userId: authUser.id,
-            messageId: user.id,
-            name: attachment.name,
-            mimeType: attachment.mimeType,
-            sizeBytes: attachment.sizeBytes,
-            localPath: attachment.localPath || null,
-          })),
-        })
-      }
-
-      const assistant = await tx.aiMessage.create({
-        data: {
+          ...(turnReplyRowId ? { id: turnReplyRowId } : {}),
           userId: authUser.id,
           conversationId: activeConversation.id,
           role: 'assistant',
@@ -848,13 +1123,29 @@ export async function POST(request: Request) {
                 unitNumber: correctedProposal?.unitNumber ?? reply.proposal.unitNumber,
               })
             : null,
-          // Solo Gemini devuelve pasos crudos reutilizables en el siguiente turno.
+          // Solo los proveedores que devuelven pasos crudos los guardan.
           rawStepsJson: reply.steps.length > 0 ? JSON.stringify(reply.steps) : null,
+          // La franja de cobertura se guarda con la respuesta: al recargar, la
+          // interfaz reconstruye las mismas métricas verificadas del turno.
+          studyMetaJson: studyMeta ? JSON.stringify(studyMeta) : null,
         },
-      })
-
-      return [user, assistant] as const;
-    }, { tenantId: authUser.id });
+        select: { id: true, content: true, stepStage: true, createdAt: true },
+      });
+    } catch (error) {
+      if (!turnReplyRowId || !isUniqueViolation(error)) throw error;
+      const existing = await tenant.aiMessage.findUnique({
+        where: { id: turnReplyRowId },
+        select: {
+          id: true,
+          content: true,
+          stepStage: true,
+          studyMetaJson: true,
+          createdAt: true,
+        },
+      });
+      if (!existing) throw error;
+      assistantMessage = existing;
+    }
 
     // Medición real que aporta el catedrático: [[nivel:U4=55]] al final del
     // mensaje. Se anota como nivel diagnosticado, nunca como valor de fábrica.
@@ -937,7 +1228,10 @@ export async function POST(request: Request) {
     // Lo hablado hoy se apunta como memoria DESPUÉS de contestar (`after`): el
     // alumno no espera a que el sistema escriba el recuerdo, y si esto falla la
     // respuesta ya está dada. Las reglas escriben siempre; el modelo solo pule.
-    after(async () => {
+    // En modo streaming el `after` del framework puede quedar fuera del ámbito
+    // de la petición: se ejecuta igual, sin retrasar el cierre del stream.
+    const defer = options.defer ?? after;
+    defer(async () => {
       try {
         const remembered = await rememberConversation(authUser.id, {
           scope: agent.id,
@@ -953,13 +1247,27 @@ export async function POST(request: Request) {
       } catch (error) {
         console.error('[memoria] no se pudo escribir la del catedrático:', error);
       }
+
+      // El coach se recalcula también fuera de la respuesta. Si falla, el chat
+      // sigue igual: en el peor caso se conserva el perfil anterior (caduca a
+      // los 14 días) o no se añade ningún ajuste.
+      try {
+        const coach = await refreshCoachAdvice(authUser.id, agent.subjectId, {
+          timezone: student?.timezone ?? null,
+        });
+        if (coach) {
+          console.log(
+            `[coach] ${coach.signals.length} señal(es) · ${coach.rigor}/${coach.explanationFocus} · ${coach.fingerprint}`
+          );
+        }
+      } catch (error) {
+        console.error('[coach] no se pudo actualizar el perfil pedagógico:', error);
+      }
     })
 
     return NextResponse.json({
       conversationId: activeConversation.id,
-      model: reply.model,
-      provider: reply.provider,
-      /** Contesta el respaldo local: el cliente puede avisar de que no hay IA. */
+      /** Contesta el respaldo local: el cliente puede ofrecer reintentar. */
       degraded,
       measured,
       attachments: stored.map((attachment) => ({
@@ -986,12 +1294,15 @@ export async function POST(request: Request) {
         topicLabel: note.topicLabel,
       })),
       notesTotal,
+      scope,
+      /** Contrato de citas y cobertura del turno (solo en modo estudio). */
+      study: studyMeta,
       /** Qué ha programado el diagnóstico en la agenda (null si no tocaba refuerzo). */
       plannerSync,
       noteProposal: correctedProposal,
       /** Documento guardado que el catedrático ha pedido proyectar al lado del chat. */
       openNote,
-      userMessageId: userMessage.id,
+      userMessageId: userMessageRow.id,
       reply: {
         id: assistantMessage.id,
         role: 'assistant',
@@ -1003,31 +1314,132 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('[tutor] Error inesperado:', error);
 
-    // Siempre JSON con forma de error: el cliente nunca debe recibir un HTML de
-    // pasarela ni una conexión cortada. Si el fallo es de la IA, se conserva su
-    // estado (429 cupo, 502 proveedor, 503 sin motor) y su mensaje, que ya está
-    // escrito para el alumno. El resto se cuenta como 500 sin filtrar detalles.
-    if (error instanceof TutorError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: error.message,
-          kind: error.kind ?? 'ia',
-          retryable: error.status === 429 || error.status >= 500,
-        },
-        { status: error.status, headers: { 'Cache-Control': 'no-store' } }
-      );
-    }
-
+    // Siempre JSON con forma de error, también en streaming: el cliente nunca
+    // recibe un HTML de pasarela ni una conexión cortada. El mensaje público es
+    // neutro (sin proveedor, modelo ni detalle de red); el detalle se queda en
+    // el log del servidor.
+    const failure = publicTutorError(error);
     return NextResponse.json(
       {
         ok: false,
-        error:
-          'El catedrático no ha podido responder por un fallo del servidor. Tu mensaje no se ha perdido: vuelve a intentarlo en unos segundos.',
-        kind: 'servidor',
-        retryable: true,
+        error: failure.message,
+        retryable: failure.retryable,
       },
-      { status: 500, headers: { 'Cache-Control': 'no-store' } }
+      { status: failure.status, headers: { 'Cache-Control': 'no-store' } }
     );
   }
+}
+
+/**
+ * Respuesta SSE del mismo turno.
+ *
+ * El `POST` devuelve la cabecera al instante y el trabajo real sigue dentro del
+ * stream: latidos cada 15 s (para que ni el móvil ni la pasarela la den por
+ * muerta) y frases de estado pedagógicas mientras el catedrático prepara la
+ * respuesta. El texto final se entrega en `delta` para que aparezca de forma
+ * fluida en vez de en un bloque seco.
+ *
+ * Los deltas se generan al recibir la respuesta completa del motor: es
+ * transporte en streaming, no tokens del proveedor. El contrato de la UI es el
+ * mismo y el alumno ve la respuesta escribirse; cuando el motor exponga tokens,
+ * solo cambia esta función.
+ */
+async function streamTutorTurn(request: Request): Promise<Response> {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+
+      const send = (event: TutorStreamEvent, data: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(tutorSseFrame(event, data)));
+        } catch {
+          // El alumno ha cerrado la pestaña: el turno sigue y se guarda igual.
+          closed = true;
+        }
+      };
+
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // Ya estaba cerrado.
+        }
+      };
+
+      send('open', { ok: true, academy: 'BrainUp Academy' });
+
+      const heartbeat = setInterval(() => send('heartbeat', { at: Date.now() }), 15_000);
+      let statusIndex = 0;
+      const status = setInterval(() => {
+        send('status', {
+          text:
+            TUTOR_STREAM_STATUS_LINES[statusIndex % TUTOR_STREAM_STATUS_LINES.length],
+        });
+        statusIndex += 1;
+      }, 4_000);
+
+      void (async () => {
+        try {
+          const response = await handleTutor(request, {
+            defer: (work) => {
+              void work().catch((error) =>
+                console.error('[tutor] memoria en segundo plano:', error)
+              );
+            },
+          });
+          const data = (await response.json().catch(() => null)) as
+            | { reply?: { content?: string }; error?: string; retryable?: boolean }
+            | null;
+
+          if (!response.ok || !data?.reply) {
+            send('error', {
+              error:
+                data?.error ??
+                'El catedrático no ha podido responder en este momento. Tu mensaje no se ha perdido: vuelve a intentarlo.',
+              retryable: data?.retryable !== false,
+              status: response.status,
+            });
+            return;
+          }
+
+          const characters = Array.from(String(data.reply.content ?? ''));
+          if (characters.length > 0) {
+            const pieces = Math.min(40, Math.max(1, Math.ceil(characters.length / 90)));
+            const size = Math.max(1, Math.ceil(characters.length / pieces));
+            for (let index = 0; index < characters.length; index += size) {
+              send('delta', { text: characters.slice(index, index + size).join('') });
+              await new Promise((resolve) => setTimeout(resolve, 12));
+            }
+          }
+
+          send('done', data);
+        } catch (error) {
+          console.error('[tutor] stream interrumpido:', error);
+          send('error', {
+            error:
+              'El catedrático no ha podido responder en este momento. Tu mensaje no se ha perdido: vuelve a intentarlo.',
+            retryable: true,
+          });
+        } finally {
+          clearInterval(heartbeat);
+          clearInterval(status);
+          close();
+        }
+      })();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      // Netlify y otras pasarelas no deben acumular el stream.
+      'X-Accel-Buffering': 'no',
+    },
+  });
 }

@@ -10,8 +10,14 @@ import {
   deleteUserAiKey,
   markUserAiKeyStatus,
   readDecryptedUserKey,
+  readUserAiKeyBaseUrl,
   saveUserAiKey,
 } from '@/lib/ai/userKeyStore';
+import { saveProviderOrder, sanitizeProviderOrder } from '@/lib/ai/providerOrder';
+import {
+  getProviderDescriptor,
+  normalizeProviderBaseUrl,
+} from '@/lib/ai/providers';
 import type { AiKeyActionResult } from '@/lib/ai/keyStatus';
 import {
   USER_KEY_PROVIDER_LABEL,
@@ -37,6 +43,7 @@ import {
 const saveSchema = z.object({
   provider: z.string(),
   key: z.string().trim().min(1, 'Escribe la clave.').max(200, 'La clave es demasiado larga.'),
+  baseUrl: z.string().trim().max(300).optional(),
 });
 
 function storeFailure(error: unknown): AiKeyActionResult {
@@ -66,6 +73,7 @@ export async function saveMyAiKey(formData: FormData): Promise<AiKeyActionResult
   const parsed = saveSchema.safeParse({
     provider: String(formData.get('provider') ?? ''),
     key: String(formData.get('key') ?? ''),
+    baseUrl: String(formData.get('baseUrl') ?? ''),
   });
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'La clave no es válida.' };
@@ -79,6 +87,16 @@ export async function saveMyAiKey(formData: FormData): Promise<AiKeyActionResult
   const formatError = providerKeyFormatError(provider, parsed.data.key);
   if (formatError) return { ok: false, message: formatError };
 
+  // Un endpoint propio se valida ANTES de la red: HTTPS público, sin
+  // credenciales en la URL y sin direcciones privadas (SSRF).
+  const descriptor = getProviderDescriptor(provider);
+  let baseUrl: string | null = null;
+  if (descriptor?.requiresBaseUrl) {
+    const normalized = normalizeProviderBaseUrl(parsed.data.baseUrl ?? '');
+    if (!normalized.ok) return { ok: false, message: normalized.message };
+    baseUrl = normalized.url;
+  }
+
   // Se gasta un intento solo cuando la petición va a salir a la red: un error
   // de formato no debe consumir el cupo de comprobaciones.
   const limit = await consumeAiKeyAttempt(user.id);
@@ -91,7 +109,7 @@ export async function saveMyAiKey(formData: FormData): Promise<AiKeyActionResult
     };
   }
 
-  const check = await checkProviderKey(provider, parsed.data.key);
+  const check = await checkProviderKey(provider, parsed.data.key, { baseUrl: baseUrl ?? undefined });
   if (!check.persist) {
     return { ok: false, code: 'not_checked', message: check.error ?? 'No se pudo comprobar la clave.' };
   }
@@ -103,6 +121,7 @@ export async function saveMyAiKey(formData: FormData): Promise<AiKeyActionResult
       key: parsed.data.key,
       status: check.status,
       lastError: check.error,
+      baseUrl,
     });
     if (check.status === 'valida') await resetAiKeyAttempts(user.id);
     revalidatePath('/ajustes');
@@ -143,6 +162,25 @@ export async function deleteMyAiKey(providerRaw: string): Promise<AiKeyActionRes
   }
 }
 
+export async function saveMyProviderOrder(order: string[]): Promise<AiKeyActionResult> {
+  const user = await requireUser();
+  const clean = sanitizeProviderOrder(order);
+  try {
+    await saveProviderOrder(user.id, clean);
+    revalidatePath('/ajustes');
+    return {
+      ok: true,
+      message:
+        clean.length > 0
+          ? 'Orden de proveedores guardado. El próximo turno usará primero tu primera elección.'
+          : 'Orden restablecido al del catálogo.',
+    };
+  } catch (error) {
+    console.error('[ai] no se pudo guardar el orden de proveedores:', error instanceof Error ? error.message : 'error');
+    return { ok: false, message: 'No se pudo guardar el orden de proveedores. Inténtalo de nuevo.' };
+  }
+}
+
 export async function recheckMyAiKey(providerRaw: string): Promise<AiKeyActionResult> {
   const user = await requireUser();
   const read = readProvider(providerRaw);
@@ -170,7 +208,10 @@ export async function recheckMyAiKey(providerRaw: string): Promise<AiKeyActionRe
     return { ok: false, provider, message: `No tienes ninguna clave de ${label} guardada que comprobar.` };
   }
 
-  const check = await checkProviderKey(provider, key);
+  const storedBaseUrl = getProviderDescriptor(provider)?.requiresBaseUrl
+    ? await readUserAiKeyBaseUrl(user.id, provider)
+    : null;
+  const check = await checkProviderKey(provider, key, { baseUrl: storedBaseUrl ?? undefined });
   if (!check.persist) {
     return { ok: false, code: 'not_checked', provider, message: check.error ?? 'No se pudo comprobar la clave.' };
   }

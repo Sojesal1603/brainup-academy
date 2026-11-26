@@ -14,7 +14,7 @@ import modelsConfig from './models.json';
  * o cambiar sin aviso. En local se activa para probar modelos nuevos.
  */
 
-export type ModelProviderId = 'gemini' | 'groq' | 'openrouter' | 'nvidia';
+export type ModelProviderId = string;
 
 export interface ModelConfigEntry {
   id: string;
@@ -29,12 +29,10 @@ interface ProviderConfig {
   exclude?: string[];
 }
 
-const ENV_BY_PROVIDER: Record<ModelProviderId, string> = {
-  gemini: 'AI_GEMINI_MODELS',
-  groq: 'AI_GROQ_MODELS',
-  openrouter: 'AI_OPENROUTER_MODELS',
-  nvidia: 'AI_NVIDIA_MODELS',
-};
+/** `AI_<ID>_MODELS`, también para proveedores que se añadan al catálogo. */
+function envKeyFor(provider: string): string {
+  return `AI_${provider.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_MODELS`;
+}
 
 const RAW = modelsConfig as Record<string, ProviderConfig | string | undefined>;
 
@@ -62,7 +60,7 @@ export function isPreviewModel(id: string, entry?: ModelConfigEntry): boolean {
  */
 export function configuredModelChain(provider: ModelProviderId): ModelConfigEntry[] {
   const config = providerConfig(provider);
-  const envValue = (process.env[ENV_BY_PROVIDER[provider]] ?? '').trim();
+  const envValue = (process.env[envKeyFor(provider)] ?? '').trim();
   const fromEnv = envValue
     .split(/[\s,;]+/)
     .map((id) => id.trim())
@@ -109,7 +107,7 @@ export function modelConfigEntry(
  * configuración lo dice (o si es un modelo multimodal conocido, que es lo que
  * usa el motor local de Ollama).
  */
-export function modelHasVision(provider: ModelProviderId | 'ollama' | 'local', model: string): boolean {
+export function modelHasVision(provider: string, model: string): boolean {
   if (provider === 'gemini') return true;
   if (provider === 'ollama' || provider === 'local') {
     return /vision|llava|moondream|pixtral|qwen[\d.]*-?vl|gemma3|gpt-4o|claude-3/i.test(model);

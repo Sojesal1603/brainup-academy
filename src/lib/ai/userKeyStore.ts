@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { decryptSecret, encryptSecret, VaultError } from '../security/vault';
 import type { UserAiKeyStatus } from './keyStatus';
+import { invalidateUserAiProfile } from './profileCache';
 import { AiKeyStoreError } from './userKeyErrors';
 
 export { AiKeyStoreError } from './userKeyErrors';
@@ -44,29 +45,22 @@ function isStatus(value: string): value is UserAiKeyStatus {
   return ['sin_comprobar', 'valida', 'invalida', 'sin_cuota'].includes(value);
 }
 
-/** La clave descifrada, o `null` si el usuario no tiene ninguna guardada. */
-export async function readDecryptedUserKey(
-  userId: string,
-  provider: string
-): Promise<string | null> {
-  const row = await db(userId).userAiKey.findUnique({
-    where: { userId_provider: { userId, provider } },
-    select: { ciphertext: true },
-  });
-  if (!row) return null;
-
+/**
+ * Descifra UNA fila, con el camino de compatibilidad para los sobres creados
+ * antes de que el proveedor entrara en el AAD.
+ */
+async function decryptRow(userId: string, provider: string, ciphertext: string): Promise<string> {
   try {
-    return decryptSecret(row.ciphertext, userAiKeyAad(userId, provider));
+    return decryptSecret(ciphertext, userAiKeyAad(userId, provider));
   } catch (error) {
-    // Compatibilidad con las filas creadas antes de que el proveedor entrara en
-    // el AAD. No se pierde ninguna clave: si el sobre viejo abre, se vuelve a
-    // cifrar con el contexto nuevo en la misma lectura.
+    // No se pierde ninguna clave: si el sobre viejo abre, se vuelve a cifrar con
+    // el contexto nuevo en la misma lectura.
     try {
-      const legacy = decryptSecret(row.ciphertext, userId);
-      const ciphertext = encryptSecret(legacy, userAiKeyAad(userId, provider));
+      const legacy = decryptSecret(ciphertext, userId);
+      const reencrypted = encryptSecret(legacy, userAiKeyAad(userId, provider));
       await db(userId).userAiKey.update({
         where: { userId_provider: { userId, provider } },
-        data: { ciphertext },
+        data: { ciphertext: reencrypted },
       });
       return legacy;
     } catch {
@@ -81,6 +75,89 @@ export async function readDecryptedUserKey(
   }
 }
 
+/** La clave descifrada, o `null` si el usuario no tiene ninguna guardada. */
+export async function readDecryptedUserKey(
+  userId: string,
+  provider: string
+): Promise<string | null> {
+  const row = await db(userId).userAiKey.findUnique({
+    where: { userId_provider: { userId, provider } },
+    select: { ciphertext: true },
+  });
+  if (!row) return null;
+  return decryptRow(userId, provider, row.ciphertext);
+}
+
+/** Resultado de leer todas las claves propias de una cuenta de una vez. */
+export interface DecryptedUserAiKeys {
+  /** Proveedor → clave en claro. Solo en memoria del servidor. */
+  keys: Map<string, string>;
+  /** `updatedAt` máximo de las filas leídas (epoch ms); 0 si no hay ninguna. */
+  updatedAtMs: number;
+  /** Proveedores cuyo sobre no se pudo abrir en modo tolerante. */
+  failedProviders: string[];
+  /** Endpoint propio por proveedor (solo `custom`), si está guardado. */
+  baseUrls: Map<string, string>;
+}
+
+/**
+ * Todas las claves propias de una cuenta, en **una** consulta y con los
+ * descifrados en paralelo.
+ *
+ * Antes se hacía un `findUnique` por proveedor y un `await` dentro del bucle:
+ * cuatro viajes a la base y cuatro descifrados secuenciales antes de llamar al
+ * modelo, en cada turno. Mismo resultado, una sola ida y vuelta.
+ *
+ * `tolerateErrors` solo lo usan las pantallas de estado: si el vault no puede
+ * abrir un sobre, ese proveedor se omite y se anota en `failedProviders` en vez
+ * de tumbar la página. Las rutas de IA NO lo usan: allí el fallo es un 503.
+ */
+export async function readDecryptedUserKeys(
+  userId: string,
+  options: { tolerateErrors?: boolean } = {}
+): Promise<DecryptedUserAiKeys> {
+  let rows: Array<{ provider: string; ciphertext: string; updatedAt: Date; baseUrl?: string | null }>;
+  try {
+    rows = await db(userId).userAiKey.findMany({
+      select: { provider: true, ciphertext: true, updatedAt: true, baseUrl: true },
+    });
+  } catch (error) {
+    // Antes de aplicar la migración de la Fase 3 no existe `baseUrl`: las
+    // claves normales deben seguir funcionando igual.
+    if ((error as { code?: string } | null)?.code !== 'P2022') throw error;
+    rows = await db(userId).userAiKey.findMany({
+      select: { provider: true, ciphertext: true, updatedAt: true },
+    });
+  }
+
+  let updatedAtMs = 0;
+  for (const row of rows) {
+    updatedAtMs = Math.max(updatedAtMs, row.updatedAt.getTime());
+  }
+
+  const keys = new Map<string, string>();
+  const baseUrls = new Map<string, string>();
+  const failedProviders: string[] = [];
+  for (const row of rows) {
+    if (row.baseUrl) baseUrls.set(row.provider, row.baseUrl);
+  }
+  await Promise.all(
+    rows.map(async (row) => {
+      try {
+        keys.set(row.provider, await decryptRow(userId, row.provider, row.ciphertext));
+      } catch (error) {
+        if (options.tolerateErrors && error instanceof AiKeyStoreError) {
+          failedProviders.push(row.provider);
+          return;
+        }
+        throw error;
+      }
+    })
+  );
+
+  return { keys, updatedAtMs, failedProviders, baseUrls };
+}
+
 /** Cifra y guarda (o reemplaza) la clave de un proveedor. */
 export async function saveUserAiKey(input: {
   userId: string;
@@ -88,6 +165,8 @@ export async function saveUserAiKey(input: {
   key: string;
   status: UserAiKeyStatus;
   lastError: string | null;
+  /** Solo para endpoints compatibles OpenAI; ya validado por la acción. */
+  baseUrl?: string | null;
 }): Promise<UserAiKeySummary> {
   let ciphertext: string;
   try {
@@ -117,6 +196,7 @@ export async function saveUserAiKey(input: {
       status: input.status,
       lastCheckedAt: checkedAt,
       lastError: input.lastError,
+      baseUrl: input.baseUrl ?? null,
     },
     update: {
       ciphertext,
@@ -124,8 +204,13 @@ export async function saveUserAiKey(input: {
       status: input.status,
       lastCheckedAt: checkedAt,
       lastError: input.lastError,
+      baseUrl: input.baseUrl ?? null,
     },
   });
+
+  // La caché del perfil contiene la clave ANTERIOR: se tira en el acto para que
+  // el siguiente turno use la que el alumno acaba de guardar.
+  invalidateUserAiProfile(input.userId);
 
   return {
     provider: input.provider,
@@ -134,6 +219,23 @@ export async function saveUserAiKey(input: {
     lastCheckedAt: checkedAt.toISOString(),
     lastError: input.lastError,
   };
+}
+
+/** Endpoint guardado de una clave (solo `custom`), sin exponer la clave. */
+export async function readUserAiKeyBaseUrl(
+  userId: string,
+  provider: string
+): Promise<string | null> {
+  try {
+    const row = await db(userId).userAiKey.findUnique({
+      where: { userId_provider: { userId, provider } },
+      select: { baseUrl: true },
+    });
+    return row?.baseUrl ?? null;
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'P2022') return null;
+    throw error;
+  }
 }
 
 /** Cambia solo el estado comprobado, sin volver a pedir la clave en claro. */
@@ -156,6 +258,8 @@ export async function markUserAiKeyStatus(input: {
 /** Borra la clave del usuario. Idempotente: si no había, no pasa nada. */
 export async function deleteUserAiKey(userId: string, provider: string): Promise<void> {
   await db(userId).userAiKey.deleteMany({ where: { provider } });
+  // Una clave borrada no puede seguir respondiendo desde la caché del perfil.
+  invalidateUserAiProfile(userId);
 }
 
 /** Estado visible en Ajustes y en `/api/ia/mi-clave`; nunca incluye el sobre. */

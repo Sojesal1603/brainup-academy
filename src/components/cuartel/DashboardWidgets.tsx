@@ -1,4 +1,5 @@
 import { Suspense, cache } from 'react';
+import { after } from 'next/server';
 import { unstable_cache } from 'next/cache';
 import Link from 'next/link';
 import {
@@ -18,8 +19,9 @@ import { currentTenant } from '@/lib/tenantContext';
 import { safeDb } from '@/lib/dbTimeout';
 import { buildReviewQueue } from '@/lib/srs';
 import { levelFromXp, weekKeyOf } from '@/lib/challenges';
-import { ensureTodayPlan } from '@/lib/dayPlan';
+import { getDailyBrief, type DailyBriefSnapshot } from '@/lib/dailyBrief';
 import { buildProactiveProposal, localDaysBetween } from '@/lib/proactivity';
+import { ensureDirectorNarration } from '@/lib/director/narration';
 import { readTodayPlanConstraints } from '@/lib/planner/constraintStore';
 import PlanConstraintsCard from './PlanConstraintsCard';
 import ProactiveCard from './ProactiveCard';
@@ -355,23 +357,6 @@ const loadMoodleTasks = cache((userId: string) =>
   safeDb<MoodleTaskPreview[]>('cuartel.moodle', () => readMoodleTasks(userId), [], 4_000)
 );
 
-/**
- * El plan de hoy y el chequeo de clase también se cachean unos segundos.
- * `ensureTodayPlan` lee siete consultas de contexto cada vez que se llama;
- * sin esta foto, el widget seguiría tardando segundos aunque el resto del
- * Cuartel ya estuviera cacheado.
- */
-const readDayPlan = unstable_cache(
-  async (userId: string, dayKey: string) => {
-    const [year, month, day] = dayKey.split('-').map(Number);
-    const now = new Date();
-    now.setFullYear(year, month - 1, day);
-    return ensureTodayPlan(userId, now);
-  },
-  ['cuartel-plan-v2'],
-  { revalidate: 15, tags: ['cuartel', 'plan'] }
-);
-
 const readTodayCheckIn = unstable_cache(
   async (userId: string, dayKey: string) => {
     const [year, month, day] = dayKey.split('-').map(Number);
@@ -576,10 +561,10 @@ export async function DashboardToday() {
   const { user } = await currentTenant();
   const now = new Date();
   const dayKey = localDayKey(now);
-  const [plan, checkInItems, profile, upcomingExams, risk] = await Promise.all([
-    safeDb<Awaited<ReturnType<typeof ensureTodayPlan>> | null>(
-      'cuartel.plan',
-      () => readDayPlan(user.id, dayKey),
+  const [brief, checkInItems, profile, upcomingExams, risk] = await Promise.all([
+    safeDb<DailyBriefSnapshot | null>(
+      'cuartel.brief',
+      () => getDailyBrief(user.id),
       null,
       5_500
     ),
@@ -593,6 +578,20 @@ export async function DashboardToday() {
     loadUpcomingExams(user.id),
     loadRiskData(user.id),
   ]);
+
+  // El brief es la única foto del día: si trae plan, el widget pinta esos
+  // bloques; si no, se degrada sin tumbar el resto del Cuartel.
+  const plan = brief?.plan ?? null;
+
+  // La decisión ya está calculada por reglas. La IA solo pule una línea DESPUÉS
+  // de responder: si falla o no hay cupo, el Cuartel ya está pintado.
+  if (plan) {
+    after(async () => {
+      await ensureDirectorNarration(user.id, plan).catch((error) => {
+        console.warn('[director] no se pudo narrar el plan:', error);
+      });
+    });
+  }
 
   // La propuesta no decide nada nuevo: cita el plan que ya existe y añade lo
   // que el plan no puede saber (racha y día local). Sin IA y sin escrituras.
@@ -628,7 +627,7 @@ export async function DashboardToday() {
       {plan ? (
         <>
           <ProactiveCard decision={decision} />
-          <HoyTocaEsto plan={plan} />
+          <HoyTocaEsto plan={plan} narration={brief?.narration ?? null} />
           <DashboardReminder />
         </>
       ) : (

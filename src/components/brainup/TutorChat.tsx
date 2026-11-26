@@ -11,6 +11,7 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  Compass,
   Download,
   Eye,
   FileText,
@@ -24,6 +25,7 @@ import {
   Ruler,
   RotateCcw,
   Send,
+  ShieldCheck,
   ShieldQuestion,
   X,
 } from 'lucide-react';
@@ -66,7 +68,12 @@ import {
  * colgada (red, servidor reiniciándose). Sin él, el spinner giraba para siempre
  * y el alumno no sabía si esperar o recargar.
  */
-const CHAT_TIMEOUT_MS = 60_000;
+/**
+ * Tiempo máximo SIN recibir nada del servidor. Cada latido lo reinicia: un
+ * turno largo no se corta solo porque la IA tarde, pero una conexión muerta no
+ * deja al alumno esperando para siempre.
+ */
+const STREAM_IDLE_MS = 45_000;
 /** Redactar un apunte es la llamada más cara del sistema: más margen. */
 const NOTES_TIMEOUT_MS = 180_000;
 
@@ -129,10 +136,10 @@ function describeHttpStatus(status: number): string {
   if (status === 404) return 'No se ha encontrado el catedrático o la conversación. Recarga la página.';
   if (status === 413) return 'La petición es demasiado grande: quita algún adjunto o acorta el mensaje.';
   if (status === 429) {
-    return 'Ahora mismo no queda cupo de IA (los motores gratuitos se han agotado). Espera un minuto y vuelve a intentarlo: tu mensaje no se ha perdido.';
+    return 'El catedrático está recibiendo muchas consultas ahora mismo. Espera unos segundos y vuelve a intentarlo: tu mensaje no se ha perdido.';
   }
   if (status === 502) {
-    return 'El motor de IA no ha contestado a tiempo. Suele ser saturación momentánea: vuelve a intentarlo en unos segundos.';
+    return 'El catedrático no ha podido contestar a tiempo. Suele ser algo momentáneo: vuelve a intentarlo en unos segundos.';
   }
   if (status === 503) {
     return 'El servidor no está disponible un momento (puede estar arrancando). Vuelve a intentarlo en unos segundos.';
@@ -163,6 +170,159 @@ function describeFetchError(error: unknown): string {
   }
   const message = error instanceof Error ? error.message.trim() : '';
   return message.length > 0 ? message : 'Error inesperado del tutor.';
+}
+
+/** Clave idempotente del turno: se reutiliza al reintentar. */
+function newClientKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** Ámbito de fuentes del turno (Fase 4). */
+type TutorScope = 'estudio' | 'curiosidad' | 'examen';
+
+interface TutorStudyMeta {
+  outOfScope: boolean;
+  status: 'verificado' | 'parcial' | 'sin_respaldo' | 'vacio';
+  coverage: {
+    withCitation: number;
+    total: number;
+    ratio: number;
+    citedBlocks: number;
+    retrievedBlocks: number;
+    corpusBlocks: number;
+  };
+  sources: Array<{
+    chunkId: string;
+    ref: number;
+    title: string;
+    label: string;
+    pageFrom: number | null;
+    pageTo: number | null;
+  }>;
+  invalidCitations: number;
+  verifiedCitations: number;
+}
+
+/** Lo que devuelve el turno al terminar (SSE `done`). */
+interface TutorTurnPayload {
+  conversationId?: string;
+  measured?: { unitNumber: number; title: string; mastery: number } | null;
+  attachmentsReadable?: boolean;
+  unreadable?: string[];
+  documents?: Array<{
+    name: string;
+    pages: number;
+    chars: number;
+    mode: string;
+    notes: string[];
+  }>;
+  notRead?: string[];
+  sharedNotes?: SharedNoteRef[];
+  scope?: TutorScope;
+  study?: TutorStudyMeta | null;
+  noteProposal?: NoteProposal | null;
+  openNote?: {
+    id: string;
+    title: string;
+    unitNumber: number | null;
+    unitTitle: string | null;
+    subjectId: string;
+    href?: string;
+  } | null;
+  reply?: { id: string; content: string; stage: TutorStage | null };
+  degraded?: boolean;
+  replayed?: boolean;
+  userMessageId?: string;
+}
+
+/**
+ * Lee el stream SSE del catedrático.
+ *
+ * Los latidos y los estados no se pintan como mensajes: mantienen viva la
+ * conexión y alimentan la línea de «está pensando». Los `delta` construyen la
+ * respuesta de forma progresiva y `done` trae el sobre completo del turno.
+ */
+async function readTutorEventStream(
+  response: Response,
+  handlers: {
+    onActivity?: () => void;
+    onStatus?: (text: string) => void;
+    onDelta?: (partial: string) => void;
+  }
+): Promise<TutorTurnPayload> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('La conexión no ha devuelto respuesta. Vuelve a intentarlo.');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let partial = '';
+  let done: TutorTurnPayload | null = null;
+
+  while (true) {
+    const read = await reader.read();
+    if (read.done) break;
+    buffer += decoder.decode(read.value, { stream: true });
+
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary >= 0) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf('\n\n');
+
+      let event = 'message';
+      const dataLines: string[] = [];
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+      }
+      if (dataLines.length === 0) continue;
+
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      handlers.onActivity?.();
+
+      if (event === 'status' && typeof payload.text === 'string') {
+        handlers.onStatus?.(payload.text);
+        continue;
+      }
+      if (event === 'delta' && typeof payload.text === 'string') {
+        partial += payload.text;
+        handlers.onDelta?.(partial);
+        continue;
+      }
+      if (event === 'done') {
+        done = payload as TutorTurnPayload;
+        continue;
+      }
+      if (event === 'error') {
+        const message =
+          typeof payload.error === 'string'
+            ? payload.error
+            : 'El catedrático no ha podido responder en este momento. Vuelve a intentarlo.';
+        const status = typeof payload.status === 'number' ? payload.status : 503;
+        throw new HttpStatusError(message, status);
+      }
+    }
+  }
+
+  if (!done) {
+    throw new Error(
+      'La conexión se ha cortado antes de terminar la respuesta. Tu mensaje está guardado: pulsa «Reintentar».'
+    );
+  }
+  if (!done.reply && partial.length > 0) {
+    done.reply = { id: `stream-${Date.now()}`, content: partial, stage: null };
+  }
+  return done;
 }
 
 /** Solo se ofrece reintentar cuando el fallo puede irse con otra tentativa. */
@@ -204,6 +364,8 @@ interface ChatMessage {
   attachments?: AttachmentRef[];
   /** Apunte que el catedrático ofrece escribirle, a la espera de tu permiso. */
   noteProposal?: NoteProposal | null;
+  /** Cobertura verificada del turno, persistida para sobrevivir a la recarga. */
+  studyMeta?: TutorStudyMeta | null;
 }
 
 /** Apunte ya redactado, para poder abrirlo, descargarlo o imprimirlo. */
@@ -317,7 +479,6 @@ export interface TutorOpeningContext {
 
 interface TutorChatProps {
   agent: TutorAgent;
-  model: string;
   initialConversationId: string | null;
   initialMessages: ChatMessage[];
   /** Modo de trabajo inicial, si se entra desde un enlace con ?mode=. */
@@ -777,7 +938,6 @@ function NoteOfferCard({
 
 export default function TutorChat({
   agent,
-  model,
   initialConversationId,
   initialMessages,
   initialMode = null,
@@ -787,15 +947,27 @@ export default function TutorChat({
 }: TutorChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [mode, setMode] = useState<SubjectMode | null>(initialMode);
+  /** Estudio = solo sus materiales; curiosidad = ampliación abierta y etiquetada. */
+  const [scope, setScope] = useState<TutorScope>('estudio');
+  // Al volver a entrar, la franja se reconstruye del último turno guardado; si
+  // ese turno no era de estudio, se queda sin franja en vez de enseñar una vieja.
+  const [studyMeta, setStudyMeta] = useState<TutorStudyMeta | null>(() => {
+    const lastAssistant = [...initialMessages].reverse().find((message) => message.role === 'assistant');
+    return lastAssistant?.studyMeta ?? null;
+  });
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
-  const [activeModel, setActiveModel] = useState(model);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
+  /** Frase pedagógica del servidor mientras el catedrático prepara el turno. */
+  const [streamingStatus, setStreamingStatus] = useState<string | null>(null);
+  /** ¿Ya hay un globo de respuesta escribiéndose? (entonces no hace falta el loader) */
+  const [streamingReplyActive, setStreamingReplyActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Turno que falló por red o por el servidor: se puede reenviar tal cual. */
   const [failedTurn, setFailedTurn] = useState<{
     text: string;
     attachments: PendingAttachment[];
+    clientKey: string;
   } | null>(null);
   const [measurement, setMeasurement] = useState<
     { unitNumber: number; title: string; mastery: number } | null
@@ -907,7 +1079,12 @@ export default function TutorChat({
   // un mensaje de hace diez turnos, una respuesta nueva no te arranca la vista.
   useEffect(() => {
     if (!nearBottomRef.current) return;
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    // Mientras la respuesta se escribe, saltar sin animación: lanzar un
+    // «smooth» por cada delta encola animaciones y se nota a tirones.
+    bottomRef.current?.scrollIntoView({
+      behavior: isSending ? 'auto' : 'smooth',
+      block: 'end',
+    });
   }, [messages, isSending]);
 
   const handleScroll = () => {
@@ -917,10 +1094,16 @@ export default function TutorChat({
       element.scrollHeight - element.scrollTop - element.clientHeight < 140;
   };
 
-  const send = async (rawText?: string, retryAttachments?: PendingAttachment[]) => {
+  const send = async (
+    rawText?: string,
+    retryAttachments?: PendingAttachment[],
+    retryClientKey?: string
+  ) => {
     const text = (rawText ?? input).trim();
-    // Al reintentar, el turno viaja con los adjuntos que ya tenía: no se pierden.
+    // Al reintentar, el turno viaja con los adjuntos y la MISMA clave idempotente:
+    // el servidor reconoce la fila y no duplica el mensaje.
     const outgoing = retryAttachments ?? pending;
+    const clientKey = retryClientKey ?? newClientKey();
     if ((!text && outgoing.length === 0) || isSending) return;
     if (uploading) {
       setAttachmentError('Espera a que terminen de subir los archivos: en cuanto estén, se envía el mensaje.');
@@ -946,17 +1129,29 @@ export default function TutorChat({
     setPending([]);
     setIsSending(true);
 
+    const abort = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const bump = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => abort.abort(), STREAM_IDLE_MS);
+    };
+    bump();
+    let streamedReplyId: string | null = null;
+
     try {
       const res = await fetch('/api/tutor', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: timeoutSignal(CHAT_TIMEOUT_MS),
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        signal: abort.signal,
         body: JSON.stringify({
           agentId: agent.id,
           conversationId,
           message: text,
           shareNotes,
           mode,
+          scope,
+          // La misma clave en cada reintento: el servidor no duplica el turno.
+          clientKey,
           // De cada archivo viaja solo su id: los bytes ya están en el disco del
           // servidor, que es donde se le saca el texto al documento. Esto es lo
           // que permite subir un tema de 200 MB sin que quepa en un JSON.
@@ -966,50 +1161,43 @@ export default function TutorChat({
         }),
       });
 
-      const data = (await res.json().catch(() => null)) as
-        | {
-            conversationId?: string;
-            model?: string;
-            measured?: { unitNumber: number; title: string; mastery: number } | null;
-            attachmentsReadable?: boolean;
-            /** Archivos que el modelo de este turno no ha podido leer. */
-            unreadable?: string[];
-            /** Qué se ha podido leer de cada documento subido. */
-            documents?: Array<{
-              name: string;
-              pages: number;
-              chars: number;
-              mode: string;
-              notes: string[];
-            }>;
-            /** Archivos que ni se han podido mirar (por tamaño). */
-            notRead?: string[];
-            sharedNotes?: SharedNoteRef[];
-            noteProposal?: NoteProposal | null;
-            /** Apunte guardado que el catedrático ha pedido abrir en el panel. */
-            openNote?: {
-              id: string;
-              title: string;
-              unitNumber: number | null;
-              unitTitle: string | null;
-              subjectId: string;
-              /** Cita `?doc=note:ID`; el panel es la vista del documento. */
-              href?: string;
-            } | null;
-            reply?: { id: string; content: string; stage: TutorStage | null };
-            error?: string;
-          }
-        | null;
-
-      // El servidor siempre contesta JSON: si el estado no es 2xx, se usa su
-      // mensaje (ya viene en castellano) o el que corresponda al código.
       if (!res.ok) {
-        throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
+        const failure = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new HttpStatusError(failure?.error || describeHttpStatus(res.status), res.status);
       }
-      if (!data?.reply) {
-        throw new Error(
-          data?.error || 'El catedrático ha contestado en blanco. Vuelve a intentarlo.'
-        );
+
+      const data = await readTutorEventStream(res, {
+        onActivity: bump,
+        onStatus: (line) => setStreamingStatus(line),
+        onDelta: (partial) => {
+          setStreamingStatus(null);
+          if (!streamedReplyId) {
+            streamedReplyId = `stream-assistant-${Date.now()}`;
+            setStreamingReplyActive(true);
+            const placeholderId = streamedReplyId;
+            setMessages((prev) => [
+              ...prev,
+              { id: placeholderId, role: 'assistant', content: partial },
+            ]);
+            return;
+          }
+          const placeholderId = streamedReplyId;
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === placeholderId ? { ...message, content: partial } : message
+            )
+          );
+        },
+      });
+
+      // El globo provisional se sustituye por el mensaje definitivo (con su id
+      // y su etapa) unas líneas más abajo.
+      if (streamedReplyId) {
+        const placeholderId = streamedReplyId;
+        setMessages((prev) => prev.filter((message) => message.id !== placeholderId));
+      }
+      if (!data.reply) {
+        throw new Error('El catedrático ha contestado en blanco. Vuelve a intentarlo.');
       }
 
       setFailedTurn(null);
@@ -1020,7 +1208,6 @@ export default function TutorChat({
       );
 
       if (data.conversationId) setConversationId(data.conversationId);
-      if (data.model) setActiveModel(data.model);
       if (data.measured) {
         setMeasurement(data.measured);
         // El radar lateral (servidor) muestra el nivel medido: se refresca.
@@ -1034,7 +1221,7 @@ export default function TutorChat({
       if (outgoing.length > 0 && data.attachmentsReadable === false) {
         const names = (data.unreadable ?? []).filter(Boolean);
         notices.push(
-          `El modelo que ha respondido ahora no puede mirar imágenes ni escaneos${names.length > 0 ? `: de ${names.map((name) => `«${name}»`).join(', ')} solo ha visto el nombre` : ''}. El texto de los documentos sí se ha leído. Pídeselo otra vez cuando haya un modelo con visión disponible, o pégale el texto a mano.`
+          `El catedrático no puede mirar imágenes ni escaneos en este momento${names.length > 0 ? `: de ${names.map((name) => `«${name}»`).join(', ')} solo ha visto el nombre` : ''}. El texto de los documentos sí se ha leído. Pídeselo otra vez en un rato, o pégale el texto a mano.`
         );
       }
 
@@ -1063,6 +1250,8 @@ export default function TutorChat({
       setAttachmentWarning(notices.length > 0 ? notices.join(' — ') : null);
 
       setSharedNotes(Array.isArray(data.sharedNotes) ? data.sharedNotes : []);
+      setStudyMeta(data.study ?? null);
+      if (data.scope) setScope(data.scope);
 
       setMessages((prev) => [
         ...prev,
@@ -1072,6 +1261,7 @@ export default function TutorChat({
           content: data.reply!.content,
           stage: data.reply!.stage,
           noteProposal: data.noteProposal ?? null,
+          studyMeta: data.study ?? null,
         },
       ]);
 
@@ -1105,17 +1295,23 @@ export default function TutorChat({
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
       setInput(text);
       setPending(outgoing);
-      setFailedTurn(canRetry(err) ? { text, attachments: outgoing } : null);
+      setFailedTurn(canRetry(err) ? { text, attachments: outgoing, clientKey } : null);
       setError(describeFetchError(err));
     } finally {
+      if (idleTimer) clearTimeout(idleTimer);
+      setStreamingStatus(null);
+      setStreamingReplyActive(false);
       setIsSending(false);
     }
   };
 
-  /** Reenvía el turno que se quedó sin respuesta, con su texto y sus adjuntos. */
+  /**
+   * Reenvía el turno que se quedó sin respuesta con la MISMA `clientKey`: el
+   * servidor reconoce el mensaje ya guardado y no lo duplica.
+   */
   const retrySend = () => {
     if (!failedTurn || isSending) return;
-    void send(failedTurn.text, failedTurn.attachments);
+    void send(failedTurn.text, failedTurn.attachments, failedTurn.clientKey);
   };
 
   /**
@@ -1170,8 +1366,6 @@ export default function TutorChat({
               agentName: string;
             };
             quality?: { words: number; developedPoints: number; structureMissing?: string[] };
-            model?: string;
-            provider?: string;
             error?: string;
           }
         | null;
@@ -1205,16 +1399,16 @@ export default function TutorChat({
             words: data.quality?.words ?? 0,
             developedPoints: data.quality?.developedPoints ?? 0,
             structureMissing: data.quality?.structureMissing ?? [],
-            model: data.model ?? '',
-            provider: data.provider ?? '',
+            model: '',
+            provider: 'original',
           },
         },
       }));
 
       // Acaba de entregar el documento: se abre en la vista dividida, que es
-      // donde se lee, se compara con otros motores y se guarda sin salir del
-      // chat. La versión recién escrita entra como primera pestaña.
-      const engineId = data.provider ?? '';
+      // donde se lee, se compara con otras versiones y se guarda sin salir del
+      // chat. La versión recién escrita entra como «Versión del catedrático».
+      const engineId = 'original';
       setPanel({
         messageId: message.id,
         title: draft.title,
@@ -1231,8 +1425,8 @@ export default function TutorChat({
         variants: [
           {
             engine: engineId,
-            label: engines.find((engine) => engine.id === engineId)?.name ?? 'Motor',
-            model: data.model ?? '',
+            label: 'Versión del catedrático',
+            model: '',
             status: 'ready',
             token,
             title: draft.title,
@@ -1666,7 +1860,6 @@ export default function TutorChat({
             draftToken?: string;
             draft?: { title: string; content: string };
             quality?: { words: number };
-            model?: string;
             error?: string;
           }
         | null;
@@ -1675,14 +1868,14 @@ export default function TutorChat({
         throw new HttpStatusError(data?.error || describeHttpStatus(res.status), res.status);
       }
       if (!data?.ok || !data.draftToken || !data.draft) {
-        throw new Error(data?.error || 'Ese motor no ha podido escribir su versión.');
+        throw new Error(data?.error || 'No se ha podido escribir esa versión.');
       }
 
       const draft = data.draft;
       const variant: NoteVariant = {
         engine: engineId,
         label,
-        model: data.model ?? '',
+        model: '',
         status: 'ready',
         token: data.draftToken,
         title: draft.title,
@@ -1721,15 +1914,6 @@ export default function TutorChat({
   };
 
   const hasMessages = messages.length > 0;
-
-  /** Proveedor que está respondiendo, para el rótulo de la barra. */
-  const providerName = /groq/i.test(activeModel)
-    ? 'Groq'
-    : /openrouter/i.test(activeModel)
-      ? 'OpenRouter'
-      : /ollama|local/i.test(activeModel)
-        ? 'Local'
-        : 'Gemini';
 
   const openingMessage = useMemo(() => buildOpeningMessage(agent, opening), [agent, opening]);
 
@@ -1808,9 +1992,7 @@ export default function TutorChat({
           </span>
           <span className="hidden items-center gap-1.5 truncate text-[11px] text-stone-500 sm:inline-flex">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/80" />
-            {providerName}
-            {' · '}
-            {activeModel.startsWith('auto') ? 'mejor modelo' : activeModel}
+            En línea · responde en segundos
           </span>
           <label className="ml-1 flex items-center gap-1.5 text-[10px] text-stone-500">
             <span className="hidden sm:inline">Modo</span>
@@ -1832,6 +2014,43 @@ export default function TutorChat({
               ))}
             </select>
           </label>
+
+          {/* Ámbito de fuentes: no es lo mismo estudiar que explorar. */}
+          <div
+            className="ml-1 flex items-center rounded-md border border-white/10 bg-[#0c0c0e] p-0.5"
+            title="Estudio: solo tu temario y tus apuntes. Curiosidad: ampliación abierta, etiquetada fuera de tu temario."
+          >
+            <button
+              type="button"
+              disabled={isSending}
+              onClick={() => setScope('estudio')}
+              aria-pressed={scope === 'estudio'}
+              className={clsx(
+                'flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-50',
+                scope === 'estudio'
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : 'text-stone-500 hover:text-stone-300'
+              )}
+            >
+              <ShieldCheck className="h-3 w-3" />
+              Estudio
+            </button>
+            <button
+              type="button"
+              disabled={isSending}
+              onClick={() => setScope('curiosidad')}
+              aria-pressed={scope === 'curiosidad'}
+              className={clsx(
+                'flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-50',
+                scope === 'curiosidad'
+                  ? 'bg-amber-500/15 text-amber-300'
+                  : 'text-stone-500 hover:text-stone-300'
+              )}
+            >
+              <Compass className="h-3 w-3" />
+              Curiosidad
+            </button>
+          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
@@ -1894,6 +2113,70 @@ export default function TutorChat({
               </span>
             ))}
           </span>
+        </div>
+      )}
+
+      {/* Contrato de citas: cobertura real del último turno de estudio. */}
+      {scope === 'estudio' && studyMeta && (
+        <div
+          className={clsx(
+            'flex shrink-0 flex-wrap items-start gap-2 border-b px-4 py-2 text-[11px]',
+            studyMeta.outOfScope
+              ? 'border-amber-500/20 bg-amber-500/[0.04] text-amber-200'
+              : studyMeta.status === 'verificado'
+                ? 'border-emerald-500/15 bg-emerald-500/[0.03] text-stone-400'
+                : 'border-white/[0.05] text-stone-400'
+          )}
+        >
+          {studyMeta.outOfScope ? (
+            <Compass className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+          ) : (
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
+          )}
+          <span className="min-w-0 flex-1">
+            {studyMeta.outOfScope ? (
+              <>
+                <strong>Fuera de tu temario.</strong> No se ha llamado al modelo para no
+                inventar contenido. {studyMeta.coverage.corpusBlocks > 0
+                  ? 'Hay material tuyo de esta materia, pero nada respalda esta pregunta.'
+                  : 'Todavía no hay apuntes ni documentos indexados de esta materia.'}
+              </>
+            ) : studyMeta.coverage.total > 0 ? (
+              <>
+                <strong>
+                  {studyMeta.coverage.withCitation} de {studyMeta.coverage.total}
+                </strong>{' '}
+                apartados con cita verificada ·{' '}
+                <strong>{studyMeta.coverage.citedBlocks}</strong> de{' '}
+                {studyMeta.coverage.corpusBlocks} fragmentos de tu temario ·{' '}
+                {Math.round(studyMeta.coverage.ratio * 100)}% de la respuesta respaldada.
+                {studyMeta.invalidCitations > 0 && (
+                  <span className="text-amber-300">
+                    {' '}
+                    {studyMeta.invalidCitations} cita(s) no verificada(s) marcadas.
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <strong>Sin respaldo localizable.</strong> Este turno no ha podido atar la
+                respuesta a un fragmento de tus materiales.
+              </>
+            )}
+          </span>
+          {studyMeta.outOfScope && (
+            <button
+              type="button"
+              onClick={() => {
+                setScope('curiosidad');
+                if (lastUserText) setInput(lastUserText);
+              }}
+              className="flex items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+            >
+              <Compass className="h-3 w-3" />
+              Explorar en curiosidad
+            </button>
+          )}
         </div>
       )}
 
@@ -2050,7 +2333,7 @@ export default function TutorChat({
                     <button
                       onClick={() => void checkCalculations(message)}
                       disabled={calcChecks[message.id]?.loading}
-                      title="Comprobar las cuentas con el motor del servidor, sin volver a preguntar al modelo"
+                      title="Comprobar las cuentas en el servidor, sin volver a preguntar"
                       className="flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-medium text-stone-300 transition-colors hover:border-emerald-400/40 hover:text-emerald-200 disabled:opacity-60"
                     >
                       {calcChecks[message.id]?.loading ? (
@@ -2095,7 +2378,7 @@ export default function TutorChat({
                       </ul>
                     )}
                     <p className="text-[10px] text-stone-500">
-                      Cuentas del servidor, no del modelo. No cambia la respuesta ni la nota.
+                      Comprobación del servidor: no cambia la respuesta ni la nota.
                     </p>
                   </div>
                 )}
@@ -2121,7 +2404,7 @@ export default function TutorChat({
           );
         })}
 
-        {isSending && (
+        {isSending && !streamingReplyActive && (
           <div className="flex gap-3">
             <div
               className="w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 mt-0.5"
@@ -2136,7 +2419,7 @@ export default function TutorChat({
             <div className="min-w-0 flex-1 max-w-md">
               <NeuralLoader
                 compact
-                title="El catedrático está pensando"
+                title={streamingStatus ?? 'El catedrático está pensando'}
                 messages={[
                   'Analizando tu respuesta y tus errores abiertos...',
                   'Cruzando apuntes con el temario oficial...',

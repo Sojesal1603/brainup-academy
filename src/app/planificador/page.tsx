@@ -1,6 +1,6 @@
 import { currentTenant } from '@/lib/tenantContext';
 import { calculateRequiredHoursForTopic } from '@/lib/planner';
-import { reviewDayProgress } from '@/lib/dayPlan';
+import { getCachedDayReview } from '@/lib/dayReviewCache';
 import { StudyMode } from '@/lib/types';
 import nextDynamic from 'next/dynamic';
 import ModeSwitcher from '@/components/dashboard/ModeSwitcher';
@@ -14,8 +14,6 @@ const PlannerControls = nextDynamic(() => import('@/components/planificador/Plan
 });
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock, Repeat, Target } from 'lucide-react';
 import Link from 'next/link';
-
-export const dynamic = 'force-dynamic';
 
 /** Clave de día en hora LOCAL: los bloques se guardan a medianoche local y
  * `toISOString()` los movía al día anterior en España (UTC+1/+2). */
@@ -33,7 +31,7 @@ export default async function PlannerPage() {
 
   // Foto del avance real del día: es la misma que usa el motor al recalcular,
   // así que la tarjeta y el plan nuevo no pueden contar cosas distintas.
-  const review = await reviewDayProgress(user.id);
+  const review = await getCachedDayReview(user.id);
 
   const subjects = await prisma.subject.findMany({
     include: {

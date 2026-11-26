@@ -18,6 +18,7 @@ import {
 import clsx from 'clsx';
 import { sanitizeNoteContent } from '@/lib/apuntesIa';
 import { scanInline } from '@/lib/inlineEmphasis';
+import VisualBlock from '@/components/visual/VisualBlock';
 
 /* ------------------------------------------------------------------ */
 /* Matemáticas (KaTeX)                                                 */
@@ -774,6 +775,9 @@ function renderBlock(block: Block, index: number, revealAnswers: boolean): React
       );
 
     case 'code':
+      if (block.lang.toLowerCase().startsWith('visual')) {
+        return <VisualBlock key={key} source={block.code} />;
+      }
       return (
         <pre
           key={key}

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { currentTenant } from '@/lib/tenantContext';
-import type { TenantPrisma } from '@/lib/db';
+import { getBrainUpCatalog, type BrainUpCatalogAgent } from '@/lib/brainupCatalog';
 import { agentSlug } from '@/lib/agentSlug';
 import {
   Sparkles,
@@ -27,8 +27,6 @@ import Link from 'next/link';
 import SubjectSolarSystem from '@/components/brainup/SubjectSolarSystem';
 import ModeShortcuts from '@/components/brainup/ModeShortcuts';
 
-export const dynamic = 'force-dynamic';
-
 /**
  * Avatar propio de cada materia: dos catedráticos solo comparten icono si son la
  * misma asignatura. Se busca por palabra clave del nombre (el temario se importa
@@ -53,28 +51,6 @@ function subjectIcon(name: string) {
   return GraduationCap;
 }
 
-/** El catálogo de catedráticos con lo justo para pintar cada tarjeta. */
-function loadCatalog(prisma: TenantPrisma) {
-  return prisma.aiAgent.findMany({
-    include: {
-      subject: {
-        include: {
-          errorLogs: { where: { isMastered: false } },
-          // Solo lo justo para el badge: estado de las unidades y próximo examen.
-          topics: { select: { status: true }, take: 200 },
-          exams: {
-            where: { isCompleted: false, examDate: { gte: new Date() } },
-            orderBy: { examDate: 'asc' },
-            take: 1,
-            select: { title: true, examDate: true },
-          },
-        },
-      },
-    },
-    orderBy: { subject: { order: 'asc' } },
-  });
-}
-
 /**
  * Hub de catedráticos: una tarjeta de cristal por materia, con el avatar teñido
  * del color de la asignatura y un badge que dice en qué punto está el temario
@@ -82,7 +58,7 @@ function loadCatalog(prisma: TenantPrisma) {
  * real de las unidades y de la fecha del próximo examen.
  */
 export default async function BrainUpHubPage() {
-  const { tenant: prisma } = await currentTenant();
+  const { user } = await currentTenant();
 
   // La base remota tiene un solo hueco de conexión y este catálogo es la consulta
   // más pesada de la vista: cuando el pooler va lento se pasa de los 4,5 s y, sin
@@ -90,10 +66,10 @@ export default async function BrainUpHubPage() {
   // recargar. Un timeout se degrada a «catálogo no disponible»; cualquier otro
   // error (esquema desincronizado, permisos) se propaga para que se vea y se
   // registre: esconderlo sería tapar el problema de verdad.
-  let agents: Awaited<ReturnType<typeof loadCatalog>> = [];
+  let agents: BrainUpCatalogAgent[] = [];
   let catalogTimedOut = false;
   try {
-    agents = await loadCatalog(prisma);
+    agents = await getBrainUpCatalog(user.id);
   } catch (error) {
     if ((error as { code?: string } | null)?.code !== 'P1008') throw error;
     catalogTimedOut = true;
@@ -160,10 +136,12 @@ export default async function BrainUpHubPage() {
           subjectName: agent.subject.name,
           color: agent.subject.color,
           href: `/brainup/${agentSlug(agent.subject.name)}`,
-          examDays: agent.subject.exams[0]
+          examDays: agent.subject.nextExam
             ? Math.max(
                 0,
-                Math.round((agent.subject.exams[0].examDate.getTime() - now) / 86400000)
+                Math.round(
+                  (new Date(agent.subject.nextExam.examDateIso).getTime() - now) / 86400000
+                )
               )
             : null,
         }))}
@@ -172,13 +150,16 @@ export default async function BrainUpHubPage() {
       {/* Grid de Catedráticos por Asignatura */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {agents.map((agent) => {
-          const unmasteredErrors = agent.subject.errorLogs.length;
+          const unmasteredErrors = agent.subject.unmasteredErrors;
           const color = agent.subject.color;
-          const nextExam = agent.subject.exams[0] ?? null;
+          const nextExam = agent.subject.nextExam;
           const examDays = nextExam
-            ? Math.max(0, Math.round((nextExam.examDate.getTime() - now) / 86400000))
+            ? Math.max(
+                0,
+                Math.round((new Date(nextExam.examDateIso).getTime() - now) / 86400000)
+              )
             : null;
-          const inCourse = agent.subject.topics.some((topic) => topic.status === 'en_curso');
+          const inCourse = agent.subject.inCourse;
           const AvatarIcon = subjectIcon(agent.subject.name);
 
           // Badge superior: primero el examen cercano (es lo que cambia el plan),

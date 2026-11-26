@@ -1,5 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { AiKeyStoreError } from './userKeyErrors';
+import { accountLedgerId, platformLedgerId } from './ledgerId';
+import {
+  readCachedOwnKeys,
+  writeCachedOwnKeys,
+} from './profileCache';
+import type { DecryptedUserAiKeys } from './userKeyStore';
+import { providerIds, providerLabelOf } from './providers';
 
 /**
  * De dónde sale la clave de IA de una petición.
@@ -24,14 +30,10 @@ import { AiKeyStoreError } from './userKeyErrors';
  */
 
 /** Proveedores que se autentican con una clave del alumno o de la plataforma. */
-export type AiKeyProvider = 'gemini' | 'groq' | 'openrouter' | 'nvidia';
+export type AiKeyProvider = string;
 
-export const AI_KEY_PROVIDERS: readonly AiKeyProvider[] = [
-  'gemini',
-  'groq',
-  'openrouter',
-  'nvidia',
-];
+/** Sale del catálogo: añadir un proveedor no toca esta lista. */
+export const AI_KEY_PROVIDERS: readonly AiKeyProvider[] = providerIds();
 
 export type AiCredentialSource = 'usuario' | 'plataforma';
 
@@ -44,12 +46,23 @@ export interface AiCredential {
   /** Etiqueta para la interfaz y para el reparto de carga: «principal», «2»… */
   label: string;
   /**
-   * Identificador estable para los libros de salud/enfriamiento. Para la clave
-   * del alumno es `usuario`; para la de plataforma, el nombre real de la
-   * variable (así se siguen repartiendo las claves `_2`, `_3`… sin mezclar
-   * usuarios).
+   * Nombre de la variable de entorno. Para la clave del alumno es literalmente
+   * `usuario` y se conserva por compatibilidad con las pantallas de Ajustes.
+   * NO es la identidad del libro: dos alumnos comparten ese texto.
    */
   envVar: string;
+  /**
+   * Identidad del libro de salud, enfriamientos y contadores.
+   *
+   * Para una clave propia es un HMAC de `userId:provider` (nunca la clave ni el
+   * `userId` en claro); para una de plataforma, su variable de entorno. Es lo
+   * que impide que un 429 de un alumno enfríe la clave de otro.
+   */
+  ledgerId: string;
+  /** Orden explícito del alumno; menor = antes. */
+  priority: number;
+  /** Endpoint propio ya validado (solo proveedores que lo admiten). */
+  baseUrl?: string;
 }
 
 /** Mensaje único que ven las pantallas cuando falta la clave. */
@@ -101,7 +114,31 @@ function platformKeyEnvNames(provider: AiKeyProvider): string[] {
       'OPENROUTER_API_KEY_4',
     ];
   }
-  return ['NVIDIA_API_KEY', 'NVIDIA_API_KEY_2', 'NVIDIA_API_KEY_3', 'NVIDIA_API_KEY_4'];
+  if (provider === 'nvidia') {
+    return ['NVIDIA_API_KEY', 'NVIDIA_API_KEY_2', 'NVIDIA_API_KEY_3', 'NVIDIA_API_KEY_4'];
+  }
+  if (provider === 'openai') {
+    return ['OPENAI_API_KEY', 'OPENAI_API_KEY_2', 'OPENAI_API_KEY_3', 'OPENAI_API_KEY_4'];
+  }
+  if (provider === 'anthropic') {
+    return [
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_API_KEY_2',
+      'ANTHROPIC_API_KEY_3',
+      'ANTHROPIC_API_KEY_4',
+    ];
+  }
+  if (provider === 'custom') {
+    return [
+      'OPENAI_COMPATIBLE_API_KEY',
+      'OPENAI_COMPATIBLE_API_KEY_2',
+      'OPENAI_COMPATIBLE_API_KEY_3',
+      'OPENAI_COMPATIBLE_API_KEY_4',
+    ];
+  }
+  // Proveedor nuevo del catálogo: convención única, sin tocar este archivo.
+  const base = provider.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  return [1, 2, 3, 4].map((index) => `${base}_API_KEY${index === 1 ? '' : `_${index}`}`);
 }
 
 /** Nombres de variables de un proveedor (también para pintar el estado). */
@@ -154,56 +191,159 @@ function platformCredentialsFor(provider: AiKeyProvider): AiCredential[] {
       source: 'plataforma',
       label: labelForEnv(envVar),
       envVar,
+      ledgerId: platformLedgerId(envVar),
+      priority: 100,
     });
   }
   return credentials;
 }
 
 /**
- * La clave propia del usuario, descifrada para esta petición.
+ * Las claves propias del usuario, en UNA consulta y con los descifrados en
+ * paralelo.
  *
- * Devuelve `null` si no tiene ninguna guardada. Si la tiene pero el vault no
- * puede descifrarla, lanza `AiKeyStoreError`: es un fallo de configuración del
- * servidor, no una excusa para caer a la clave de plataforma.
+ * La carga del almacén es diferida a propósito: importar el motor no debe abrir
+ * Prisma hasta que de verdad haya que leer una clave guardada. Si el vault no
+ * puede descifrar una fila, lanza `AiKeyStoreError` (o la omite en modo
+ * tolerante): es un fallo de configuración del servidor, no una excusa para
+ * caer a la clave de plataforma.
  */
-async function readOwnKey(userId: string, provider: AiKeyProvider): Promise<string | null> {
-  // Carga diferida a propósito: importar el motor no debe abrir Prisma (ni
-  // recargar `.env`) hasta que de verdad haya que leer una clave guardada.
-  const { readDecryptedUserKey } = await import('./userKeyStore');
-  return readDecryptedUserKey(userId, provider);
+async function readOwnKeysForProfile(
+  userId: string,
+  options: { tolerateVaultErrors?: boolean }
+): Promise<DecryptedUserAiKeys> {
+  const { readDecryptedUserKeys } = await import('./userKeyStore');
+  return readDecryptedUserKeys(userId, { tolerateErrors: options.tolerateVaultErrors });
 }
 
-/**
- * Credenciales de un proveedor para ESTE usuario, aplicando la política.
- *
- * Se llama una vez por petición y proveedor; no se cachea entre peticiones.
- */
-/**
- * Las claves propias que tiene el usuario, por proveedor.
- *
- * Se leen las cuatro de una vez porque la política necesita saber si el usuario
- * tiene alguna clave propia, y no solo la del proveedor que se va a usar: quien
- * tiene la suya no debe completarse con claves de plataforma de OTROS
- * proveedores (Groq, OpenRouter, NVIDIA), ni siquiera siendo la cuenta de
- * plataforma. Lo que el alumno pega es lo que se gasta.
- */
-async function readOwnKeys(userId: string): Promise<Map<AiKeyProvider, string>> {
-  const keys = new Map<AiKeyProvider, string>();
-  for (const provider of AI_KEY_PROVIDERS) {
-    const key = (await readOwnKey(userId, provider))?.trim() ?? '';
-    if (key.length > 0) keys.set(provider, key);
-  }
-  return keys;
-}
-
-/** Credencial de una clave propia. */
-function ownCredential(provider: AiKeyProvider, key: string): AiCredential {
+/** Credencial de una clave propia, con libro aislado por cuenta. */
+function ownCredential(
+  userId: string,
+  provider: AiKeyProvider,
+  key: string,
+  priority: number,
+  baseUrl?: string
+): AiCredential {
   return {
     provider,
     key,
     source: 'usuario',
     label: 'principal',
     envVar: 'usuario',
+    ledgerId: accountLedgerId(userId, provider),
+    priority,
+    ...(baseUrl ? { baseUrl } : {}),
+  };
+}
+
+/** El perfil de IA resuelto para una cuenta. */
+export interface UserAiProfile {
+  userId: string;
+  /** Credenciales utilizables, en el orden estable del catálogo. */
+  credentials: AiCredential[];
+  /** Proveedores que el alumno tiene guardados (aunque ahora fallen). */
+  ownProviders: AiKeyProvider[];
+  /** `updatedAt` máximo de las filas leídas; `null` si vino de caché sin fila. */
+  updatedAtMs: number | null;
+  /** Orden explícito del alumno (ids del catálogo). */
+  providerOrder: string[];
+  /** ¿Se ha servido de la caché en memoria? Útil para medir y verificar. */
+  fromCache: boolean;
+}
+
+/**
+ * Credenciales que corresponden a un mapa de claves propias.
+ *
+ * La regla de la casa sigue intacta: si el alumno tiene ALGUNA clave propia,
+ * solo se usan las suyas (no se completa con proveedores de plataforma). Si no
+ * tiene ninguna y está autorizado, se usan las de plataforma.
+ */
+function credentialsForProfile(
+  userId: string,
+  ownKeys: ReadonlyMap<string, string>,
+  order: string[] = [],
+  baseUrls: ReadonlyMap<string, string> = new Map()
+): AiCredential[] {
+  const own: AiCredential[] = [];
+  for (const provider of AI_KEY_PROVIDERS) {
+    const key = ownKeys.get(provider)?.trim() ?? '';
+    if (key.length > 0) {
+      const index = order.indexOf(provider);
+      own.push(
+        ownCredential(
+          userId,
+          provider,
+          key,
+          index < 0 ? 1000 : index,
+          baseUrls.get(provider)
+        )
+      );
+    }
+  }
+  own.sort((a, b) => a.priority - b.priority);
+  if (own.length > 0) return own;
+  if (!isPlatformAiUser(userId)) return [];
+  return AI_KEY_PROVIDERS.flatMap((provider) => platformCredentialsFor(provider));
+}
+
+function providersOf(keys: ReadonlyMap<string, string>): AiKeyProvider[] {
+  return AI_KEY_PROVIDERS.filter((provider) => (keys.get(provider)?.trim() ?? '').length > 0);
+}
+
+/**
+ * Resuelve el perfil de IA del alumno: sus claves, una sola lectura y caché de
+ * 60 s (5 s si está vacío).
+ *
+ * Se llama una vez por petición (la puerta `ensureAiAccess` lo hace por ti). El
+ * orden de `credentials` es estable, así que la cadena de proveedores no cambia
+ * entre turnos por azar del `Map`.
+ *
+ * La caché se invalida en el acto al guardar o borrar una clave
+ * (`saveUserAiKey`/`deleteUserAiKey` llaman a `invalidateUserAiProfile`). En
+ * varias instancias, el TTL acota la ventana a 60 s.
+ */
+export async function resolveUserAiProfile(
+  userId: string,
+  options: { tolerateVaultErrors?: boolean } = {}
+): Promise<UserAiProfile> {
+  const cached = readCachedOwnKeys(userId);
+  if (cached) {
+    return {
+      userId,
+      credentials: credentialsForProfile(userId, cached.keys, cached.order, cached.baseUrls),
+      ownProviders: providersOf(cached.keys),
+      updatedAtMs: cached.updatedAtMs,
+      providerOrder: cached.order,
+      fromCache: true,
+    };
+  }
+
+  const [read, order] = await Promise.all([
+    readOwnKeysForProfile(userId, options),
+    (async () => {
+      const { readProviderOrder } = await import('./providerOrder');
+      return readProviderOrder(userId).catch(() => []);
+    })(),
+  ]);
+  const ownKeys = new Map<string, string>();
+  for (const provider of AI_KEY_PROVIDERS) {
+    const key = read.keys.get(provider)?.trim() ?? '';
+    if (key.length > 0) ownKeys.set(provider, key);
+  }
+
+  // No se cachea una lectura a medias: si el vault falló en un proveedor, la
+  // pantalla de estado debe poder reintentarlo en la siguiente carga.
+  if (read.failedProviders.length === 0) {
+    writeCachedOwnKeys(userId, ownKeys, read.updatedAtMs, Date.now(), order, read.baseUrls);
+  }
+
+  return {
+    userId,
+    credentials: credentialsForProfile(userId, ownKeys, order, read.baseUrls),
+    ownProviders: providersOf(ownKeys),
+    updatedAtMs: read.updatedAtMs,
+    providerOrder: order,
+    fromCache: false,
   };
 }
 
@@ -211,33 +351,32 @@ export async function resolveAiCredentials(
   userId: string,
   provider: AiKeyProvider
 ): Promise<AiCredential> {
-  const own = await readOwnKeys(userId);
-  const ownKey = own.get(provider);
-  if (ownKey) return ownCredential(provider, ownKey);
+  const profile = await resolveUserAiProfile(userId);
+  const own = profile.credentials.find(
+    (credential) => credential.provider === provider && credential.source === 'usuario'
+  );
+  if (own) return own;
 
-  if (own.size > 0) {
+  if (profile.ownProviders.length > 0) {
     // Tiene claves propias, pero no de este proveedor: no se le completa con la
     // de plataforma. Se le dice qué falta, en vez de gastar otra cuenta.
     throw new AiKeyRequiredError(
-      `Tu clave de ${providerLabel(provider)} no está guardada y no se usa la de plataforma cuando tienes claves propias. Añádela en Ajustes si quieres usar este proveedor.`,
+      'Esa clave no está guardada y no se usa la de plataforma cuando tienes claves propias. Añádela en Ajustes si quieres usar ese proveedor.',
       provider
     );
   }
 
-  if (isPlatformAiUser(userId)) {
-    const platformKey = platformCredentialsFor(provider)[0];
-    if (platformKey) return platformKey;
-  }
+  const platform = profile.credentials.find(
+    (credential) => credential.provider === provider && credential.source === 'plataforma'
+  );
+  if (platform) return platform;
 
   throw new AiKeyRequiredError(AI_KEY_REQUIRED_MESSAGE, provider);
 }
 
 /** Nombre del proveedor para los mensajes. */
 export function providerLabel(provider: AiKeyProvider): string {
-  if (provider === 'gemini') return 'Gemini';
-  if (provider === 'groq') return 'Groq';
-  if (provider === 'openrouter') return 'OpenRouter';
-  return 'NVIDIA';
+  return providerLabelOf(provider);
 }
 
 /**
@@ -252,33 +391,8 @@ export async function resolveAllAiCredentials(
   userId: string,
   options: { tolerateVaultErrors?: boolean } = {}
 ): Promise<AiCredential[]> {
-  const own: AiCredential[] = [];
-  for (const provider of AI_KEY_PROVIDERS) {
-    let ownKey = '';
-    try {
-      ownKey = (await readOwnKey(userId, provider))?.trim() ?? '';
-    } catch (error) {
-      // Las páginas de estado y los rótulos no pueden caerse porque el hosting
-      // no tenga la clave maestra: se omite la propia y, si el usuario está en
-      // la lista, todavía puede usar la de plataforma. Las rutas de IA NO usan
-      // este modo tolerante: allí el fallo se convierte en un 503 claro.
-      if (options.tolerateVaultErrors && error instanceof AiKeyStoreError) continue;
-      throw error;
-    }
-    if (ownKey.length > 0) own.push(ownCredential(provider, ownKey));
-  }
-
-  /*
-   * Si el alumno ha pegado alguna clave, sus peticiones van SOLO con las suyas.
-   * Antes se completaba con las de plataforma de los proveedores que no tenía, y
-   * un alumno con clave de Gemini acababa gastando Groq de la plataforma sin
-   * saberlo (y viendo «Groq» en la cabecera). La regla es la de la casa: la
-   * clave propia manda y no se mezcla.
-   */
-  if (own.length > 0) return own;
-
-  if (!isPlatformAiUser(userId)) return [];
-  return AI_KEY_PROVIDERS.flatMap((provider) => platformCredentialsFor(provider));
+  const profile = await resolveUserAiProfile(userId, options);
+  return profile.credentials;
 }
 
 /**

@@ -73,7 +73,6 @@ export async function POST(
     return NextResponse.json({
       ok: true,
       warning: result.warning,
-      model: result.model,
       generation: result.generation,
     });
   } catch (error) {

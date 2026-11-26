@@ -63,6 +63,8 @@ export interface ProfileSummary {
   studyMode: string;
   streakCurrent: number;
   challengeXp: number;
+  /** Zona IANA del alumno; la usa el brief para saber qué día es «hoy». */
+  timezone: string | null;
 }
 
 /**
@@ -85,6 +87,7 @@ const loadCachedProfileSummary = unstable_cache(
         studyMode: true,
         streakCurrent: true,
         challengeXp: true,
+        timezone: true,
       },
     });
   },

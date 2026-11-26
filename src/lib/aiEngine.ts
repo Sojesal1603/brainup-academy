@@ -50,10 +50,20 @@ import {
   configuredModelChain,
   excludedModels,
   isPreviewModel,
-  modelHasVision,
 } from './ai/modelCatalog';
+import {
+  customModelsFromEnv,
+  getProviderDescriptor,
+  modelCapabilities,
+  providerIds,
+} from './ai/providers';
+import {
+  capabilityDegradationMessage,
+  planRoute,
+  type RoutableModel,
+} from './ai/router';
 
-export type AiProvider = 'gemini' | 'groq' | 'openrouter' | 'nvidia' | 'ollama' | 'local';
+export type AiProvider = string;
 
 /** Un turno de conversación tal y como lo entienden los proveedores OpenAI. */
 export interface ChatMessage {
@@ -86,6 +96,14 @@ export interface AiTextParams {
   history?: unknown[];
   attachments?: AiAttachmentPart[];
   /**
+   * Capacidades que exige el turno, además de la visión que se deduce de los
+   * adjuntos. El router filtra antes de llamar y, si ninguna clave del alumno
+   * las cubre, degrada con un mensaje neutro.
+   */
+  requiresVision?: boolean;
+  requiresTools?: boolean;
+  requiresJson?: boolean;
+  /**
    * Nombres de adjuntos cuyo TEXTO ya viaja en el prompt (PDF, Word…): no hay
    * que avisar de que «no se han podido leer» solo porque sus bytes no viajen.
    */
@@ -107,6 +125,12 @@ export interface AiTextParams {
    * motor (o por otro distinto del que dice la pestaña).
    */
   provider?: AiProvider;
+  /**
+   * Hedge dentro del perfil: a los ~700 ms del campeón se lanza otro proveedor
+   * de las MISMAS claves; gana el primero que contesta y el otro se aborta.
+   * Se desactiva en trabajos de fondo y en la comparativa forzada.
+   */
+  hedge?: boolean;
 }
 
 export interface ModelCandidate {
@@ -237,7 +261,6 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_INTERACTIONS_ENDPOINT = `${GEMINI_BASE}/interactions`;
 const GEMINI_MODELS_ENDPOINT = `${GEMINI_BASE}/models`;
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
-const GROQ_CHAT_ENDPOINT = `${GROQ_BASE}/chat/completions`;
 const GROQ_MODELS_ENDPOINT = `${GROQ_BASE}/models`;
 
 /*
@@ -253,7 +276,6 @@ const GROQ_MODELS_ENDPOINT = `${GROQ_BASE}/models`;
  * habiendo modelos gratuitos.
  */
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
-const OPENROUTER_CHAT_ENDPOINT = `${OPENROUTER_BASE}/chat/completions`;
 const OPENROUTER_MODELS_ENDPOINT = `${OPENROUTER_BASE}/models`;
 
 const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/+$/, '');
@@ -489,63 +511,6 @@ const OPENROUTER_STATIC_POOL = [
 /* Claves y disponibilidad                                             */
 /* ------------------------------------------------------------------ */
 
-/** Llamada al endpoint oficial de NVIDIA (integrate.api.nvidia.com).
- * Igual que `callOpenAiCompatible` pero con su propia clave y dominio.
- * El modelo suele venir especificado (ej. `nemotron` o `nvidia/nemotron`) y la
- * clave debe ser `NVIDIA_API_KEY`.
- */
-async function callNvidia(params: TransportParams): Promise<{ text: string }> {
-  const endpoint = 'https://integrate.api.nvidia.com/v1/chat/completions';
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${params.apiKey ?? ''}`,
-  };
-  const body = {
-    model: params.model ?? 'nemotron',
-    messages: openAiMessages(params, 'nvidia'),
-    temperature: 0.4,
-    max_tokens: params.maxTokens ?? 2048,
-  };
-  let res: Response;
-  try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
-    });
-  } catch (error) {
-    const timedOut = isTimeoutError(error);
-    throw new TutorError(
-      timedOut
-        ? 'NVIDIA ha tardado demasiado en contestar. Se prueba el siguiente modelo.'
-        : 'No se pudo contactar con el servicio de IA de NVIDIA. Comprueba tu conexión e inténtalo de nuevo.',
-      timedOut ? 504 : 502,
-      error instanceof Error ? error.message : String(error),
-      timedOut ? 'timeout' : undefined
-    );
-  }
-  const payload = (await res.json().catch(() => null)) as NvidiaPayload | null;
-  if (!res.ok) {
-    const providerMessage =
-      typeof payload?.error === 'object'
-        ? payload?.error?.message
-        : typeof payload?.error === 'string'
-          ? payload.error
-          : undefined;
-    throw describeHttpError('nvidia', res.status, providerMessage || `HTTP ${res.status}`);
-  }
-  const text = (payload?.choices?.[0]?.message?.content || '').trim();
-  if (!text) {
-    throw new TutorError(
-      'NVIDIA no ha devuelto ninguna respuesta. Reinténtalo.',
-      502,
-      'Respuesta vacía del proveedor'
-    );
-  }
-  return { text };
-}
-
 /** Máximo de claves por proveedor: las extra se numeran hasta aquí. */
 export const MAX_KEYS_PER_PROVIDER = 4;
 
@@ -560,6 +525,15 @@ export interface ProviderKey {
   label: string;
   envVar: string;
   key: string;
+  /**
+   * Identidad del libro de salud/enfriamiento. En BYOK es un HMAC por cuenta y
+   * proveedor, no el literal `usuario`: dos alumnos nunca comparten libro.
+   */
+  ledgerId: string;
+  /** De dónde sale la clave; decide el alcance del cupo por modelo. */
+  source: AiCredential['source'];
+  /** Endpoint propio (solo proveedores que lo admiten). */
+  baseUrl?: string;
 }
 
 /**
@@ -594,7 +568,15 @@ function localEngineAllowed(): boolean {
 export function getProviderKeys(provider: AiProvider): ProviderKey[] {
   if (provider === 'ollama') {
     if (!localEngineAllowed()) return [];
-    return [{ label: 'local', envVar: 'OLLAMA_BASE_URL', key: OLLAMA_BASE }];
+    return [
+      {
+        label: 'local',
+        envVar: 'OLLAMA_BASE_URL',
+        key: OLLAMA_BASE,
+        ledgerId: 'OLLAMA_BASE_URL',
+        source: 'plataforma',
+      },
+    ];
   }
   const keys: ProviderKey[] = [];
   const seen = new Set<string>();
@@ -602,7 +584,14 @@ export function getProviderKeys(provider: AiProvider): ProviderKey[] {
     if (credential.provider !== provider) continue;
     if (credential.key.length === 0 || seen.has(credential.key)) continue;
     seen.add(credential.key);
-    keys.push({ label: credential.label, envVar: credential.envVar, key: credential.key });
+    keys.push({
+      label: credential.label,
+      envVar: credential.envVar,
+      key: credential.key,
+      ledgerId: credential.ledgerId,
+      source: credential.source,
+      ...(credential.baseUrl ? { baseUrl: credential.baseUrl } : {}),
+    });
   }
   return keys.slice(0, MAX_KEYS_PER_PROVIDER);
 }
@@ -636,21 +625,27 @@ export function getConfiguredEngines(): EngineOption[] {
 
 /** Cómo se llama cada motor en la interfaz, sin tecnicismos. */
 function engineDisplayName(provider: AiProvider): string {
-  if (provider === 'gemini') return 'Gemini';
-  if (provider === 'groq') return 'Groq';
-  if (provider === 'openrouter') return 'OpenRouter';
-  if (provider === 'nvidia') return 'NVIDIA';
-  return 'Modelo local';
+  if (provider === 'ollama' || provider === 'local') return 'Modelo local';
+  return getProviderDescriptor(provider)?.label ?? provider;
 }
 
+/**
+ * Proveedores que pueden contestar con las credenciales de ESTA petición.
+ *
+ * Sale del catálogo, así que añadir uno nuevo no toca esta función. Un
+ * proveedor con endpoint propio solo entra si su credencial trae la URL ya
+ * validada: una clave sin endpoint no puede llamar a ninguna parte.
+ */
 export function getConfiguredProviders(): AiProvider[] {
   const providers: AiProvider[] = [];
-  if (getApiKey('gemini')) providers.push('gemini');
-  if (getApiKey('groq')) providers.push('groq');
-  // OpenRouter va DESPUÉS de Groq y antes del modelo local: es la tercera vía.
-  if (getApiKey('openrouter')) providers.push('openrouter');
-  // NVIDIA usa su propia clave y endpoint propio, tras OpenRouter.
-  if (getApiKey('nvidia')) providers.push('nvidia');
+  for (const descriptor of providerIds()) {
+    const keys = getProviderKeys(descriptor);
+    if (keys.length === 0) continue;
+    if (getProviderDescriptor(descriptor)?.requiresBaseUrl && !keys.some((key) => key.baseUrl)) {
+      continue;
+    }
+    providers.push(descriptor);
+  }
   // El motor local va SIEMPRE el último: la nube escribe mejor.
   const mode = ollamaMode();
   if (mode === 'on') providers.push('ollama');
@@ -687,7 +682,7 @@ export function hasAnyFreeKey(): boolean {
   for (const provider of getConfiguredProviders()) {
     if (provider === 'ollama') return true;
     const keys = getProviderKeys(provider);
-    if (keys.some((entry) => getKeyCooldownSeconds(provider, entry.envVar) === 0)) return true;
+    if (keys.some((entry) => getKeyCooldownSeconds(provider, entry.ledgerId) === 0)) return true;
   }
   return false;
 }
@@ -705,7 +700,7 @@ function candidateKey(provider: AiProvider, model: string): string {
  * multimodales conocidos: decir que sí de más acaba en una disculpa inventada.
  */
 export function modelSupportsVision(provider: AiProvider, model: string): boolean {
-  return modelHasVision(provider, model);
+  return modelCapabilities(provider, model).vision;
 }
 
 /* ------------------------------------------------------------------ */
@@ -818,16 +813,6 @@ interface OpenAiModelsPayload {
 }
 interface OllamaModelsPayload {
   models?: Array<{ name?: string }>;
-}
-interface NvidiaModelsPayload {
-  choices?: Array<{ message?: { content?: string } }>;
-  error?: { message?: string };
-}
-// Respuesta del endpoint https://integrate.api.nvidia.com/v1/chat/completions
-// Estructura simplificada: choices[0].message.content tiene el texto.
-interface NvidiaPayload {
-  choices?: Array<{ message?: { content?: string } }>;
-  error?: { message?: string };
 }
 
 const catalogCache = new Map<string, { at: number; list: string[] }>();
@@ -956,14 +941,8 @@ export async function rankModels(provider: AiProvider): Promise<ModelCandidate[]
     ranked.sort((a, b) => b.score - a.score);
     return ranked;
   }
-  if (
-    provider !== 'gemini' &&
-    provider !== 'groq' &&
-    provider !== 'openrouter' &&
-    provider !== 'nvidia'
-  ) {
-    return [];
-  }
+  const descriptor = getProviderDescriptor(provider);
+  if (!descriptor) return [];
   const keyEntry = getProviderKeys(provider)[0];
   if (!keyEntry) return [];
   const ranked: ModelCandidate[] = [];
@@ -977,7 +956,14 @@ export async function rankModels(provider: AiProvider): Promise<ModelCandidate[]
   //    turno entero se gastaba en ellos y el alumno veía «Sin IA» teniendo
   //    `3.6-flash` y `3.5-flash` sanos. El orden sale de `models.json` o de
   //    `AI_<PROVEEDOR>_MODELS`, no de este archivo.
-  configuredModelChain(provider).forEach((entry, index) => {
+  const configured = configuredModelChain(provider);
+  const declared =
+    configured.length > 0
+      ? configured
+      : (provider === 'custom' ? customModelsFromEnv() : descriptor.models.map((entry) => entry.id)).map(
+          (id) => ({ id })
+        );
+  declared.forEach((entry, index) => {
     seen.add(entry.id);
     ranked.push({
       provider,
@@ -988,16 +974,19 @@ export async function rankModels(provider: AiProvider): Promise<ModelCandidate[]
   });
 
   // 2) El catálogo real completa por detrás: un modelo nuevo entra solo, pero
-  //    nunca por delante de los que ya sabemos que contestan. NVIDIA no publica
-  //    catálogo compatible, así que se queda con su cadena configurada.
-  if (provider !== 'nvidia') {
+  //    nunca por delante de los que ya sabemos que contestan. Los adaptadores
+  //    nuevos usan su catálogo declarado; no se inventan ids.
+  if (provider === 'gemini' || provider === 'groq' || provider === 'openrouter') {
     const apiKey = keyEntry.key;
     const listed =
+      // El catálogo se cachea por LIBRO, no por `envVar`: en BYOK todas las
+      // claves propias se llaman `usuario` y el catálogo de un alumno no debe
+      // decidir el de otro.
       provider === 'gemini'
-        ? await listGeminiModels(apiKey, keyEntry.envVar)
+        ? await listGeminiModels(apiKey, keyEntry.ledgerId)
         : provider === 'groq'
-          ? await listGroqModels(apiKey, keyEntry.envVar)
-          : await listOpenRouterModels(apiKey, keyEntry.envVar);
+          ? await listGroqModels(apiKey, keyEntry.ledgerId)
+          : await listOpenRouterModels(apiKey, keyEntry.ledgerId);
     const scorer =
       provider === 'gemini'
         ? scoreGeminiModel
@@ -1073,17 +1062,25 @@ function isCoolingDown(key: string): boolean {
   return getCooldownSeconds(key) > 0;
 }
 
-function keyId(provider: AiProvider, envVar: string): string {
-  return `${provider}#${envVar}`;
+/**
+ * Identidad de una clave en el libro: proveedor + `ledgerId`.
+ *
+ * `ledgerId` es la variable de entorno para una clave de plataforma y un HMAC
+ * por cuenta para una clave propia. Antes, TODAS las claves propias llegaban
+ * con `envVar: 'usuario'`, así que este id era `gemini#usuario` para todo el
+ * mundo: el 429 de un alumno enfriaba la clave de los demás.
+ */
+function keyId(provider: AiProvider, ledgerId: string): string {
+  return `${provider}#${ledgerId}`;
 }
 
 function markKeyHealth(
   provider: AiProvider,
-  envVar: string,
+  ledgerId: string,
   status: string,
   detail?: string
 ): void {
-  keyLedger.set(keyId(provider, envVar), {
+  keyLedger.set(keyId(provider, ledgerId), {
     status,
     until: status === 'ok' ? 0 : Date.now() + cooldownFor(status, detail || ''),
     at: Date.now(),
@@ -1091,9 +1088,14 @@ function markKeyHealth(
   });
 }
 
-/** Segundos que le quedan de enfriamiento a una clave (0 si está disponible). */
-export function getKeyCooldownSeconds(provider: AiProvider, envVar: string): number {
-  const entry = keyLedger.get(keyId(provider, envVar));
+/**
+ * Segundos que le quedan de enfriamiento a una clave (0 si está disponible).
+ *
+ * El segundo argumento es el `ledgerId` de la clave (ver `ProviderKey`), no el
+ * `envVar` visible: en BYOK son distintos a propósito.
+ */
+export function getKeyCooldownSeconds(provider: AiProvider, ledgerId: string): number {
+  const entry = keyLedger.get(keyId(provider, ledgerId));
   if (!entry || entry.until === 0) return 0;
   return Math.max(0, Math.ceil((entry.until - Date.now()) / 1000));
 }
@@ -1105,14 +1107,18 @@ export function getKeyCooldownSeconds(provider: AiProvider, envVar: string): num
  */
 const keyCalls = new Map<string, number>();
 
-function noteKeyUse(provider: AiProvider, envVar: string): void {
-  const id = keyId(provider, envVar);
+function noteKeyUse(provider: AiProvider, ledgerId: string): void {
+  const id = keyId(provider, ledgerId);
   keyCalls.set(id, (keyCalls.get(id) ?? 0) + 1);
 }
 
-/** Intentos hechos con esta clave desde que arrancó la app (para el reparto). */
-export function getKeyCallCount(provider: AiProvider, envVar: string): number {
-  return keyCalls.get(keyId(provider, envVar)) ?? 0;
+/**
+ * Intentos hechos con esta clave desde que arrancó la app (para el reparto).
+ * Recibe el `ledgerId`, así que el contador es de esa cuenta y no de todos los
+ * alumnos que usen el mismo proveedor.
+ */
+export function getKeyCallCount(provider: AiProvider, ledgerId: string): number {
+  return keyCalls.get(keyId(provider, ledgerId)) ?? 0;
 }
 
 /*
@@ -1120,12 +1126,12 @@ export function getKeyCallCount(provider: AiProvider, envVar: string): number {
  * se queda sin cupo con la clave 1, ese modelo sigue teniendo cupo con la clave
  * 2, y los otros modelos siguen teniendo cupo con la clave 1.
  */
-function pairId(modelKey: string, label: string): string {
-  return `${modelKey}#${label}`;
+function pairId(modelKey: string, scope: string): string {
+  return `${modelKey}#${scope}`;
 }
 
-function markPairHealth(modelKey: string, label: string, status: string, detail?: string): void {
-  pairLedger.set(pairId(modelKey, label), {
+function markPairHealth(modelKey: string, scope: string, status: string, detail?: string): void {
+  pairLedger.set(pairId(modelKey, scope), {
     status,
     until: Date.now() + cooldownFor(status, detail || ''),
     at: Date.now(),
@@ -1133,9 +1139,21 @@ function markPairHealth(modelKey: string, label: string, status: string, detail?
   });
 }
 
+/**
+ * Alcance del cupo «modelo + clave».
+ *
+ * En plataforma la etiqueta («principal», «2»…) ya es única por proveedor. En
+ * BYOK todas las claves propias se llaman «principal», así que el alcance tiene
+ * que ser el libro de la cuenta: si no, el cupo de un modelo se compartiría
+ * entre alumnos.
+ */
+function pairScope(entry: ProviderKey): string {
+  return entry.source === 'usuario' ? entry.ledgerId : entry.label;
+}
+
 /** Segundos de enfriamiento de un modelo con una clave concreta (0 = libre). */
-export function getPairCooldownSeconds(modelKey: string, label: string): number {
-  const entry = pairLedger.get(pairId(modelKey, label));
+export function getPairCooldownSeconds(modelKey: string, scope: string): number {
+  const entry = pairLedger.get(pairId(modelKey, scope));
   if (!entry || entry.until === 0) return 0;
   return Math.max(0, Math.ceil((entry.until - Date.now()) / 1000));
 }
@@ -1143,8 +1161,8 @@ export function getPairCooldownSeconds(modelKey: string, label: string): number 
 /** ¿Se puede intentar este modelo con esta clave ahora mismo? */
 function isKeyFreeFor(modelKey: string, provider: AiProvider, entry: ProviderKey): boolean {
   return (
-    getKeyCooldownSeconds(provider, entry.envVar) === 0 &&
-    getPairCooldownSeconds(modelKey, entry.label) === 0
+    getKeyCooldownSeconds(provider, entry.ledgerId) === 0 &&
+    getPairCooldownSeconds(modelKey, pairScope(entry)) === 0
   );
 }
 
@@ -1160,11 +1178,11 @@ function keysForTurn(modelKey: string, provider: AiProvider): ProviderKey[] {
   const usable = all.filter((entry) => isKeyFreeFor(modelKey, provider, entry));
   if (usable.length <= 1) return usable;
   const ordered = [...usable].sort(
-    (a, b) => getKeyCallCount(provider, a.envVar) - getKeyCallCount(provider, b.envVar)
+    (a, b) => getKeyCallCount(provider, a.ledgerId) - getKeyCallCount(provider, b.ledgerId)
   );
   if (usable.length < all.length) {
-    const lastGoodLabel = lastGoodKeyByModel.get(modelKey);
-    const index = ordered.findIndex((entry) => entry.label === lastGoodLabel);
+    const lastGoodScope = lastGoodKeyByModel.get(`${ledgerScope()}|${modelKey}`);
+    const index = ordered.findIndex((entry) => pairScope(entry) === lastGoodScope);
     if (index > 0) {
       const [good] = ordered.splice(index, 1);
       ordered.unshift(good);
@@ -1173,11 +1191,11 @@ function keysForTurn(modelKey: string, provider: AiProvider): ProviderKey[] {
   return ordered;
 }
 
-/** Cuántos modelos de este proveedor están sin cupo con ESTA clave. */
-function countModelsOutOfQuota(provider: AiProvider, label: string): number {
+/** Cuántos modelos de este proveedor están sin cupo con ESTE ámbito de clave. */
+function countModelsOutOfQuota(provider: AiProvider, scope: string): number {
   let count = 0;
   for (const [id, entry] of pairLedger) {
-    if (!id.startsWith(`${provider}:`) || !id.endsWith(`#${label}`)) continue;
+    if (!id.startsWith(`${provider}:`) || !id.endsWith(`#${scope}`)) continue;
     if (Math.max(0, entry.until - Date.now()) > 0) count += 1;
   }
   return count;
@@ -1187,31 +1205,41 @@ function countModelsOutOfQuota(provider: AiProvider, label: string): number {
 function noKeysReason(modelKey: string, provider: AiProvider): string {
   const keys = getProviderKeys(provider);
   if (keys.length === 0) return `sin clave para ${provider}`;
-  const allKeysCooling = keys.every((entry) => getKeyCooldownSeconds(provider, entry.envVar) > 0);
+  const allKeysCooling = keys.every((entry) => getKeyCooldownSeconds(provider, entry.ledgerId) > 0);
   if (allKeysCooling) return `todas las claves de ${provider} están en enfriamiento`;
   return `el cupo de ${modelKey} está agotado en todas las claves`;
 }
 
-/** Último modelo que respondió bien (se promociona al frente de la cadena). */
-let lastGoodKey: string | null = null;
+/**
+ * Alcance del «último modelo bueno» para el juego de credenciales actual.
+ *
+ * Con BYOK, el modelo que le fue bien al alumno A no puede reordenar la cadena
+ * del alumno B. El alcance sale de los propios `ledgerId` de la petición: para
+ * claves propias es el HMAC de la cuenta; para plataforma, sus variables.
+ */
+function ledgerScope(): string {
+  const ids = Array.from(new Set(scopedCredentials().map((entry) => entry.ledgerId))).sort();
+  return ids.length > 0 ? ids.join('|') : 'sin-ambito';
+}
+
+/** Último modelo que respondió bien EN ESTA CUENTA (se promociona al frente). */
+const lastGoodKeyByScope = new Map<string, string>();
 
 /**
  * Y con qué CLAVE respondió bien cada modelo: con cupo caído, volver a probar
  * el modelo por la clave que acaba de funcionar ahorra el turno entero.
+ * La clave del mapa es «alcance|modelo»; el valor, el ámbito de la clave.
  */
 const lastGoodKeyByModel = new Map<string, string>();
 
 export function getLastGoodKey(): string | null {
-  return lastGoodKey;
+  return lastGoodKeyByScope.get(ledgerScope()) ?? null;
 }
 
 /** El proveedor de un identificador de modelo («gemini:x-flash» → `gemini`). */
 function providerOfModelKey(modelKey: string): AiProvider | null {
-  if (modelKey.startsWith('gemini:')) return 'gemini';
-  if (modelKey.startsWith('groq:')) return 'groq';
-  if (modelKey.startsWith('openrouter:')) return 'openrouter';
-  if (modelKey.startsWith('ollama:')) return 'ollama';
-  return null;
+  const index = modelKey.indexOf(':');
+  return index > 0 ? modelKey.slice(0, index) : null;
 }
 
 /**
@@ -1230,7 +1258,7 @@ export function isQuotaTight(): boolean {
   let cooling = false;
   for (const provider of providers) {
     for (const entry of getProviderKeys(provider)) {
-      if (getKeyCooldownSeconds(provider, entry.envVar) === 0) freeKeys += 1;
+      if (getKeyCooldownSeconds(provider, entry.ledgerId) === 0) freeKeys += 1;
       else cooling = true;
     }
   }
@@ -1245,11 +1273,12 @@ export function isQuotaTight(): boolean {
   if (freeKeys === 1 && cooling) return true;
   // El modelo en uso sin ninguna clave libre: la siguiente llamada de fondo ya
   // no tendría por dónde salir, así que no se le da el turno.
+  const lastGoodKey = getLastGoodKey();
   if (lastGoodKey) {
     const provider = providerOfModelKey(lastGoodKey);
     if (provider) {
       const free = getProviderKeys(provider).filter((entry) =>
-        isKeyFreeFor(lastGoodKey as string, provider, entry)
+        isKeyFreeFor(lastGoodKey, provider, entry)
       ).length;
       if (free === 0) return true;
     }
@@ -1308,23 +1337,32 @@ export function getUsageToday(): {
 
 function configuredProviderOrder(): AiProvider[] {
   const forced = (process.env.AI_PROVIDER || 'auto').trim().toLowerCase();
-  if (forced === 'gemini') return ['gemini'];
-  if (forced === 'groq') return ['groq'];
-  if (forced === 'openrouter') return ['openrouter'];
-  if (forced === 'ollama') return ['ollama'];
-  // Auto: Gemini primero, Groq de desbordamiento y OpenRouter como tercera vía.
-  return getConfiguredProviders();
+  if (forced !== 'auto') {
+    // Un despliegue puede fijar un proveedor para pruebas; sigue sin salirse
+    // de las credenciales de la petición (si no hay, la cadena queda vacía).
+    return getConfiguredProviders().filter((provider) => provider === forced);
+  }
+
+  const order = getConfiguredProviders();
+  const priorities = new Map<string, number>();
+  for (const credential of scopedCredentials()) {
+    const current = priorities.get(credential.provider);
+    const next = Number.isFinite(credential.priority) ? credential.priority : 1000;
+    if (current === undefined || next < current) priorities.set(credential.provider, next);
+  }
+  return [...order].sort((a, b) => {
+    if (a === 'ollama') return 1;
+    if (b === 'ollama') return -1;
+    return (priorities.get(a) ?? 1000) - (priorities.get(b) ?? 1000);
+  });
 }
 
 function forcedModel(provider: AiProvider): string | null {
-  const raw =
-    (provider === 'gemini'
-      ? process.env.GEMINI_MODEL
-      : provider === 'groq'
-        ? process.env.GROQ_MODEL
-        : provider === 'openrouter'
-          ? process.env.OPENROUTER_MODEL
-          : '') || '';
+  const envName =
+    provider === 'custom'
+      ? 'AI_CUSTOM_MODEL'
+      : `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_MODEL`;
+  const raw = process.env[envName] || '';
   const value = raw.trim();
   if (!value || value.toLowerCase() === 'auto') return null;
   return value;
@@ -1357,7 +1395,8 @@ export async function getCandidateChain(only?: AiProvider): Promise<ModelCandida
       push(candidate);
     }
   }
-  // El último modelo que funcionó va primero: acierta casi siempre.
+  // El último modelo que funcionó EN ESTA CUENTA va primero: acierta casi siempre.
+  const lastGoodKey = getLastGoodKey();
   if (lastGoodKey) {
     const index = chain.findIndex((c) => c.key === lastGoodKey);
     if (index > 0) {
@@ -1465,7 +1504,7 @@ function providerLabel(provider: AiProvider): string {
   if (provider === 'groq') return 'Groq';
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'nvidia') return 'NVIDIA';
-  return 'el modelo local (Ollama)';
+  return 'el modelo local';
 }
 
 function describeHttpError(provider: AiProvider, status: number, providerMessage: string): TutorError {
@@ -1494,14 +1533,14 @@ function describeHttpError(provider: AiProvider, status: number, providerMessage
   if (provider === 'ollama') {
     if (status === 404) {
       return new TutorError(
-        'Ese modelo no está descargado en tu Ollama. Descárgalo con `ollama pull <modelo>` (npm run ollama:doctor te dice cuál te conviene y por qué).',
+        'Ese modelo no está descargado en tu motor local. Descárgalo desde la guía de Ajustes (te dice cuál te conviene y por qué).',
         404,
         providerMessage,
         kind
       );
     }
     return new TutorError(
-      `Ollama ha contestado con un error (HTTP ${status}). Comprueba que el servicio está levantado con \`npm run ollama:doctor\`.`,
+      `El modelo local ha contestado con un error (HTTP ${status}). Comprueba que el servicio esté levantado.`,
       502,
       providerMessage,
       kind
@@ -1509,7 +1548,7 @@ function describeHttpError(provider: AiProvider, status: number, providerMessage
   }
   if (status === 400 || status === 401 || status === 403) {
     return new TutorError(
-      `La clave de ${providerLabel(provider)} no es válida o no tiene permisos. Revísala en Ajustes.`,
+      'La clave de IA no es válida o no tiene permisos. Revísala en Ajustes.',
       502,
       providerMessage,
       kind
@@ -1518,7 +1557,7 @@ function describeHttpError(provider: AiProvider, status: number, providerMessage
   if (status === 404) {
     return new TutorError('Modelo no disponible.', 404, providerMessage, kind);
   }
-  return new TutorError(`El servicio de ${providerLabel(provider)} está fallando.`, 502, providerMessage, kind);
+  return new TutorError('El servicio de IA está fallando.', 502, providerMessage, kind);
 }
 
 /** Aplana la respuesta de la API de Interactions para quedarnos con el texto. */
@@ -1575,6 +1614,14 @@ interface TransportParams {
   readableTextAttachments?: string[];
   maxTokens?: number;
   timeoutMs?: number;
+  /** Señal externa del hedge: aborta al perdedor sin tocar su timeout propio. */
+  signal?: AbortSignal;
+}
+
+/** Timeout del intento + cancelación del hedge, en una sola señal. */
+function attemptSignal(timeoutMs: number | undefined, external?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs ?? AI_ATTEMPT_MAX_MS);
+  return external ? AbortSignal.any([timeout, external]) : timeout;
 }
 
 interface OpenAiChatPayload {
@@ -1629,7 +1676,7 @@ async function callGemini(params: TransportParams): Promise<{ text: string; step
         store: false,
         input,
       }),
-      signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
+      signal: attemptSignal(params.timeoutMs, params.signal),
     });
   } catch (error) {
     // Un modelo lento NO se reintenta: el reintento vuelve a esperar los mismos
@@ -1637,7 +1684,7 @@ async function callGemini(params: TransportParams): Promise<{ text: string; step
     const timedOut = isTimeoutError(error);
     throw new TutorError(
       timedOut
-        ? 'Gemini ha tardado demasiado en contestar. Se prueba el siguiente modelo.'
+        ? 'Tu proveedor de IA ha tardado demasiado en contestar. Se prueba el siguiente modelo.'
         : 'No se pudo contactar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo.',
       timedOut ? 504 : 502,
       error instanceof Error ? error.message : String(error),
@@ -1709,7 +1756,7 @@ function openAiMessages(params: TransportParams, provider: AiProvider): OpenAiMe
 }
 
 async function callOpenAiCompatible(
-  provider: 'groq' | 'openrouter' | 'ollama',
+  provider: AiProvider,
   endpoint: string,
   params: TransportParams
 ): Promise<{ text: string }> {
@@ -1736,15 +1783,15 @@ async function callOpenAiCompatible(
           ? { reasoning_effort: 'low' }
           : {}),
       }),
-      signal: AbortSignal.timeout(params.timeoutMs ?? AI_ATTEMPT_MAX_MS),
+      signal: attemptSignal(params.timeoutMs, params.signal),
     });
   } catch (error) {
     const timedOut = isTimeoutError(error);
     const message =
       provider === 'ollama'
-        ? 'No se pudo contactar con Ollama local. Comprueba que el servicio esté iniciado en el puerto 11434.'
+        ? 'No se pudo contactar con el modelo local. Comprueba que el servicio esté iniciado en el puerto 11434.'
         : timedOut
-          ? `${providerLabel(provider)} ha tardado demasiado en contestar. Se prueba el siguiente modelo.`
+          ? 'Tu proveedor de IA ha tardado demasiado en contestar. Se prueba el siguiente modelo.'
           : 'No se pudo contactar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo.';
     throw new TutorError(
       message,
@@ -1768,7 +1815,7 @@ async function callOpenAiCompatible(
   if (!text) {
     const emptyMessage =
       provider === 'ollama'
-        ? 'Ollama no ha devuelto ninguna respuesta. Reinténtalo.'
+        ? 'El modelo local no ha devuelto ninguna respuesta. Reinténtalo.'
         : 'El modelo no ha devuelto ninguna respuesta. Reinténtalo.';
     const finish = payload?.choices?.[0]?.finish_reason ?? 'desconocido';
     throw new TutorError(
@@ -1776,6 +1823,82 @@ async function callOpenAiCompatible(
       502,
       `Respuesta vacía del proveedor (finish_reason: ${finish})`
     );
+  }
+  return { text };
+}
+
+interface AnthropicPayload {
+  content?: Array<{ type?: string; text?: string }>;
+  error?: { message?: string };
+}
+
+function anthropicMessages(params: TransportParams): Array<Record<string, unknown>> {
+  const history = (params.messages ?? [])
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .map((message) => ({ role: message.role, content: message.content }));
+  const attachments = (params.attachments ?? []).filter(
+    (attachment) => isImageAttachment(attachment) && modelSupportsVision('anthropic', params.model)
+  );
+  if (attachments.length === 0) return [...history, { role: 'user', content: params.message }];
+  return [
+    ...history,
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: params.message },
+        ...attachments.map((attachment) => ({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: attachment.mimeType,
+            data: attachment.data,
+          },
+        })),
+      ],
+    },
+  ];
+}
+
+async function callAnthropic(params: TransportParams, endpoint: string): Promise<{ text: string }> {
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': params.apiKey ?? '',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: params.model,
+        max_tokens: params.maxTokens ?? 2048,
+        system: params.systemInstruction,
+        messages: anthropicMessages(params),
+      }),
+      signal: attemptSignal(params.timeoutMs, params.signal),
+    });
+  } catch (error) {
+    const timedOut = isTimeoutError(error);
+    throw new TutorError(
+      timedOut
+        ? 'Tu proveedor de IA ha tardado demasiado en contestar. Se prueba el siguiente modelo.'
+        : 'No se pudo contactar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo.',
+      timedOut ? 504 : 502,
+      error instanceof Error ? error.message : String(error),
+      timedOut ? 'timeout' : undefined
+    );
+  }
+  const payload = (await res.json().catch(() => null)) as AnthropicPayload | null;
+  if (!res.ok) {
+    throw describeHttpError('anthropic', res.status, payload?.error?.message || `HTTP ${res.status}`);
+  }
+  const text = (payload?.content ?? [])
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text ?? '')
+    .join('')
+    .trim();
+  if (!text) {
+    throw new TutorError('El modelo no ha devuelto ninguna respuesta. Reinténtalo.', 502, 'Respuesta vacía del proveedor');
   }
   return { text };
 }
@@ -1832,6 +1955,108 @@ function promoteOtherProvider(queue: ModelCandidate[], index: number): ModelCand
 
 type KeyOutcome = AiTextResult | 'next-key' | 'stop';
 
+/** Endpoint de chat del adaptador, con el baseUrl de la credencial si lo hay. */
+function chatEndpoint(provider: AiProvider, baseUrl?: string): string | null {
+  const descriptor = getProviderDescriptor(provider);
+  if (!descriptor) return null;
+  const base = (baseUrl ?? descriptor.baseUrl ?? '').replace(/\/+$/, '');
+  if (!base) return null;
+  const defaultPath = descriptor.adapter === 'anthropic-messages' ? '/messages' : '/chat/completions';
+  return `${base}${descriptor.chatPath ?? defaultPath}`;
+}
+
+/**
+ * Un intento de transporte, con el adaptador que diga el catálogo.
+ *
+ * Es el único sitio que traduce `provider` a dialecto. Lo usan el bucle normal
+ * y el hedge, así que una mejora en un adaptador vale para los dos.
+ */
+async function dispatchCandidate(input: {
+  candidate: ModelCandidate;
+  apiKey: string;
+  baseUrl?: string;
+  systemInstruction: string;
+  params: AiTextParams;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<{ text: string; steps?: unknown[] }> {
+  const { candidate, apiKey, systemInstruction, params, timeoutMs, signal } = input;
+  if (candidate.provider === 'ollama') {
+    return callOllama({
+      model: candidate.model,
+      systemInstruction,
+      messages: params.messages ?? [],
+      message: params.message,
+      attachments: params.attachments ?? [],
+      readableTextAttachments: params.readableTextAttachments,
+      maxTokens: params.maxTokens,
+      timeoutMs,
+      signal,
+    });
+  }
+
+  const adapter = getProviderDescriptor(candidate.provider)?.adapter;
+  if (adapter === 'gemini-interactions') {
+    return callGemini({
+      apiKey,
+      model: candidate.model,
+      systemInstruction,
+      history: params.history ?? [],
+      messages: params.messages ?? [],
+      message: params.message,
+      attachments: params.attachments ?? [],
+      timeoutMs,
+      signal,
+    });
+  }
+
+  const endpoint = chatEndpoint(candidate.provider, input.baseUrl);
+  if (!endpoint) {
+    throw new TutorError(
+      'Esa clave no tiene un endpoint válido configurado. Revísala en Ajustes.',
+      502,
+      `sin endpoint para ${candidate.provider}`
+    );
+  }
+
+  if (adapter === 'anthropic-messages') {
+    return callAnthropic(
+      {
+        apiKey,
+        model: candidate.model,
+        systemInstruction,
+        messages: params.messages ?? [],
+        message: params.message,
+        attachments: params.attachments ?? [],
+        readableTextAttachments: params.readableTextAttachments,
+        maxTokens: params.maxTokens,
+        timeoutMs,
+        signal,
+      },
+      endpoint
+    );
+  }
+  if (adapter === 'openai-chat') {
+    return callOpenAiCompatible(candidate.provider, endpoint, {
+      apiKey,
+      model: candidate.model,
+      systemInstruction,
+      messages: params.messages ?? [],
+      message: params.message,
+      attachments: params.attachments ?? [],
+      readableTextAttachments: params.readableTextAttachments,
+      maxTokens: params.maxTokens,
+      timeoutMs,
+      signal,
+    });
+  }
+  throw new TutorError(
+    'Ese proveedor de IA no está soportado por este motor.',
+    502,
+    `adaptador desconocido para ${candidate.provider}`
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Turno                                                               */
 /* ------------------------------------------------------------------ */
@@ -1858,50 +2083,65 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
       'quota'
     );
   }
-  const chain = await getCandidateChain(params.provider);
-  /**
-   * ENRUTADO POR CAPACIDAD.
-   *
-   * Si el turno trae una imagen o un PDF (algo que hay que MIRAR, no solo
-   * leer), solo lo pueden atender modelos con visión. Esos bytes no se le
-   * enseñan a un modelo de texto ni se reenvían a otro proveedor «por si
-   * acaso»: si no hay ninguno disponible, se avisa y no se manda nada.
-   */
-  const requiresVision = (params.attachments ?? []).length > 0;
-  if (requiresVision) {
-    for (let index = chain.length - 1; index >= 0; index--) {
-      const candidate = chain[index];
-      if (!modelSupportsVision(candidate.provider, candidate.model)) chain.splice(index, 1);
-    }
-  }
+  let chain = await getCandidateChain(params.provider);
   const attempts: Array<{ key: string; outcome: string; note?: string }> = [];
   // El reloj del turno: la cadena entera comparte un solo presupuesto.
   const budgetMs = Math.max(1_000, params.budgetMs ?? AI_TEXT_BUDGET_MS);
   const deadline = Date.now() + budgetMs;
+  const requiresVision = params.requiresVision === true || (params.attachments ?? []).length > 0;
 
+  // Sin ninguna credencial/candidato no hay nada que filtrar: se conserva el
+  // mensaje que ya explicaba las dos salidas (clave o modelo local).
   if (chain.length === 0) {
-    if (requiresVision) {
-      lastDecision = { at: Date.now(), provider: null, model: null, ranked: [], attempts };
-      throw new TutorError(
-        'El mensaje lleva un archivo (captura o PDF) y ahora mismo no hay ningún modelo con visión disponible. No se manda a un modelo que no puede leerlo: espera un minuto e inténtalo otra vez, o pégalo como texto.',
-        503,
-        'sin modelos con visión disponibles'
-      );
-    }
     const configured = getConfiguredProviders();
-    const hasCloudKeys = Boolean(getApiKey('gemini') || getApiKey('groq') || getApiKey('openrouter'));
+    const hasCloudKeys = configured.some((provider) => provider !== 'ollama');
     const forcedNote = params.provider
-      ? ` El motor elegido (${engineDisplayName(params.provider)}) no tiene ahora mismo ningún modelo con cupo disponible.`
+      ? ' El motor elegido no tiene ahora mismo ningún modelo con cupo disponible.'
       : '';
     const message =
       (!hasCloudKeys
-        ? 'El motor de IA no tiene por dónde funcionar: esta cuenta no tiene ninguna clave de IA disponible y tampoco hay un modelo local levantado. Añade tu clave en Ajustes o arranca Ollama (`npm run ollama:doctor`).'
+        ? 'El motor de IA no tiene por dónde funcionar: esta cuenta no tiene ninguna clave de IA disponible y tampoco hay un modelo local activo. Añade tu clave en Ajustes o activa el modelo local.'
         : 'Todos los modelos gratuitos están saturados ahora mismo. Espera un minuto y reinténtalo.') +
       forcedNote;
     lastDecision = { at: Date.now(), provider: null, model: null, ranked: [], attempts };
     throw new TutorError(message, configured.length === 0 ? 503 : 429, 'Sin candidatos disponibles');
   }
 
+  /**
+   * ENRUTADO POR CAPACIDAD, ANTES DE LLAMAR.
+   *
+   * La cadena ya sale solo de las credenciales de este perfil. Aquí se filtra
+   * por lo que el turno exige de verdad (visión para imágenes/PDF, tools, JSON)
+   * y se elige campeón + hedge dentro de esos candidatos. Si nada cubre una
+   * capacidad, no se envía la petición: se degrada con un mensaje de producto.
+   */
+  const requiredCapabilities = {
+    vision: requiresVision,
+    tools: params.requiresTools === true,
+    json: params.requiresJson === true,
+  };
+  const routing = planRoute({
+    models: chain.map((candidate) => ({
+      provider: candidate.provider,
+      model: candidate.model,
+      key: candidate.key,
+    })),
+    required: requiredCapabilities,
+  });
+  if (routing.ranked.length === 0) {
+    lastDecision = { at: Date.now(), provider: null, model: null, ranked: [], attempts: [] };
+    throw new TutorError(
+      capabilityDegradationMessage(routing.missing),
+      422,
+      `capacidades no cubiertas: ${routing.missing.join(', ') || 'sin candidatos'}`
+    );
+  }
+  chain = routing.ranked.map((candidate) => ({
+    provider: candidate.provider,
+    model: candidate.model,
+    score: 0,
+    key: candidate.key ?? candidateKey(candidate.provider, candidate.model),
+  }));
   lastDecision = {
     at: Date.now(),
     provider: null,
@@ -1918,12 +2158,85 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
   // Copia mutable: el orden puede cambiar sobre la marcha.
   const queue = [...chain];
   /**
-   * Fallos seguidos de cada proveedor en ESTE turno. Sirve para distinguir un
-   * modelo saturado (se prueba el siguiente del mismo proveedor, que suele ir
-   * bien) de un proveedor caído (ahí sí conviene saltar al otro).
+   * Fallos seguidos de cada proveedor en ESTE turno. Distingue un modelo
+   * saturado (se prueba el siguiente del mismo proveedor) de un proveedor
+   * caído (se adelanta otro).
    */
   const providerFailures = new Map<AiProvider, number>();
 
+  /**
+   * HEDGE DENTRO DEL PERFIL.
+   *
+   * El campeón sale ya; a los 700 ms se lanza el primer modelo de OTRO
+   * proveedor de las mismas claves. Gana el primero que contesta y el otro se
+   * aborta. Nunca se añade un proveedor que no esté en la cadena del alumno.
+   * Fuera del chat (trabajo de fondo) o con un proveedor forzado no se hace.
+   */
+  if (params.hedge !== false && params.priority !== 'fondo' && queue.length > 1) {
+    const champion = queue[0];
+    const hedgeIndex = queue.findIndex(
+      (candidate, index) => index > 0 && candidate.provider !== champion.provider
+    );
+    const hedge = hedgeIndex > 0 ? queue[hedgeIndex] : null;
+    if (hedge && champion.provider !== 'ollama' && hedge.provider !== 'ollama') {
+      const championKey = keysForTurn(champion.key, champion.provider)[0];
+      const hedgeKey = keysForTurn(hedge.key, hedge.provider)[0];
+      if (championKey && hedgeKey) {
+        const controller = new AbortController();
+        const run = async (
+          candidate: ModelCandidate,
+          key: ProviderKey,
+          delayMs: number
+        ): Promise<{ candidate: ModelCandidate; key: ProviderKey; text: { text: string; steps?: unknown[] } }> => {
+          if (delayMs > 0) await sleep(delayMs);
+          if (controller.signal.aborted) throw new Error('hedge abortado');
+          const left = deadline - Date.now();
+          if (left <= MIN_ATTEMPT_MS) throw new Error('sin tiempo para el hedge');
+          const text = await dispatchCandidate({
+            candidate,
+            apiKey: key.key,
+            baseUrl: key.baseUrl,
+            systemInstruction: params.systemInstruction,
+            params,
+            timeoutMs: Math.max(MIN_ATTEMPT_MS, Math.min(left, params.attemptMs ?? AI_ATTEMPT_MAX_MS)),
+            signal: controller.signal,
+          });
+          return { candidate, key, text };
+        };
+
+        try {
+          const winner = await Promise.any([
+            run(champion, championKey, 0),
+            run(hedge, hedgeKey, 700),
+          ]);
+          controller.abort();
+          providerFailures.delete(winner.candidate.provider);
+          markHealth(winner.candidate.key, 'ok');
+          markKeyHealth(winner.candidate.provider, winner.key.ledgerId, 'ok');
+          lastGoodKeyByScope.set(ledgerScope(), winner.candidate.key);
+          lastGoodKeyByModel.set(`${ledgerScope()}|${winner.candidate.key}`, pairScope(winner.key));
+          noteCall(winner.candidate.provider, true);
+          attempts.push({
+            key: `${winner.candidate.key}#${winner.key.label}`,
+            outcome: 'ok',
+            note: 'hedge',
+          });
+          decision.provider = winner.candidate.provider;
+          decision.model = winner.candidate.model;
+          return {
+            text: winner.text.text,
+            steps: winner.text.steps ?? [],
+            model: winner.candidate.model,
+            provider: winner.candidate.provider,
+          };
+        } catch {
+          // Los dos fallaron o se quedaron sin tiempo: sigue el bucle normal,
+          // que sabe clasificar el error y probar las claves restantes.
+          controller.abort();
+        }
+      }
+    }
+  }
   for (let index = 0; index < queue.length; index++) {
     const candidate = queue[index];
     /** Candidatos que quedan por probar detrás de este (sin contarlo a él). */
@@ -1959,7 +2272,7 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
     const tryKey = async (keyEntry: ProviderKey, keysLeft: number): Promise<KeyOutcome> => {
       const apiKey = keyEntry.key;
       const attemptKey = `${candidate.key}#${keyEntry.label}`;
-      noteKeyUse(candidate.provider, keyEntry.envVar);
+      noteKeyUse(candidate.provider, keyEntry.ledgerId);
       /** Nivel de recorte del prompt de sistema (0 = sin apretar). */
       let compactLevel = 0;
 
@@ -1983,75 +2296,21 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
         const systemInstruction = compactSystemInstruction(params.systemInstruction, compactLevel);
 
         try {
-          let result: { text: string; steps?: unknown[] };
-          if (candidate.provider === 'gemini') {
-            result = await callGemini({
-              apiKey,
-              model: candidate.model,
-              systemInstruction,
-              // Se pasan las dos formas del historial: los pasos crudos cuando
-              // los hay (llevan los adjuntos) y el chat para reconstruirlos
-              // cuando el llamador solo manda `messages`.
-              history: params.history ?? [],
-              messages: params.messages ?? [],
-              message: params.message,
-              attachments: params.attachments ?? [],
-              timeoutMs: attemptTimeoutMs,
-            });
-          } else if (candidate.provider === 'ollama') {
-            result = await callOllama({
-              model: candidate.model,
-              systemInstruction,
-              messages: params.messages ?? [],
-              message: params.message,
-              attachments: params.attachments ?? [],
-              readableTextAttachments: params.readableTextAttachments,
-              maxTokens: params.maxTokens,
-              timeoutMs: attemptTimeoutMs,
-            });
-          } else if (candidate.provider === 'groq') {
-            result = await callOpenAiCompatible('groq', GROQ_CHAT_ENDPOINT, {
-              apiKey,
-              model: candidate.model,
-              systemInstruction,
-              messages: params.messages ?? [],
-              message: params.message,
-              attachments: params.attachments ?? [],
-              readableTextAttachments: params.readableTextAttachments,
-              maxTokens: params.maxTokens,
-              timeoutMs: attemptTimeoutMs,
-            });
-          } else if (candidate.provider === 'nvidia') {
-            result = await callNvidia({
-              apiKey,
-              model: candidate.model,
-              systemInstruction,
-              messages: params.messages ?? [],
-              message: params.message,
-              attachments: params.attachments ?? [],
-              readableTextAttachments: params.readableTextAttachments,
-              maxTokens: params.maxTokens,
-              timeoutMs: attemptTimeoutMs,
-            });
-          } else {
-            result = await callOpenAiCompatible('openrouter', OPENROUTER_CHAT_ENDPOINT, {
-              apiKey,
-              model: candidate.model,
-              systemInstruction,
-              messages: params.messages ?? [],
-              message: params.message,
-              attachments: params.attachments ?? [],
-              readableTextAttachments: params.readableTextAttachments,
-              maxTokens: params.maxTokens,
-              timeoutMs: attemptTimeoutMs,
-            });
-          }
+          const result = await dispatchCandidate({
+            candidate,
+            apiKey,
+            baseUrl: keyEntry.baseUrl,
+            systemInstruction,
+            params,
+            timeoutMs: attemptTimeoutMs,
+          });
 
           providerFailures.delete(candidate.provider);
           markHealth(candidate.key, 'ok');
-          markKeyHealth(candidate.provider, keyEntry.envVar, 'ok');
-          lastGoodKey = candidate.key;
-          lastGoodKeyByModel.set(candidate.key, keyEntry.label);
+          markKeyHealth(candidate.provider, keyEntry.ledgerId, 'ok');
+          // Solo esta cuenta recuerda que este modelo le fue bien.
+          lastGoodKeyByScope.set(ledgerScope(), candidate.key);
+          lastGoodKeyByModel.set(`${ledgerScope()}|${candidate.key}`, pairScope(keyEntry));
           noteCall(candidate.provider, true);
           attempts.push({
             key: attemptKey,
@@ -2118,14 +2377,14 @@ export async function runAiText(params: AiTextParams): Promise<AiTextResult> {
           // clave en vez de rendirse.
           if (statusKind === 'quota' || statusKind === 'quota_daily' || statusKind === 'auth') {
             if (statusKind === 'auth') {
-              markKeyHealth(candidate.provider, keyEntry.envVar, statusKind, detail);
+              markKeyHealth(candidate.provider, keyEntry.ledgerId, statusKind, detail);
               lastError = new TutorError(
-                `La clave de ${providerLabel(candidate.provider)} no es válida o no tiene permisos. Revísala en Ajustes.`,
+                'La clave de IA no es válida o no tiene permisos. Revísala en Ajustes.',
                 502,
                 detail
               );
             } else {
-              markPairHealth(candidate.key, keyEntry.label, statusKind, detail);
+              markPairHealth(candidate.key, pairScope(keyEntry), statusKind, detail);
               sawQuota = true;
             }
             console.warn(
@@ -2228,46 +2487,33 @@ export async function getEngineStatus(): Promise<EngineStatus> {
   // Ajustes: si Ollama está levantado, aparece como red de seguridad real.
   await probeOllama();
   const providers: EngineProviderStatus[] = [];
-  for (const id of ['gemini', 'groq', 'openrouter', 'ollama'] as const) {
+  for (const id of [...providerIds(), 'ollama']) {
+    const descriptor = getProviderDescriptor(id);
     const keys = getProviderKeys(id);
     const keyStatus = keys.map((entry) => ({
       label: entry.label,
       envVar: entry.envVar,
-      coolingSeconds: getKeyCooldownSeconds(id, entry.envVar),
-      modelsOutOfQuota: countModelsOutOfQuota(id, entry.label),
-      used: getKeyCallCount(id, entry.envVar),
-      lastStatus: keyLedger.get(keyId(id, entry.envVar))?.status ?? null,
+      coolingSeconds: getKeyCooldownSeconds(id, entry.ledgerId),
+      modelsOutOfQuota: countModelsOutOfQuota(id, pairScope(entry)),
+      used: getKeyCallCount(id, entry.ledgerId),
+      lastStatus: keyLedger.get(keyId(id, entry.ledgerId))?.status ?? null,
     }));
+    const hasEndpoint = !descriptor?.requiresBaseUrl || keys.some((entry) => entry.baseUrl);
     providers.push({
       id,
-      name:
-        id === 'gemini'
-          ? 'Google Gemini'
-          : id === 'groq'
-            ? 'Groq Cloud'
-            : id === 'openrouter'
-              ? 'OpenRouter (modelos gratis)'
-              : 'Ollama Local (Offline)',
+      name: descriptor?.label ?? 'Ollama Local (Offline)',
       keyEnv: mainKeyEnv(id),
-      configured: id === 'ollama' ? ollamaMode() === 'on' || ollamaUp : keys.length > 0,
-      signupUrl:
-        id === 'gemini'
-          ? 'https://aistudio.google.com/api-keys'
-          : id === 'groq'
-            ? 'https://console.groq.com/keys'
-            : id === 'openrouter'
-              ? 'https://openrouter.ai/keys'
-              : 'https://ollama.com/download',
+      configured:
+        id === 'ollama' ? ollamaMode() === 'on' || ollamaUp : keys.length > 0 && hasEndpoint,
+      signupUrl: descriptor?.signupUrl || 'https://ollama.com/download',
       note:
-        id === 'gemini'
-          ? 'Proveedor primario. Tier gratuito de Google AI Studio, por clave.'
-          : id === 'groq'
-            ? 'Reserva de desbordamiento ultrarrápida con cuota gratuita propia.'
-            : id === 'openrouter'
-              ? 'Tercera vía de la nube: modelos gratuitos (:free) de otras familias. Su plan gratuito se cuenta por CUENTA (20 peticiones/minuto y 50 al día), así que aquí añadir claves no multiplica el cupo: es una vía más, no una más ancha.'
-              : ollamaUp
-                ? 'Modelo local levantado: entra solo como último recurso, así que los catedráticos siguen funcionando aunque se agote el cupo gratuito de Gemini y Groq. No tiene cupo ni cuesta dinero.'
-                : 'Motor local (gratis e ilimitado) que evita quedarse sin IA cuando se agota el cupo de la nube. Para levantarlo: `npm run ollama:doctor` te dice qué instalar y qué modelo te conviene según tu ordenador.',
+        id === 'ollama'
+          ? ollamaUp
+            ? 'Modelo local levantado: entra solo como último recurso, así que los catedráticos siguen funcionando aunque se agote el cupo gratuito de la nube. No tiene cupo ni cuesta dinero.'
+            : 'Motor local (gratis e ilimitado) que evita quedarse sin IA cuando se agota el cupo de la nube. Para levantarlo: `npm run ollama:doctor` te dice qué instalar y qué modelo te conviene según tu ordenador.'
+          : descriptor?.requiresBaseUrl
+            ? 'Endpoint compatible OpenAI: la dirección HTTPS la pones tú y se valida antes de guardarla.'
+            : 'Proveedor del catálogo BYOK. Se usa solo si tú has guardado su clave; nunca se completa con una cuenta ajena.',
       keys: keyStatus,
       keysAvailable: keyStatus.filter((entry) => entry.coolingSeconds === 0).length,
       extraKeyEnv:
@@ -2288,12 +2534,14 @@ export async function getEngineStatus(): Promise<EngineStatus> {
       // El enfriamiento de un modelo viene de dos sitios: del propio modelo o
       // del cupo del par modelo#clave. Se enseña lo que de verdad bloquea.
       const keys = getProviderKeys(provider);
-      const pairCooldowns = keys.map((entry) => getPairCooldownSeconds(candidate.key, entry.label));
+      const pairCooldowns = keys.map((entry) =>
+        getPairCooldownSeconds(candidate.key, pairScope(entry))
+      );
       const modelCooldown = getCooldownSeconds(candidate.key);
       const somePairFree = keys.length === 0 || pairCooldowns.some((seconds) => seconds === 0);
       const pairCooling = pairCooldowns.length > 0 ? Math.max(...pairCooldowns) : 0;
       const lastPair = keys
-        .map((entry) => pairLedger.get(pairId(candidate.key, entry.label)))
+        .map((entry) => pairLedger.get(pairId(candidate.key, pairScope(entry))))
         .filter((entry): entry is LedgerEntry => Boolean(entry))
         .sort((a, b) => b.at - a.at)[0];
       ranked.push({
@@ -2312,7 +2560,7 @@ export async function getEngineStatus(): Promise<EngineStatus> {
     ranked,
     nextKey: chain[0]?.key ?? null,
     selected: lastDecision?.model ?? null,
-    lastGood: lastGoodKey,
+    lastGood: getLastGoodKey(),
     usage: getUsageToday(),
     lastDecision,
     quotaTight: isQuotaTight(),

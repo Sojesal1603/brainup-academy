@@ -14,7 +14,9 @@ const TutorChat = nextDynamic(() => import('@/components/brainup/TutorChat'), {
   loading: () => <ChatSkeleton />,
 });
 import SessionClosePanel from '@/components/brainup/SessionClosePanel';
-import { getConfiguredModelLabel, parseTutorReply, type TutorStage } from '@/lib/tutor';import { normalizeSubjectMode } from '@/lib/subjects/modes';
+import { parseTutorReply, type TutorStage } from '@/lib/tutor';
+import { parseStudyMeta } from '@/lib/study/answerContract';
+import { normalizeSubjectMode } from '@/lib/subjects/modes';
 
 
 import type { NoteProposal } from '@/lib/apuntesIa';
@@ -64,18 +66,17 @@ export default async function TutorPage({
   const initialMode = normalizeSubjectMode(
     Array.isArray(query.mode) ? query.mode[0] : query.mode
   );
-  // El rótulo del motor se lee con las credenciales de ESTA cuenta: la página no
-  // debe anunciar la clave de plataforma si el usuario no tiene la suya.
+  // Las credenciales se resuelven con las claves de ESTA cuenta (BYOK), pero la
+  // interfaz no anuncia el proveedor: el alumno habla con su catedrático.
   const aiCredentials = await resolveAllAiCredentials(user.id, { tolerateVaultErrors: true });
-  const modelLabel = runWithAiCredentials(aiCredentials, () => getConfiguredModelLabel());
-  // Motores que pueden escribir ahora mismo: con ellos se comparan las
-  // versiones de un mismo apunte (Gemini, Groq, OpenRouter, local…).
-  const engines = runWithAiCredentials(aiCredentials, () => getConfiguredEngines());
-  // Proveedor que toca ahora mismo: el PRIMERO de la cadena real de esta
-  // cuenta, no el primero que aparezca en la etiqueta del modelo. La etiqueta
-  // «auto (Gemini + Groq)» contiene «Groq» y la cabecera anunciaba Groq a un
-  // alumno cuya clave era de Gemini: decir la verdad es parte del arreglo.
-  const engineLabel = aiCredentials.length === 0 ? 'Sin IA' : engines[0]?.name ?? 'Sin IA';
+  // Variantes disponibles para comparar una misma unidad. Se etiquetan como
+  // «Versión A/B»; el id interno del motor no se pinta nunca.
+  const engines = runWithAiCredentials(aiCredentials, () => getConfiguredEngines()).map(
+    (engine, index) => ({
+      id: engine.id,
+      name: `Versión ${String.fromCharCode(65 + index)}`,
+    })
+  );
 
   // La dirección puede ser el UUID del agente o el nombre de la materia
   // («lengua-castellana-y-literatura-i»). El UUID es frágil: cambia al volver a
@@ -221,6 +222,9 @@ export default async function TutorPage({
             sizeBytes: attachment.sizeBytes,
           })),
           noteProposal: readNoteProposal(m.noteProposal),
+          // La franja de cobertura se guardó con la respuesta: al recargar se
+          // reconstruye con las mismas métricas verificadas.
+          studyMeta: parseStudyMeta(m.studyMetaJson),
         };
       }) ?? [];
 
@@ -260,10 +264,7 @@ export default async function TutorPage({
         <div className="hidden shrink-0 items-center gap-3 sm:flex">
           <span className="inline-flex items-center gap-1.5 text-[11px] text-stone-400">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/80" />
-            {engineLabel}
-          </span>
-          <span className="hidden text-[10px] font-mono text-stone-600 lg:inline">
-            {modelLabel.startsWith('auto') ? 'mejor modelo gratuito disponible' : modelLabel}
+            En línea
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-[10px] text-stone-400">
             <Sparkles className="h-3 w-3" />
@@ -291,7 +292,6 @@ export default async function TutorPage({
               category: agent.subject.category,
             },
           }}
-          model={modelLabel}
           initialMode={initialMode}
           initialConversationId={conversation?.id ?? null}
           initialMessages={initialMessages}

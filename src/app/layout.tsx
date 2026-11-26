@@ -11,7 +11,8 @@ import { getViewerCourse } from '@/lib/viewerCourse';
 // La app entera depende de PostgreSQL en tiempo de petición. Sin esto, Next
 // intenta prerenderizar `/_not-found` durante el build, monta el `Header` y
 // consulta la base: el build falla si la base no está accesible en ese instante.
-// `/_not-found` también pasa a dinámico y el build no toca datos.
+// `/_not-found` también pasa a dinámico y el build no toca datos. Las páginas
+// de lectura ya no lo fuerzan: sus datos van por caché con etiquetas.
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {

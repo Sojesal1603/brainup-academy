@@ -1,5 +1,6 @@
 import nextDynamic from 'next/dynamic';
 import { currentTenant } from '@/lib/tenantContext';
+import { getNotesWorkspace } from '@/lib/notesWorkspace';
 import MoodleMaterialsPanel from '@/components/apuntes/MoodleMaterialsPanel';
 import { EditorSkeleton } from '@/components/ui/Skeletons';
 import { BookOpen } from 'lucide-react';
@@ -10,39 +11,12 @@ const NotionWorkspace = nextDynamic(() => import('@/components/apuntes/NotionWor
   loading: () => <EditorSkeleton />,
 });
 
-export const dynamic = 'force-dynamic';
-
 export default async function NotesPage() {
-  const { tenant: prisma } = await currentTenant();
-  const notes = await prisma.note.findMany({
-    include: {
-      // La unidad y la asignatura dan la sección del cuaderno; el agente dice
-      // qué catedrático lo ha escrito, si lo ha escrito uno.
-      topic: {
-        include: {
-          subject: true,
-        },
-      },
-      agent: { select: { name: true } },
-    },
-    orderBy: { updatedAt: 'desc' },
-  });
-
-  const subjects = await prisma.subject.findMany({
-    include: {
-      topics: {
-        select: { id: true, title: true },
-      },
-    },
-    orderBy: { order: 'asc' },
-  });
-
-  // Apuntes que el profesor ha subido a Moodle (vacíos si no está conectado).
-  const moodleMaterials = await prisma.moodleMaterial.findMany({
-    include: { course: { select: { fullName: true, shortName: true } } },
-    orderBy: [{ course: { fullName: 'asc' } }, { sectionName: 'asc' }, { name: 'asc' }],
-    take: 400,
-  });
+  const { user } = await currentTenant();
+  // La unidad y la asignatura dan la sección del cuaderno; el agente dice qué
+  // catedrático lo ha escrito. La foto está cacheada y las acciones de apuntes
+  // purgan la etiqueta `apuntes`.
+  const { notes, subjects, materials } = await getNotesWorkspace(user.id);
 
   return (
     <div className="space-y-8">
@@ -66,24 +40,13 @@ export default async function NotesPage() {
       </div>
 
       {/* Apuntes de Moodle: lo que sube el profesor, sin salir de aquí */}
-      <MoodleMaterialsPanel
-        materials={moodleMaterials.map((material) => ({
-          id: material.id,
-          name: material.name,
-          sectionName: material.sectionName,
-          courseName: material.course.fullName || material.course.shortName,
-          moduleType: material.moduleType,
-          mimeType: material.mimeType,
-          sizeBytes: material.sizeBytes,
-          modifiedAtIso: material.modifiedAt ? material.modifiedAt.toISOString() : null,
-          hasFile: Boolean(material.downloadUrl),
-          webUrl: material.webUrl,
-          downloaded: Boolean(material.localPath),
-        }))}
-      />
+      <MoodleMaterialsPanel materials={materials} />
 
       {/* Workspace Interactivo */}
-      <NotionWorkspace notes={notes} subjects={subjects} />
+      <NotionWorkspace
+        notes={notes.map((note) => ({ ...note, updatedAt: note.updatedAtIso }))}
+        subjects={subjects}
+      />
     </div>
   );
 }

@@ -24,6 +24,7 @@ import {
   type AiProvider,
 } from '@/lib/aiEngine';
 import { loadMemoryBlock } from '@/lib/agentMemory';
+import { publicTutorError } from '@/lib/tutorPublicError';
 import { rememberNoteDraft, takeNoteDraft } from '@/lib/noteDrafts';
 import { resolveNoteUnit } from '@/lib/noteUnitMatch';
 import {
@@ -392,8 +393,6 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         updated: saved.updated,
-        model: draft.model,
-        provider: draft.provider,
         quality: {
           words: quality.words,
           developedPoints: quality.developedPoints,
@@ -793,8 +792,6 @@ export async function POST(request: Request) {
         ok: true,
         preview: true,
         draftToken: token,
-        model: attempt.reply.model,
-        provider: attempt.reply.provider,
         quality: {
           words: finalQuality.words,
           developedPoints: finalQuality.developedPoints,
@@ -842,8 +839,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       updated: saved.updated,
-      model: attempt.reply.model,
-      provider: attempt.reply.provider,
       // Lo que ha salido de verdad, para que el chat pueda decirlo si le falta
       // algo: mejor avisar que dar por bueno un apunte escaso.
       quality: {
@@ -872,8 +867,13 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof TutorError) {
+      // El detalle (proveedor, modelo, HTTP) se queda en el log del servidor.
       console.error('[apuntes]', error.status, error.message, error.detail ?? '');
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      const failure = publicTutorError(error);
+      return NextResponse.json(
+        { error: failure.message, retryable: failure.retryable },
+        { status: failure.status }
+      );
     }
     console.error('[apuntes] Error inesperado:', error);
     return NextResponse.json(

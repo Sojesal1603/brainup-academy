@@ -31,6 +31,13 @@ import {
   normalizeSubjectCategory,
 } from './subjects/category';
 
+/** El cuaderno cacheado y su ruta se refrescan juntos. */
+function revalidateApuntes() {
+  updateTag('apuntes');
+  updateTag('notas');
+  revalidatePath('/apuntes');
+}
+
 /** Todo lo que depende del temario se refresca con cada cambio de estado. */
 function revalidateTemario() {
   // Invalida la lectura compartida de `getTemarioSubjects` en esta misma
@@ -577,6 +584,7 @@ export async function createExam(data: {
 
   revalidatePath('/');
   updateTag('cuartel');
+  updateTag('catalogo');
   revalidatePath('/examenes');
   revalidatePath('/planificador');
   return { success: true };
@@ -625,6 +633,7 @@ export async function updateExam(
 
   revalidatePath('/');
   updateTag('cuartel');
+  updateTag('catalogo');
   revalidatePath('/examenes');
   revalidatePath('/planificador');
   return { success: true };
@@ -648,6 +657,7 @@ export async function deleteExam(examId: string) {
 
   revalidatePath('/');
   updateTag('cuartel');
+  updateTag('catalogo');
   revalidatePath('/examenes');
   revalidatePath('/planificador');
   return { success: true, title: existing.title };
@@ -727,7 +737,7 @@ export async function createNote(data: {
     },
   });
 
-  revalidatePath('/apuntes');
+  revalidateApuntes();
   revalidatePath('/');
   updateTag('cuartel');
   return { success: true, noteId: note.id };
@@ -743,6 +753,26 @@ export async function updateNote(data: {
   tags?: string;
 }) {
   const { tenant: prisma } = await currentTenant();
+
+  // En un apunte con árbol modular, `Note.content` es una proyección de solo
+  // lectura. Dejar que el editor antiguo escriba aquí crearía dos fuentes de
+  // verdad: el próximo desarrollo pisaría lo que el alumno cree haber guardado.
+  const sectionCount = await prisma.noteSection.count({ where: { noteId: data.id } });
+
+  if (sectionCount > 0) {
+    await prisma.note.update({
+      where: { id: data.id },
+      data: {
+        title: data.title,
+        tags: data.tags,
+        updatedAt: new Date(),
+      },
+    });
+
+    revalidateApuntes();
+    return { success: true as const, preservedContent: true as const };
+  }
+
   await prisma.note.update({
     where: { id: data.id },
     data: {
@@ -753,8 +783,8 @@ export async function updateNote(data: {
     },
   });
 
-  revalidatePath('/apuntes');
-  return { success: true };
+  revalidateApuntes();
+  return { success: true as const, preservedContent: false as const };
 }
 
 /**
@@ -763,7 +793,7 @@ export async function updateNote(data: {
 export async function deleteNote(id: string) {
   const { tenant: prisma } = await currentTenant();
   await prisma.note.delete({ where: { id } });
-  revalidatePath('/apuntes');
+  revalidateApuntes();
   return { success: true };
 }
 
@@ -813,7 +843,7 @@ export async function createCustomSubject(data: {
   revalidatePath('/');
   updateTag('cuartel');
   revalidatePath('/planificador');
-  revalidatePath('/apuntes');
+  revalidateApuntes();
   revalidatePath('/ajustes');
   return { success: true, subjectId: subject.id };
 }
@@ -882,7 +912,7 @@ export async function createCustomTopic(data: {
   revalidatePath('/');
   updateTag('cuartel');
   revalidatePath('/planificador');
-  revalidatePath('/apuntes');
+  revalidateApuntes();
   return { success: true, topicId: topic.id };
 }
 
@@ -1463,7 +1493,7 @@ export async function importTemario(data: {
   const total = await prisma.topic.count({ where: { subjectId: subject.id } });
 
   revalidateTemario();
-  revalidatePath('/apuntes');
+  revalidateApuntes();
   revalidatePath('/estadisticas');
   revalidatePath('/errores');
   revalidatePath('/ajustes');

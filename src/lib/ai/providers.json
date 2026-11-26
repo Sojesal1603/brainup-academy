@@ -1,0 +1,106 @@
+{
+  "$comentario": "Catálogo de proveedores BYOK. Añadir uno nuevo es una entrada aquí (y, si habla otro dialecto, un adaptador). El orden de esta lista es el orden por defecto cuando el alumno no ha elegido uno. `models` declara capacidades reales; el motor filtra por ellas antes de llamar.",
+  "version": 1,
+  "providers": [
+    {
+      "id": "gemini",
+      "label": "Google Gemini",
+      "adapter": "gemini-interactions",
+      "keyFormat": "^[A-Za-z0-9._-]+$",
+      "keyHint": "AIza… o AQ.…",
+      "signupUrl": "https://aistudio.google.com/api-keys",
+      "check": "chat-minimal",
+      "models": [
+        { "id": "gemini-3.5-flash-lite", "vision": true, "tools": true, "json": true },
+        { "id": "gemini-3.1-flash-lite", "vision": true, "tools": true, "json": true },
+        { "id": "gemini-3.6-flash", "vision": true, "tools": true, "json": true },
+        { "id": "gemini-3.5-flash", "vision": true, "tools": true, "json": true }
+      ]
+    },
+    {
+      "id": "groq",
+      "label": "Groq",
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "keyFormat": "^[A-Za-z0-9._-]+$",
+      "keyHint": "gsk_…",
+      "signupUrl": "https://console.groq.com/keys",
+      "check": "chat-minimal",
+      "models": [
+        { "id": "openai/gpt-oss-120b", "tools": true, "json": true },
+        { "id": "openai/gpt-oss-20b", "tools": true, "json": true },
+        { "id": "qwen/qwen3.8-27b", "tools": true, "json": true }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "adapter": "openai-chat",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "keyFormat": "^[A-Za-z0-9._-]+$",
+      "keyHint": "sk-or-v1-…",
+      "signupUrl": "https://openrouter.ai/keys",
+      "check": "key-endpoint",
+      "models": [
+        { "id": "deepseek/deepseek-chat-v3.1:free", "tools": true, "json": true },
+        { "id": "qwen/qwen3-32b:free", "tools": true, "json": true },
+        { "id": "meta-llama/llama-3.3-70b-instruct:free", "tools": true, "json": true }
+      ]
+    },
+    {
+      "id": "nvidia",
+      "label": "NVIDIA",
+      "adapter": "openai-chat",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "keyFormat": "^[A-Za-z0-9._-]+$",
+      "keyHint": "nvapi-…",
+      "signupUrl": "https://build.nvidia.com/",
+      "check": "key-endpoint",
+      "models": [
+        { "id": "nvidia/llama-3.1-nemotron-70b-instruct", "tools": true, "json": true }
+      ]
+    },
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.openai.com/v1",
+      "keyFormat": "^[A-Za-z0-9._-]+$",
+      "keyHint": "sk-…",
+      "signupUrl": "https://platform.openai.com/api-keys",
+      "check": "models",
+      "models": [
+        { "id": "gpt-4o-mini", "vision": true, "tools": true, "json": true },
+        { "id": "gpt-4.1-mini", "vision": true, "tools": true, "json": true },
+        { "id": "gpt-4o", "vision": true, "tools": true, "json": true }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "label": "Anthropic",
+      "adapter": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "keyFormat": "^[A-Za-z0-9._-]+$",
+      "keyHint": "sk-ant-…",
+      "signupUrl": "https://console.anthropic.com/settings/keys",
+      "check": "models",
+      "models": [
+        { "id": "claude-3-5-haiku-latest", "vision": true, "tools": true, "json": true },
+        { "id": "claude-3-5-sonnet-latest", "vision": true, "tools": true, "json": true }
+      ]
+    },
+    {
+      "id": "custom",
+      "label": "Endpoint compatible OpenAI",
+      "adapter": "openai-chat",
+      "requiresBaseUrl": true,
+      "keyFormat": "^[A-Za-z0-9._-]+$",
+      "keyHint": "sk-…",
+      "signupUrl": "",
+      "check": "models",
+      "models": [
+        { "id": "gpt-4o-mini", "vision": false, "tools": false, "json": false }
+      ]
+    }
+  ]
+}

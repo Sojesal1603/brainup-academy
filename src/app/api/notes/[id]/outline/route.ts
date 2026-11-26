@@ -130,7 +130,6 @@ export async function POST(
       created: created.created,
       fallback: outline.fallback,
       warning: outline.warning,
-      model: outline.model,
       note: saved ? serializeNoteTree(saved) : null,
     });
   } catch (error) {

@@ -108,10 +108,10 @@ function VariantTabs({
             disabled={pending}
             title={
               failed
-                ? variant?.error || `No se pudo escribir con ${engine.name}`
+                ? variant?.error || `No se pudo escribir ${engine.name}`
                 : variant?.status === 'ready'
-                  ? `Leer la versión de ${engine.name}${variant.model ? ` (${variant.model})` : ''}`
-                  : `Pedir esta misma unidad a ${engine.name}`
+                  ? `Leer ${engine.name}`
+                  : `Pedir esta misma unidad como ${engine.name}`
             }
             className={clsx(
               'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-medium transition-colors',
@@ -129,16 +129,6 @@ function VariantTabs({
               <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
             ) : null}
             {engine.name}
-            {variant?.status === 'ready' && variant.model && (
-              <span
-                className={clsx(
-                  'hidden font-mono text-[9px] sm:inline',
-                  active ? 'text-stone-600' : 'text-stone-600'
-                )}
-              >
-                {variant.model}
-              </span>
-            )}
           </button>
         );
       })}
@@ -313,7 +303,7 @@ export default function NoteSplitPanel({
             <p className="font-serif text-[15px] text-stone-300">Aquí se lee lo que te escribe</p>
             <p className="text-[12px] leading-relaxed text-stone-500">
               Cuando el catedrático te ofrezca unos apuntes, se abrirán en este panel. Podrás
-              comparar la versión de cada motor de IA y guardar la que prefieras, sin salir del chat.
+              comparar cada versión y guardar la que prefieras, sin salir del chat.
             </p>
           </div>
         </div>

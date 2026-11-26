@@ -32,6 +32,7 @@ import {
   createCustomTopic,
 } from '@/lib/actions';
 import NoteRenderer from './NoteRenderer';
+import NoteCanvas from './NoteCanvas';
 import {
   SUBJECT_CATEGORIES,
   SUBJECT_CATEGORY_META,
@@ -45,7 +46,8 @@ export interface NotionNote {
   title: string;
   content: string;
   tags: string | null;
-  updatedAt: Date;
+  /** ISO en la lectura cacheada; `Date` cuando llega de una mutación. */
+  updatedAt: Date | string;
   /** "alumno" (lo escribiste tú) o "catedratico" (lo escribió un catedrático IA). */
   author: string;
   /** El catedrático que lo escribió, si lo escribió uno. */
@@ -131,7 +133,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
   const [topicId, setTopicId] = useState(activeNote?.topicId || subjects[0]?.topics[0]?.id || '');
   const [tags, setTags] = useState(activeNote?.tags || '');
   const [saveStatus, setSaveStatus] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'view' | 'pdf' | 'edit'>('view');
+  const [viewMode, setViewMode] = useState<'view' | 'pdf' | 'canvas' | 'edit'>('view');
 
   // Modales
   const [isNewSubjectModalOpen, setIsNewSubjectModalOpen] = useState(false);
@@ -157,7 +159,10 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
     setTopicId(note.topicId);
     setTags(note.tags || '');
     setSaveStatus('');
-    setViewMode(note.content.trim() ? 'view' : 'edit');
+    // Si el alumno estaba en el lienzo, no se le saca de él al cambiar de página.
+    setViewMode((current) =>
+      current === 'canvas' ? 'canvas' : note.content.trim() ? 'view' : 'edit'
+    );
   };
 
   // Crear nueva página de apuntes
@@ -188,13 +193,13 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
   const handleSave = () => {
     if (!activeNoteId) return;
     startTransition(async () => {
-      await updateNote({
+      const result = await updateNote({
         id: activeNoteId,
         title,
         content,
         tags,
       });
-      setSaveStatus('Guardado ✓');
+      setSaveStatus(result.preservedContent ? 'Bloques protegidos ✓' : 'Guardado ✓');
       setTimeout(() => setSaveStatus(''), 2000);
       router.refresh();
     });
@@ -607,6 +612,19 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
                       <PenLine className="w-3 h-3" />
                       <span className="hidden sm:inline">Editar</span>
                     </button>
+                    <button
+                      onClick={() => setViewMode('canvas')}
+                      className={clsx(
+                        'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all',
+                        viewMode === 'canvas'
+                          ? 'bg-slate-800 text-slate-100 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      )}
+                      title="Lienzo modular: esquema por apartados, bloques y citas de tus fuentes"
+                    >
+                      <Layers className="w-3 h-3" />
+                      <span className="hidden sm:inline">Lienzo</span>
+                    </button>
                   </div>
 
                   {saveStatus && (
@@ -704,7 +722,7 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
                     </p>
                   </div>
                 </div>
-              ) : (
+              ) : viewMode === 'edit' ? (
                 <>
               {/* Barra de Herramientas Rápidas Notion */}
               <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-xl bg-[#070b14] border border-slate-800 text-xs text-slate-400">
@@ -774,6 +792,11 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
                 />
               </div>
                 </>
+              ) : (
+                <NoteCanvas
+                  noteId={activeNote.id}
+                  onContentChange={(nextContent) => setContent(nextContent)}
+                />
               )}
 
               {/* Tags */}

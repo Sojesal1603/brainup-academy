@@ -18,8 +18,10 @@ import {
  * dentro de su propio Suspense, así que Next puede enviar el HTML y completar
  * las secciones por streaming. La Sidebar y el Header del layout ya no esperan
  * a la base para aparecer.
+ *
+ * Sin `force-dynamic`: los widgets usan cookies y caché de datos, así que la
+ * ruta sigue siendo dinámica por sí sola, pero el shell puede reutilizarse.
  */
-export const dynamic = 'force-dynamic';
 
 export default function DashboardPage() {
   return (

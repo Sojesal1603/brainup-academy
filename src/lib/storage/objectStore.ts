@@ -166,8 +166,8 @@ async function s3(): Promise<{ module: S3Module; client: import('@aws-sdk/client
 
   // Import diferido: quien no usa el almacén (la mayoría de las páginas) no
   // carga el SDK de AWS en su bundle.
-  const module = await import('@aws-sdk/client-s3');
-  const client = new module.S3Client({
+  const s3Module = await import('@aws-sdk/client-s3');
+  const client = new s3Module.S3Client({
     region: config.region,
     endpoint: config.endpoint ?? undefined,
     forcePathStyle: config.forcePathStyle,
@@ -176,7 +176,7 @@ async function s3(): Promise<{ module: S3Module; client: import('@aws-sdk/client
       secretAccessKey: config.secretAccessKey,
     },
   });
-  s3Cache = { module, client };
+  s3Cache = { module: s3Module, client };
   return s3Cache;
 }
 

@@ -1,45 +1,37 @@
+import {
+  PROVIDER_DESCRIPTORS,
+  getProviderDescriptor,
+  providerIds,
+} from './providers';
+
 /**
  * Formato aceptado para una clave de IA propia, por proveedor.
  *
- * La regla es deliberadamente ancha: Google ha emitido claves con prefijo
- * `AIza…` y también con prefijo `AQ.`, OpenRouter empieza por `sk-or-v1-`,
- * Groq por `gsk_` y NVIDIA por `nvapi-`, pero los prefijos cambian y la
- * autoridad real es el endpoint del proveedor. Lo que no se admite son
- * espacios, saltos de línea ni caracteres de control: esos no forman parte de
- * ninguna clave y suelen indicar un copiado sucio.
- *
- * La misma función la usan el formulario y el servidor. El servidor sigue
- * mandando: el `pattern` del navegador es una ayuda, no una puerta.
+ * La lista ya no está cerrada en este archivo: sale de `providers.json`. Lo que
+ * no se admite son espacios, saltos de línea ni caracteres de control: esos no
+ * forman parte de ninguna clave y suelen indicar un copiado sucio. La autoridad
+ * real sigue siendo el endpoint del proveedor.
  */
 
 /** Proveedores en los que un alumno puede pegar su propia clave. */
-export const USER_KEY_PROVIDERS = ['gemini', 'groq', 'openrouter', 'nvidia'] as const;
+export const USER_KEY_PROVIDERS = providerIds();
 
-export type UserKeyProvider = (typeof USER_KEY_PROVIDERS)[number];
+export type UserKeyProvider = string;
 
 /** Cómo se llama cada uno en la interfaz. */
-export const USER_KEY_PROVIDER_LABEL: Record<UserKeyProvider, string> = {
-  gemini: 'Google Gemini',
-  groq: 'Groq',
-  openrouter: 'OpenRouter',
-  nvidia: 'NVIDIA',
-};
+export const USER_KEY_PROVIDER_LABEL: Record<string, string> = Object.fromEntries(
+  PROVIDER_DESCRIPTORS.map((provider) => [provider.id, provider.label])
+);
 
-/** Dónde se saca una clave gratuita de cada proveedor. */
-export const USER_KEY_PROVIDER_SIGNUP: Record<UserKeyProvider, string> = {
-  gemini: 'https://aistudio.google.com/api-keys',
-  groq: 'https://console.groq.com/keys',
-  openrouter: 'https://openrouter.ai/keys',
-  nvidia: 'https://build.nvidia.com/',
-};
+/** Dónde se saca una clave de cada proveedor (vacío en endpoints propios). */
+export const USER_KEY_PROVIDER_SIGNUP: Record<string, string> = Object.fromEntries(
+  PROVIDER_DESCRIPTORS.map((provider) => [provider.id, provider.signupUrl])
+);
 
 /** Pista del aspecto de una clave, para el marcador del campo. */
-export const USER_KEY_PROVIDER_HINT: Record<UserKeyProvider, string> = {
-  gemini: 'AIza… o AQ.…',
-  groq: 'gsk_…',
-  openrouter: 'sk-or-v1-…',
-  nvidia: 'nvapi-…',
-};
+export const USER_KEY_PROVIDER_HINT: Record<string, string> = Object.fromEntries(
+  PROVIDER_DESCRIPTORS.map((provider) => [provider.id, provider.keyHint])
+);
 
 export const AI_KEY_FORMAT = /^[A-Za-z0-9._-]+$/;
 
@@ -56,17 +48,27 @@ export const AI_KEY_FORMAT_MESSAGE =
 export function normalizeUserKeyProvider(value: string): UserKeyProvider | null {
   const raw = String(value ?? '').trim().toLowerCase();
   if (raw === 'google' || raw === 'google-ai' || raw === 'googleai') return 'gemini';
-  return (USER_KEY_PROVIDERS as readonly string[]).includes(raw) ? (raw as UserKeyProvider) : null;
+  return getProviderDescriptor(raw) ? raw : null;
+}
+
+function formatPattern(provider: UserKeyProvider): RegExp {
+  const descriptor = getProviderDescriptor(provider);
+  const raw = descriptor?.keyFormat ?? AI_KEY_FORMAT.source;
+  try {
+    return new RegExp(raw);
+  } catch {
+    return AI_KEY_FORMAT;
+  }
 }
 
 /** Devuelve el error de formato, o `null` si la clave tiene forma válida. */
 export function providerKeyFormatError(provider: UserKeyProvider, value: string): string | null {
   const key = String(value ?? '').trim();
-  const label = USER_KEY_PROVIDER_LABEL[provider];
+  const label = USER_KEY_PROVIDER_LABEL[provider] ?? 'tu proveedor';
   if (key.length === 0) return `Escribe la clave de ${label}.`;
   // El formato va antes que la longitud: un copiado con un salto de línea se
   // explica mejor como «sin espacios» que como «demasiado corta».
-  if (!AI_KEY_FORMAT.test(key)) {
+  if (!formatPattern(provider).test(key)) {
     return `La clave de ${label} solo puede tener letras, números, puntos, guiones y guiones bajos (sin espacios).`;
   }
   if (key.length < 20) return `La clave de ${label} es demasiado corta (mínimo 20 caracteres).`;

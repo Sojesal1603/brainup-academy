@@ -5,6 +5,7 @@ import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { Check, Copy } from 'lucide-react';
 import { scanInline } from '@/lib/inlineEmphasis';
+import VisualBlock from '@/components/visual/VisualBlock';
 
 /**
  * Renderizador de mensajes del Tutor IA: Markdown ligero + fórmulas LaTeX.
@@ -242,9 +243,15 @@ export default function MarkdownMessage({
           index += 1;
         }
         index += 1; // salta el cierre
-        output.push(
-          <CodeBlock key={`code-${output.length}`} code={codeLines.join('\n')} language={language} />
-        );
+        if (language.toLowerCase().startsWith('visual')) {
+          output.push(
+            <VisualBlock key={`visual-${output.length}`} source={codeLines.join('\n')} />
+          );
+        } else {
+          output.push(
+            <CodeBlock key={`code-${output.length}`} code={codeLines.join('\n')} language={language} />
+          );
+        }
         continue;
       }
 

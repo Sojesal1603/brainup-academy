@@ -11,7 +11,12 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
-import { deleteMyAiKey, recheckMyAiKey, saveMyAiKey } from '@/app/ajustes/aiKeyActions';
+import {
+  deleteMyAiKey,
+  recheckMyAiKey,
+  saveMyAiKey,
+  saveMyProviderOrder,
+} from '@/app/ajustes/aiKeyActions';
 import {
   AI_KEY_STATUS_LABEL,
   type AiKeyActionResult,
@@ -43,11 +48,13 @@ function formatDate(iso: string | null): string | null {
 
 export default function AiKeyCard({
   initialSummaries,
+  initialOrder,
   vaultReady,
   vaultError,
   isPlatformUser,
 }: {
   initialSummaries: AiKeySummaryView[];
+  initialOrder: string[];
   vaultReady: boolean;
   vaultError: string | null;
   isPlatformUser: boolean;
@@ -58,6 +65,12 @@ export default function AiKeyCard({
   );
   const [provider, setProvider] = useState<UserKeyProvider>('gemini');
   const [value, setValue] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [order, setOrder] = useState<string[]>(() => {
+    const seen = new Set(initialOrder);
+    return [...initialOrder, ...USER_KEY_PROVIDERS.filter((id) => !seen.has(id))];
+  });
+  const [orderPending, startOrder] = useTransition();
   const [result, setResult] = useState<AiKeyActionResult | null>(null);
   const [pending, startTransition] = useTransition();
   const [deleting, startDelete] = useTransition();
@@ -67,7 +80,7 @@ export default function AiKeyCard({
   const status = summary?.status ?? 'sin_comprobar';
   const statusLabel = summary ? AI_KEY_STATUS_LABEL[status] : 'Sin clave';
   const checkedAt = formatDate(summary?.lastCheckedAt ?? null);
-  const busy = pending || deleting || checking;
+  const busy = pending || deleting || checking || orderPending;
   const label = USER_KEY_PROVIDER_LABEL[provider];
 
   const applyResult = (next: AiKeyActionResult) => {
@@ -133,6 +146,18 @@ export default function AiKeyCard({
       }
       setResult(next);
       if (next.ok) router.refresh();
+    });
+  };
+
+  const moveProvider = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= order.length) return;
+    const next = [...order];
+    [next[index], next[target]] = [next[target], next[index]];
+    setOrder(next);
+    setResult(null);
+    startOrder(async () => {
+      setResult(await saveMyProviderOrder(next));
     });
   };
 
@@ -214,19 +239,31 @@ export default function AiKeyCard({
         <p className="rounded-xl border border-slate-700/70 bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
           Google exige ser mayor de 18 años para crear claves de API de Gemini.
         </p>
+      ) : provider === 'custom' ? (
+        <p className="rounded-xl border border-slate-700/70 bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+          Para un endpoint compatible con OpenAI, indica una dirección HTTPS pública (sin usuario ni
+          contraseña). La clave y la dirección se guardan cifradas; las direcciones locales o
+          privadas se rechazan.
+        </p>
       ) : (
         <p className="rounded-xl border border-slate-700/70 bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
-          La clave se comprueba contra {label} antes de guardarse. Sácala en{' '}
-          <a
-            href={USER_KEY_PROVIDER_SIGNUP[provider]}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-emerald-300 underline decoration-emerald-500/40"
-          >
-            {USER_KEY_PROVIDER_SIGNUP[provider].replace('https://', '')}
-          </a>
-          . Si tienes clave propia de un proveedor, tus peticiones no se completan con la de
-          plataforma de otro.
+          La clave se comprueba contra {label} antes de guardarse.{' '}
+          {USER_KEY_PROVIDER_SIGNUP[provider] ? (
+            <>
+              Sácala en{' '}
+              <a
+                href={USER_KEY_PROVIDER_SIGNUP[provider]}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-emerald-300 underline decoration-emerald-500/40"
+              >
+                {USER_KEY_PROVIDER_SIGNUP[provider].replace('https://', '')}
+              </a>
+              .
+            </>
+          ) : null}{' '}
+          Si tienes clave propia, tus peticiones no se completan con la de plataforma de otro
+          proveedor.
         </p>
       )}
 
@@ -272,8 +309,69 @@ export default function AiKeyCard({
         <p className="text-[11px] text-slate-400">{summary.lastError}</p>
       ) : null}
 
+      {order.length > 1 ? (
+        <div className="space-y-2 rounded-xl border border-slate-800 bg-[#080d18] p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Orden de uso
+          </p>
+          <p className="text-[11px] text-slate-500">
+            El motor empieza por el primero que tenga clave. Solo se mueve entre tus proveedores:
+            nunca llama a uno que no hayas configurado.
+          </p>
+          <ol className="space-y-1">
+            {order.map((id, index) => (
+              <li key={id} className="flex items-center gap-2 text-[11px] text-slate-300">
+                <span className="w-5 text-right font-mono text-slate-500">{index + 1}.</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {USER_KEY_PROVIDER_LABEL[id] ?? id}
+                  {!summaries[id] ? ' (sin clave)' : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => moveProvider(index, -1)}
+                  disabled={index === 0 || busy}
+                  aria-label={`Subir ${USER_KEY_PROVIDER_LABEL[id] ?? id}`}
+                  className="rounded border border-slate-700 px-1.5 py-0.5 text-slate-400 disabled:opacity-30"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveProvider(index, 1)}
+                  disabled={index === order.length - 1 || busy}
+                  aria-label={`Bajar ${USER_KEY_PROVIDER_LABEL[id] ?? id}`}
+                  className="rounded border border-slate-700 px-1.5 py-0.5 text-slate-400 disabled:opacity-30"
+                >
+                  ↓
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
       <form onSubmit={submit} className="space-y-2">
         <input type="hidden" name="provider" value={provider} />
+        {provider === 'custom' ? (
+          <div className="space-y-1">
+            <label
+              htmlFor="ai-base-url"
+              className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Dirección HTTPS del endpoint
+            </label>
+            <input
+              id="ai-base-url"
+              name="baseUrl"
+              type="url"
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="https://api.mi-servidor.com/v1"
+              className="w-full rounded-xl border border-slate-700 bg-[#080d18] px-3 py-2 font-mono text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-emerald-500/60"
+              disabled={!vaultReady || busy}
+            />
+          </div>
+        ) : null}
         <label
           htmlFor="ai-key"
           className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500"
@@ -297,7 +395,12 @@ export default function AiKeyCard({
           />
           <button
             type="submit"
-            disabled={!vaultReady || busy || value.trim().length < 20}
+            disabled={
+              !vaultReady ||
+              busy ||
+              value.trim().length < 20 ||
+              (provider === 'custom' && !baseUrl.trim())
+            }
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}

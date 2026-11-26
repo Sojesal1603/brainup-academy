@@ -8,6 +8,7 @@ import { PanelSkeleton } from '@/components/ui/Skeletons';
 import { hasSupabaseAuthConfig } from '@/lib/supabaseConfig';
 import { isPlatformAiUser } from '@/lib/ai/credentials';
 import { readUserAiKeySummary } from '@/lib/ai/userKeyStore';
+import { readProviderOrder } from '@/lib/ai/providerOrder';
 import { USER_KEY_PROVIDERS } from '@/lib/ai/keyFormat';
 import type { AiKeySummaryView } from '@/lib/ai/keyStatus';
 import { vaultStatus } from '@/lib/security/vault';
@@ -75,6 +76,7 @@ export default async function SettingsPage() {
       USER_KEY_PROVIDERS.map((provider) => readUserAiKeySummary(authUser.id, provider))
     )
   ).filter((summary): summary is AiKeySummaryView => summary !== null);
+  const providerOrder = await readProviderOrder(authUser.id);
   const vault = vaultStatus();
   const platformAiUser = isPlatformAiUser(authUser.id);
 
@@ -164,6 +166,7 @@ export default async function SettingsPage() {
       {/* Clave propia: cada cuenta usa la suya, guardada cifrada */}
       <AiKeyCard
         initialSummaries={aiKeySummaries}
+        initialOrder={providerOrder}
         vaultReady={vault.ready}
         vaultError={vault.reason}
         isPlatformUser={platformAiUser}

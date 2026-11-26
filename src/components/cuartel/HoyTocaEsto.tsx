@@ -22,10 +22,18 @@ import { STUDY_TECHNIQUES, StudyTechnique } from '@/lib/types';
  * sea una lista donde todo parece urgente. El plan lo decide el motor
  * (`dayPlan.ts`); aquí solo se pinta.
  */
-export default function HoyTocaEsto({ plan }: { plan: DayPlan }) {
+export default function HoyTocaEsto({
+  plan,
+  narration = null,
+}: {
+  plan: DayPlan;
+  /** Frase pulida por la IA en segundo plano; si no, manda la de reglas. */
+  narration?: string | null;
+}) {
   const active = plan.sessions.filter(
     (session) => !session.isCompleted && session.status !== 'abandonada'
   );
+  const directorLine = narration?.trim() || plan.director?.summary || plan.headline;
   const done = plan.sessions.filter((session) => session.isCompleted);
   const now = active.find((session) => session.status === 'parcial') ?? active[0] ?? null;
   const later = active.filter((session) => session.id !== now?.id);
@@ -42,6 +50,13 @@ export default function HoyTocaEsto({ plan }: { plan: DayPlan }) {
             <div>
               <h2 className="text-lg font-black tracking-tight text-slate-100">Hoy toca esto</h2>
               <p className="text-xs text-slate-300 mt-0.5">{plan.headline}</p>
+              <p className="mt-1 flex items-start gap-1.5 text-[11px] text-emerald-300/80">
+                <Sparkles className="mt-0.5 h-3 w-3 shrink-0" />
+                <span>
+                  <span className="font-semibold text-emerald-300">Director:</span>{' '}
+                  {directorLine}
+                </span>
+              </p>
               <p className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="inline-flex items-center gap-1">
                   <Clock className="w-3 h-3" />

@@ -1199,7 +1199,7 @@ global.fetch = async () => {
     Boolean(sinNada) &&
       sinNada.status === 503 &&
       /Ajustes/.test(sinNada.mensaje || '') &&
-      /[Oo]llama/.test(sinNada.mensaje || ''),
+      /modelo local/i.test(sinNada.mensaje || ''),
     sinNada ? String(sinNada.mensaje).slice(0, 200) : '—'
   );
 

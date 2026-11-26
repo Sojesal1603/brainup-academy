@@ -89,6 +89,10 @@ async function verifyStatic() {
   const migration = read(MIGRATION_SQL);
   const dbSource = read(path.join(ROOT, 'src', 'lib', 'db.ts'));
   const prismaSource = read(path.join(ROOT, 'src', 'lib', 'prisma.ts'));
+  // El nombre del ajuste vive en su propio módulo desde que lo comparten `db.ts`
+  // y `prisma.ts`: dos copias de la cadena podrían desincronizarse y las
+  // políticas RLS dejarían de mirar el ajuste que la app fija.
+  const tenantSettingSource = read(path.join(ROOT, 'src', 'lib', 'tenantSetting.ts'));
 
   section('Rol prisma_app');
 
@@ -178,7 +182,9 @@ async function verifyStatic() {
   section('Runtime');
 
   await ok('db() fija la cuenta con set_config(..., true) en la transacción', () => {
-    assert.match(dbSource, new RegExp(`TENANT_SETTING = '${TENANT_SETTING}'`));
+    assert.match(tenantSettingSource, new RegExp(`TENANT_SETTING = '${TENANT_SETTING}'`));
+    assert.match(dbSource, /import \{[^}]*TENANT_SETTING[^}]*\} from '\.\/tenantSetting'/);
+    assert.match(prismaSource, /import \{[^}]*TENANT_SETTING[^}]*\} from '\.\/tenantSetting'/);
     const fijados = dbSource.match(/set_config\('\$\{TENANT_SETTING\}', \$1, true\)/g) || [];
     assert.ok(fijados.length >= 2, 'faltan el camino interactivo o el de lote');
     assert.match(dbSource, /await setTenantContext\(tx, ownerId\)/);

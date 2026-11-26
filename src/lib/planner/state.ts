@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { revalidatePlanCache } from '../planCache';
 import { toDate, type DateLike } from '../selfHealing';
 
 /**
@@ -88,6 +89,10 @@ export async function setPlanEnergy(
       version: { increment: 1 },
     },
   });
+
+  // La foto del día lleva la energía y los minutos disponibles: se tira ahora,
+  // no cuando caduque el TTL.
+  revalidatePlanCache();
 }
 
 export async function invalidatePlan(
@@ -114,4 +119,9 @@ export async function invalidatePlan(
       version: { increment: 1 },
     },
   });
+
+  // Único punto de invalidación del estado del plan: sesión cerrada, examen,
+  // Moodle, restricciones o bloque completado. Purga `DailyBrief`, Cuartel y
+  // planificador; la siguiente apertura reconstruye una sola vez.
+  revalidatePlanCache();
 }

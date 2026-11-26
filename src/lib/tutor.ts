@@ -43,6 +43,7 @@ import {
 } from './tutorNotes';
 import { buildCategoryLayer, subjectCategoryOf } from './subjects/category';
 import { buildModeLayer, type SubjectMode } from './subjects/modes';
+import { VISUAL_PROMPT } from './visual/prompt';
 
 export {
   getConfiguredModelLabel,
@@ -160,6 +161,12 @@ export interface TutorContext {
    * sabe**: lo que tiene que hacer es no volver a preguntarlo.
    */
   memory?: string;
+  /**
+   * Ajuste pedagógico determinista del coach (patrones de error, bloques y
+   * foco). Llega ya redactado como bloque silencioso; vacío si no hay evidencia.
+   * No se pinta al alumno ni se menciona como etiqueta.
+   */
+  coach?: string;
   /**
    * El texto de los documentos que ha subido en este turno, ya troceado y
    * buscado por relevancia (lo arma `docContext.ts`). Un libro entero no cabe en
@@ -442,6 +449,8 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
     'Instrucción especial: en asignaturas de idiomas, explica y dialoga en español, pero ejemplos, gramática y redacciones en el idioma de la materia.'
   );
   lines.push('');
+  lines.push(VISUAL_PROMPT);
+  lines.push('');
   lines.push(
     'FORMATO OBLIGATORIO: comienza SIEMPRE tu respuesta con una única etiqueta de etapa en su propia línea, exactamente con uno de estos formatos:'
   );
@@ -479,6 +488,11 @@ export function buildTutorSystemPrompt(agent: TutorAgentInfo, ctx: TutorContext)
   }
 
   lines.push(NOTE_PROPOSAL_TAG_INSTRUCTION);
+
+  if (typeof ctx.coach === 'string' && ctx.coach.trim().length > 0) {
+    lines.push('');
+    lines.push(ctx.coach.trim());
+  }
 
   return lines.join('\n');
 }

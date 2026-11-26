@@ -268,6 +268,8 @@ export async function buildExamPackage(userId: string, subjectId: string): Promi
       message: 'Genera ahora el simulacro completo en JSON.',
       budgetMs: 75_000,
       attemptMs: 45_000,
+      // El simulacro se valida como JSON: el router exige esa capacidad.
+      requiresJson: true,
     });
 
     const parsed = parseJsonLoose(result.text);

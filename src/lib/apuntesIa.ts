@@ -20,6 +20,8 @@
  * Módulo puro (sin Prisma ni red) para poder probarlo de forma aislada.
  */
 
+import { NOTE_VISUAL_PROMPT } from './visual/prompt';
+
 export interface NoteProposal {
   /** Unidad del temario a la que pertenece el apunte. */
   unitNumber: number | null;
@@ -491,6 +493,7 @@ export function buildNoteWriterInstructions(kind: NoteSubjectKind = 'general'): 
     `PERFIL EDITORIAL DE LA ASIGNATURA: ${NOTE_SUBJECT_LABEL[kind]}.`,
     '',
     structure,
+    ...(kind === 'tecnologia' ? ['', NOTE_VISUAL_PROMPT] : []),
   ].join('\n');
 }
 
@@ -645,12 +648,20 @@ export function sanitizeNoteContent(raw: string): string {
   text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_m, body: string) => `\n\n$$${body.trim()}$$\n\n`);
   text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$${body.trim()}$`);
 
-  // 3. Bloques de código: fórmula si es fórmula, texto llano si no.
+  // 3. Bloques de código: fórmula si es fórmula, texto llano si no. La valla
+  //    `visual` es una excepción: se aparta con un marcador para que la limpieza
+  //    de vallas sueltas no se la coma, y se restaura al final.
+  const visualBlocks: string[] = [];
   text = text.replace(
-    /```[a-zA-Z0-9+#._-]*\n?([\s\S]*?)```/g,
-    (_m, body: string) => {
+    /```([a-zA-Z0-9+#._-]*)\n?([\s\S]*?)```/g,
+    (_m, language: string, body: string) => {
       const inner = String(body).trim();
       if (inner.length === 0) return '';
+      if (String(language ?? '').toLowerCase() === 'visual') {
+        const marker = `\u0000VISUAL_BLOCK_${visualBlocks.length}\u0000`;
+        visualBlocks.push(`\`\`\`visual\n${inner}\n\`\`\``);
+        return `\n\n${marker}\n\n`;
+      }
       return looksLikeMath(inner) ? `\n\n$$${inner}$$\n\n` : `\n\n${inner}\n\n`;
     }
   );
@@ -682,7 +693,13 @@ export function sanitizeNoteContent(raw: string): string {
   );
 
   // 8. Aire: sin espacios al final de línea ni tres saltos seguidos.
-  return text.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+  text = text.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+
+  // 9. Devuelve las vallas visuales que se apartaron antes de limpiar el código.
+  //    Una spec guardada en un apunte se puede volver a montar al abrirlo.
+  return text.replace(/\u0000VISUAL_BLOCK_(\d+)\u0000/g, (_m, index: string) =>
+    visualBlocks[Number(index)] ?? ''
+  );
 }
 
 /** Prompt de sistema para la llamada que redacta el apunte. */
@@ -713,7 +730,11 @@ export function buildNoteWriterUserMessage(input: NoteWriterInput, correction: s
     input.focus && input.focus.trim().length > 0
       ? `Enfócalo a lo que me hace falta: ${input.focus.trim().slice(0, 400)}`
       : 'Enfócalo a lo que cae en examen.',
-    'Recuerda: empieza por la línea `# Título`, desarrolla punto por punto en `## Desarrollo de la unidad` y sigue la estructura obligatoria. Sin relleno y sin bloques de código.',
+    `Recuerda: empieza por la línea \`# Título\`, desarrolla punto por punto en \`## Desarrollo de la unidad\` y sigue la estructura obligatoria. Sin relleno y ${
+      (input.subjectKind ?? classifyNoteSubject(input.subjectName)) === 'tecnologia'
+        ? 'sin bloques de código salvo el bloque ```visual de los trazados'
+        : 'sin bloques de código'
+    }.`,
     ...(correction ? ['', `CORRECCIÓN DEL INTENTO ANTERIOR: ${correction}`] : []),
   ].join('\n');
 }

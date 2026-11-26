@@ -10,6 +10,7 @@ import {
 } from '@/lib/studyTools';
 import { registerStudyToolCards } from '@/lib/reviewCards';
 import { verifyBlock } from '@/lib/verify';
+import { publicTutorError } from '@/lib/tutorPublicError';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -142,6 +143,9 @@ export async function POST(request: Request) {
       message,
       maxTokens: 3_500,
       priority: 'alumno',
+      // La tarjeta se parsea como JSON: si la clave no lo soporta, se degrada
+      // antes de gastar una llamada con un modelo que no puede cumplirlo.
+      requiresJson: true,
     });
 
     const tool = parseStudyToolPayload(kind, result.text);
@@ -187,12 +191,14 @@ export async function POST(request: Request) {
       ok: true,
       tool: persisted,
       topic: { id: topic.id, title: topic.title, unitNumber: topic.unitNumber },
-      provider: result.provider,
-      model: result.model,
     });
   } catch (error) {
     if (error instanceof TutorError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      const failure = publicTutorError(error);
+      return NextResponse.json(
+        { error: failure.message, retryable: failure.retryable },
+        { status: failure.status }
+      );
     }
     console.error('[tutor/herramientas] error:', error);
     return NextResponse.json(
