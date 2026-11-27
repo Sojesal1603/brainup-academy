@@ -16,7 +16,7 @@ import {
 import { db } from '@/lib/db';
 import { getTenantProfileSummary, type TenantProfileSummary } from '@/lib/userProfile';
 import { currentTenant } from '@/lib/tenantContext';
-import { safeDb } from '@/lib/dbTimeout';
+import { safeDb, safeDbOutcome } from '@/lib/dbTimeout';
 import { buildReviewQueue } from '@/lib/srs';
 import { levelFromXp, weekKeyOf } from '@/lib/challenges';
 import { getDailyBrief, type DailyBriefSnapshot } from '@/lib/dailyBrief';
@@ -34,6 +34,7 @@ import FocusLock from '@/components/enfoque/FocusLock';
 import HabitItem from '@/components/dashboard/HabitItem';
 import ModeSwitcher from '@/components/dashboard/ModeSwitcher';
 import { PanelSkeleton } from '@/components/ui/Skeletons';
+import DbDegradedNotice from './DbDegradedNotice';
 
 /**
  * Secciones del Cuartel.
@@ -43,6 +44,10 @@ import { PanelSkeleton } from '@/components/ui/Skeletons';
  * pintan al instante y cada bloque llega cuando su consulta termina. Si una
  * consulta falla o tarda más de 4 s, su sección usa datos mínimos y las demás
  * siguen funcionando: una base lenta no vuelve a congelar toda la vista.
+ *
+ * Los cargadores compartidos devuelven `safeDbOutcome` (dato + `degraded`) para
+ * que la sección pueda distinguir «no hay nada» de «no pudimos leerlo» y avisar
+ * con `DbDegradedNotice` en vez de enseñar un cero que parece un dato real.
  */
 
 const getDashboardUser = cache((userId: string) =>
@@ -82,7 +87,7 @@ const readTodayBlocks = unstable_cache(
 );
 
 const loadTodayBlocks = cache((userId: string) =>
-  safeDb<TodayBlockPreview[]>('cuartel.bloques', () => readTodayBlocks(userId), [], 4_000)
+  safeDbOutcome<TodayBlockPreview[]>('cuartel.bloques', () => readTodayBlocks(userId), [], 4_000)
 );
 
 interface ExamPreview {
@@ -116,7 +121,7 @@ const readUpcomingExams = unstable_cache(
 );
 
 const loadUpcomingExams = cache((userId: string) =>
-  safeDb<ExamPreview[]>('cuartel.examenes', () => readUpcomingExams(userId), [], 4_000)
+  safeDbOutcome<ExamPreview[]>('cuartel.examenes', () => readUpcomingExams(userId), [], 4_000)
 );
 
 interface RiskTopicPreview {
@@ -163,7 +168,7 @@ const readRiskData = unstable_cache(
 );
 
 const loadRiskData = cache((userId: string) =>
-  safeDb<RiskData>(
+  safeDbOutcome<RiskData>(
     'cuartel.riesgo',
     () => readRiskData(userId),
     { measuredUnitsCount: 0, riskTopics: [] },
@@ -395,11 +400,15 @@ export async function DashboardMode() {
 
 export async function DashboardMetrics() {
   const { user } = await currentTenant();
-  const [todayBlocks, upcomingExams, risk] = await Promise.all([
+  const [blocksOutcome, examsOutcome, riskOutcome] = await Promise.all([
     loadTodayBlocks(user.id),
     loadUpcomingExams(user.id),
     loadRiskData(user.id),
   ]);
+  const todayBlocks = blocksOutcome.data;
+  const upcomingExams = examsOutcome.data;
+  const risk = riskOutcome.data;
+  const degraded = blocksOutcome.degraded || examsOutcome.degraded || riskOutcome.degraded;
 
   const completedBlocksCount = todayBlocks.filter((block) => block.isCompleted).length;
   const totalBlocksCount = todayBlocks.length;
@@ -410,6 +419,7 @@ export async function DashboardMetrics() {
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {degraded && <DbDegradedNotice className="col-span-full" />}
       {/* Progreso de Hoy */}
       <div className="glass-card p-4 rounded-2xl">
         <div className="flex items-center justify-between text-slate-400 mb-2">
@@ -553,7 +563,14 @@ export async function DashboardReminder() {
 
 export async function DashboardConstraints() {
   const { user } = await currentTenant();
-  const today = await readTodayPlanConstraints(user.id).catch(() => ({ constraints: [] }));
+  // Antes había un `.catch` libre que también se tragaba los fallos de esquema o
+  // de permisos. `safeDb` degrada solo lo pasajero y deja subir el resto.
+  const today = await safeDb<Awaited<ReturnType<typeof readTodayPlanConstraints>>>(
+    'cuartel.restricciones',
+    () => readTodayPlanConstraints(user.id),
+    { planId: null, constraints: [] },
+    3_500
+  );
   return <PlanConstraintsCard initial={today.constraints} />;
 }
 
@@ -561,14 +578,17 @@ export async function DashboardToday() {
   const { user } = await currentTenant();
   const now = new Date();
   const dayKey = localDayKey(now);
-  const [brief, checkInItems, profile, upcomingExams, risk] = await Promise.all([
-    safeDb<DailyBriefSnapshot | null>(
+  const [briefOutcome, checkInOutcome, profile, examsOutcome, riskOutcome] = await Promise.all([
+    // 4 s: el margen del Cuartel para la consulta principal (el plan del día).
+    // Si el pooler de Supabase no contesta en ese tope, la sección se degrada y
+    // el resto de la página sigue navegable en vez de caer en un #441.
+    safeDbOutcome<DailyBriefSnapshot | null>(
       'cuartel.brief',
       () => getDailyBrief(user.id),
       null,
-      5_500
+      4_000
     ),
-    safeDb<Awaited<ReturnType<typeof getTodayClassCheckIn>>>(
+    safeDbOutcome<Awaited<ReturnType<typeof getTodayClassCheckIn>>>(
       'cuartel.clase',
       () => readTodayCheckIn(user.id, dayKey),
       [],
@@ -578,6 +598,11 @@ export async function DashboardToday() {
     loadUpcomingExams(user.id),
     loadRiskData(user.id),
   ]);
+
+  const brief = briefOutcome.data;
+  const checkInItems = checkInOutcome.data;
+  const upcomingExams = examsOutcome.data;
+  const risk = riskOutcome.data;
 
   // El brief es la única foto del día: si trae plan, el widget pinta esos
   // bloques; si no, se degrada sin tumbar el resto del Cuartel.
@@ -630,12 +655,14 @@ export async function DashboardToday() {
           <HoyTocaEsto plan={plan} narration={brief?.narration ?? null} />
           <DashboardReminder />
         </>
+      ) : briefOutcome.degraded ? (
+        <DbDegradedNotice />
       ) : (
         <div className="glass-card rounded-2xl border-amber-500/25 p-5">
           <p className="text-sm font-semibold text-slate-100">El plan de hoy aún no está listo</p>
           <p className="mt-1 text-xs text-slate-400">
-            La base de datos ha tardado más de lo previsto. El resto del Cuartel sigue disponible y
-            el plan se generará en segundo plano.
+            Todavía no hay bloques para hoy. El resto del Cuartel sigue disponible: abre el
+            planificador y el plan se generará en cuanto lo pidas.
           </p>
           <Link
             href="/planificador"
@@ -703,7 +730,7 @@ export function DashboardRadar() {
 
 async function ExamsWidget() {
   const { user } = await currentTenant();
-  const exams = await loadUpcomingExams(user.id);
+  const { data: exams, degraded } = await loadUpcomingExams(user.id);
 
   return (
     <div className="glass-card p-4 rounded-2xl space-y-3">
@@ -719,6 +746,8 @@ async function ExamsWidget() {
           Gestionar
         </Link>
       </div>
+
+      {degraded && <DbDegradedNotice compact />}
 
       <div className="space-y-2.5">
         {exams.map((exam) => {
@@ -854,7 +883,7 @@ async function MoodleWidget() {
 
 async function RiskWidget() {
   const { user } = await currentTenant();
-  const risk = await loadRiskData(user.id);
+  const { data: risk, degraded } = await loadRiskData(user.id);
 
   return (
     <div className="glass-card p-4 rounded-2xl space-y-3">
@@ -871,8 +900,10 @@ async function RiskWidget() {
         </Link>
       </div>
 
+      {degraded && <DbDegradedNotice compact />}
+
       <div className="space-y-2">
-        {risk.riskTopics.length === 0 && (
+        {risk.riskTopics.length === 0 && !degraded && (
           <p className="text-[11px] text-slate-500 leading-relaxed">
             {risk.measuredUnitsCount === 0
               ? 'Todavía no hay ninguna medición real de tu nivel. Declara tus notas en Ajustes o autoevalúa unidades en el Temario y esta lista empezará a decir algo cierto.'

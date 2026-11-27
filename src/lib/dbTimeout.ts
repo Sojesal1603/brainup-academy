@@ -108,27 +108,42 @@ export function isTransientDbError(error: unknown): boolean {
 }
 
 /**
- * Consulta con deadline y datos mínimos de respaldo.
+ * Resultado de una consulta protegida.
+ *
+ * `degraded` existe porque un respaldo vacío no es lo mismo que un dato vacío:
+ * `[]` puede significar «no hay exámenes» o «la base no contestó». Las vistas
+ * que deben decírselo al alumno usan `safeDbOutcome` y distinguen ambos casos;
+ * el resto sigue usando `safeDb`, que devuelve solo el dato.
+ */
+export interface DbOutcome<T> {
+  data: T;
+  degraded: boolean;
+  /** Código del fallo pasajero (`P1008`, `P2024`…) o `null` si fue bien. */
+  code: string | null;
+}
+
+/**
+ * Consulta con deadline y datos mínimos de respaldo, con el motivo del respaldo.
  *
  * Regla de oro: **solo se tapa lo transitorio**. Ante un P1001, P1008, P1017,
  * P2024 o ETIMEDOUT se escribe el motivo en `console.error` (Vercel lo captura
  * en stdout, que es el único sitio que sobrevive al contenedor) y se devuelve
- * `fallback`, de modo que el Server Component pinta su sección vacía en vez de
- * lanzar y convertir la página entera en un #441 opaco.
+ * `fallback` marcado como `degraded`, de modo que el Server Component pinta su
+ * sección vacía en vez de lanzar y convertir la página entera en un #441 opaco.
  *
  * Cualquier otro error —P2021 tabla inexistente, P2022 columna que no existe,
  * P2025, permisos, cadena de conexión inválida— **se relanza**. Taparlo sería
  * esconder un esquema desincronizado o un fallo de permisos detrás de una
  * pantalla que parece «sin datos», y entonces nadie lo arregla.
  */
-export async function safeDb<T>(
+export async function safeDbOutcome<T>(
   label: string,
   run: () => Promise<T>,
   fallback: T,
   timeoutMs = DB_QUERY_TIMEOUT_MS
-): Promise<T> {
+): Promise<DbOutcome<T>> {
   try {
-    return await withDbTimeout(run(), label, timeoutMs);
+    return { data: await withDbTimeout(run(), label, timeoutMs), degraded: false, code: null };
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;
     const detail = error instanceof Error ? error.message : String(error);
@@ -142,6 +157,16 @@ export async function safeDb<T>(
     console.error(
       `[db] ${label}: se usa el respaldo mínimo (${typeof code === 'string' ? code : 'timeout'}: ${detail})`
     );
-    return fallback;
+    return { data: fallback, degraded: true, code: typeof code === 'string' ? code : 'timeout' };
   }
+}
+
+/** Igual que `safeDbOutcome`, pero solo el dato (contrato original). */
+export async function safeDb<T>(
+  label: string,
+  run: () => Promise<T>,
+  fallback: T,
+  timeoutMs = DB_QUERY_TIMEOUT_MS
+): Promise<T> {
+  return (await safeDbOutcome(label, run, fallback, timeoutMs)).data;
 }

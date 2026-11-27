@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowRight, ClipboardList } from 'lucide-react';
 import { currentTenant } from '@/lib/tenantContext';
 import { getSetupState } from '@/lib/setupApply';
+import { safeDb } from '@/lib/dbTimeout';
 
 /**
  * Tarjeta «tu curso está al X% de montado».
@@ -16,7 +17,17 @@ import { getSetupState } from '@/lib/setupApply';
  */
 export default async function SetupCard() {
   const { user, tenant: prisma } = await currentTenant();
-  const setup = await getSetupState(user.id);
+  // Es la consulta más ancha del Cuartel (perfil, asignaturas, temario, exámenes
+  // y horario). Con tope propio: si Supabase se atasca, la tarjeta desaparece en
+  // vez de tumbar la página, y el resto del Cuartel ya está pintado.
+  const setup = await safeDb<Awaited<ReturnType<typeof getSetupState>> | null>(
+    'cuartel.puesta-a-punto',
+    () => getSetupState(user.id),
+    null,
+    3_500
+  );
+  if (!setup) return null;
+
   const setupPending = setup.checklist.pending.map((subject) => subject.name);
   const showSetupCard =
     !setup.snapshot.setupCompletedAt &&
@@ -25,10 +36,16 @@ export default async function SetupCard() {
   if (!showSetupCard) return null;
 
   // Solo se consulta la conversación si la tarjeta se va a enseñar.
-  const setupConversation = await prisma.aiConversation.findFirst({
-    where: { agentId: null, title: 'Puesta a punto' },
-    select: { id: true },
-  });
+  const setupConversation = await safeDb<{ id: string } | null>(
+    'cuartel.puesta-a-punto.conversacion',
+    () =>
+      prisma.aiConversation.findFirst({
+        where: { agentId: null, title: 'Puesta a punto' },
+        select: { id: true },
+      }),
+    null,
+    2_500
+  );
 
   return (
     <div className="glass-card glow-emerald border-emerald-500/25 p-4">
