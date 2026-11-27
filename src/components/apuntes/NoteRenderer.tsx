@@ -15,10 +15,31 @@ import {
   Quote,
   Search,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import clsx from 'clsx';
 import { sanitizeNoteContent } from '@/lib/apuntesIa';
 import { scanInline } from '@/lib/inlineEmphasis';
-import VisualBlock from '@/components/visual/VisualBlock';
+
+/**
+ * La figura se carga solo en el navegador, igual que en el chat
+ * (`MarkdownMessage`).
+ *
+ * `VisualBlock` depende del DOM, de `useId` y de `localStorage` para recordar los
+ * pasos validados. Renderizarlo en servidor obligaba a comparar un SVG de SSR
+ * con el de la hidratación: dos caminos distintos para el mismo dibujo. Aquí se
+ * unifica el criterio con el chat y se reserva el alto del hueco para que la
+ * página no salte cuando llega la figura. Este archivo es un componente cliente,
+ * así que `ssr: false` está permitido (en un Server Component no lo estaría).
+ */
+const VisualBlock = dynamic(() => import('@/components/visual/VisualBlock'), {
+  ssr: false,
+  loading: () => (
+    <div
+      aria-hidden="true"
+      className="my-3 h-40 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]"
+    />
+  ),
+});
 
 /* ------------------------------------------------------------------ */
 /* Matemáticas (KaTeX)                                                 */

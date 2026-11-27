@@ -10,6 +10,7 @@ import {
   Link2,
 } from 'lucide-react';
 import clsx from 'clsx';
+import ClientDate from '@/components/ui/ClientDate';
 
 interface MoodleConnectorProps {
   initialUrl: string;
@@ -60,14 +61,6 @@ export default function MoodleConnector({ initialUrl, lastSyncIso }: MoodleConne
     }
   };
 
-  const formattedLastSync = lastSync
-    ? new Date(lastSync).toLocaleString('es-ES', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : null;
 
   return (
     <div className="space-y-4">
@@ -126,9 +119,13 @@ export default function MoodleConnector({ initialUrl, lastSyncIso }: MoodleConne
 
       <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono">
         <span className="inline-block w-2 h-2 rounded-full bg-emerald-400/80" />
-        {formattedLastSync
-          ? `Última sincronización: ${formattedLastSync}`
-          : 'Sin sincronizar todavía'}
+        {lastSync ? (
+          <>
+            Última sincronización: <ClientDate iso={lastSync} format="datetime" />
+          </>
+        ) : (
+          'Sin sincronizar todavía'
+        )}
       </div>
     </div>
   );

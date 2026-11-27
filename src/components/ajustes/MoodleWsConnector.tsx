@@ -20,6 +20,7 @@ import {
   User,
 } from 'lucide-react';
 import clsx from 'clsx';
+import ClientDate from '@/components/ui/ClientDate';
 import type { MoodlePublicStatus } from '@/lib/moodleWsSync';
 import type { MoodleHealth } from '@/lib/moodleSelfHeal';
 import { MOODLE_CENTROS_INSTANCES, type MoodleDiagnosis } from '@/lib/moodleWs';
@@ -191,12 +192,6 @@ export default function MoodleWsConnector({ status, lastSyncIso, health }: Moodl
     }
   };
 
-  const connectedAt = status.connectedAt
-    ? new Date(status.connectedAt).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-    : null;
-  const lastSync = lastSyncIso
-    ? new Date(lastSyncIso).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-    : null;
 
   return (
     <div className="space-y-5">
@@ -231,8 +226,16 @@ export default function MoodleWsConnector({ status, lastSyncIso, health }: Moodl
             <span className="text-slate-500">{status.pendingTasks} tareas pendientes</span>
           </>
         )}
-        {connectedAt && <span className="text-slate-600">· conectado el {connectedAt}</span>}
-        {lastSync && <span className="text-slate-600">· última sincronización {lastSync}</span>}
+        {status.connectedAt && (
+          <span className="text-slate-600">
+            · conectado el <ClientDate iso={status.connectedAt} format="datetime" />
+          </span>
+        )}
+        {lastSyncIso && (
+          <span className="text-slate-600">
+            · última sincronización <ClientDate iso={lastSyncIso} format="datetime" />
+          </span>
+        )}
       </div>
 
       {/* Lo que ha visto el vigilante al comprobar la clave */}

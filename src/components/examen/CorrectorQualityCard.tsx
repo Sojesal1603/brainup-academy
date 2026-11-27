@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Activity, Loader2, RefreshCw } from 'lucide-react';
 import type { EvalRun } from '@/lib/evalBank';
+import ClientDate from '@/components/ui/ClientDate';
 
 /**
  * Calidad medida del corrector: error absoluto medio contra el banco de casos
@@ -69,7 +70,7 @@ export default function CorrectorQualityCard({ initial }: { initial: EvalRun | n
             ))}
           </div>
           <p className="text-[10px] text-slate-600 mt-2">
-            Última medición: {new Date(run.ranAt).toLocaleString('es-ES')} ·{' '}
+            Última medición: <ClientDate iso={run.ranAt} format="full" /> ·{' '}
             {run.model ?? 'modelo desconocido'}. Mide al corrector, no al alumno.
           </p>
         </>

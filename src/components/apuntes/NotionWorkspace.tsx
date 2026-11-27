@@ -38,6 +38,7 @@ import {
   SUBJECT_CATEGORY_META,
 } from '@/lib/subjects/category';
 import clsx from 'clsx';
+import ClientDate from '@/components/ui/ClientDate';
 
 /** Apunte tal y como llega del servidor, con quién lo ha escrito. */
 export interface NotionNote {
@@ -345,12 +346,11 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
         <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500 border-t border-slate-800/50">
           <span className="font-mono truncate">{note.tags || 'apuntes'}</span>
           <div className="flex items-center gap-1 shrink-0">
-            <span className="font-mono text-slate-600">
-              {new Date(note.updatedAt).toLocaleDateString('es-ES', {
-                day: 'numeric',
-                month: 'short',
-              })}
-            </span>
+            <ClientDate
+              iso={note.updatedAt}
+              format="short"
+              className="font-mono text-slate-600"
+            />
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -704,14 +704,11 @@ export default function NotionWorkspace({ notes, subjects }: NotionWorkspaceProp
                         isFromTutor(activeNote) && activeNote.agent?.name
                           ? `Del catedrático ${activeNote.agent.name}`
                           : 'Tuyo',
-                        new Date(activeNote.updatedAt).toLocaleDateString('es-ES', {
-                          day: 'numeric',
-                          month: 'long',
-                          year: 'numeric',
-                        }),
                       ]
                         .filter(Boolean)
                         .join(' · ')}
+                      {' · '}
+                      <ClientDate iso={activeNote.updatedAt} format="long" />
                     </p>
                     <hr className="my-5 border-stone-400/60" />
                     <article className="note-paper-body">

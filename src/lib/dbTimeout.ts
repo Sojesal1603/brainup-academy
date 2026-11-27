@@ -10,7 +10,8 @@
  *
  * El timeout de Prisma (`DB_QUERY_TIMEOUT_MS`) protege todas las consultas,
  * incluidas acciones. `safeDb` añade el fallback de los widgets del Cuartel:
- * nunca deja que una sección lenta tumbe el resto de la página.
+ * un fallo **pasajero** de conexión no tumba el resto de la página, mientras
+ * que un problema real de esquema o permisos sí sube y se ve.
  */
 
 const configuredTimeout = Number(process.env.DB_QUERY_TIMEOUT_MS);
@@ -68,11 +69,57 @@ export function withDbTimeout<T>(
 }
 
 /**
+ * Los únicos fallos que se pueden tapar con un respaldo.
+ *
+ * Todos significan lo mismo: «ahora mismo no hay conexión disponible». Ninguno
+ * dice que la consulta o el esquema estén mal, así que ninguno justifica tumbar
+ * la vista: se pinta la sección con datos de respaldo y el alumno sigue
+ * navegando mientras el pooler se recupera.
+ *
+ *   · P1001  no se puede alcanzar el servidor de la base
+ *   · P1008  la operación ha agotado el tiempo de espera
+ *   · P1017  el servidor ha cerrado la conexión
+ *   · P2024  no hubo conexión libre en el pool a tiempo
+ *   · ETIMEDOUT  el socket no contesta (error de red del driver)
+ */
+export const TRANSIENT_DB_CODES = new Set(['P1001', 'P1008', 'P1017', 'P2024', 'ETIMEDOUT']);
+
+/**
+ * ¿Este error es un fallo pasajero de conexión?
+ *
+ * Prisma pone el código en `error.code`; los errores de red de Node lo dejan en
+ * `code` o en `cause.code`. Se mira también el código del `cause` porque un
+ * `PrismaClientKnownRequestError` puede envolver un `ETIMEDOUT` del socket.
+ */
+export function isTransientDbError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+
+  // Se recorre la cadena de causas (con tope) para no entrar en un ciclo raro.
+  for (let depth = 0; depth < 3 && current && typeof current === 'object'; depth += 1) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && TRANSIENT_DB_CODES.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+
+  return false;
+}
+
+/**
  * Consulta con deadline y datos mínimos de respaldo.
  *
- * Se usa solo en lecturas de widgets. Un fallo se registra con la etiqueta de
- * la sección y devuelve `fallback`, de modo que el resto del Cuartel sigue
- * siendo usable aunque una consulta concreta esté lenta.
+ * Regla de oro: **solo se tapa lo transitorio**. Ante un P1001, P1008, P1017,
+ * P2024 o ETIMEDOUT se escribe el motivo en `console.error` (Vercel lo captura
+ * en stdout, que es el único sitio que sobrevive al contenedor) y se devuelve
+ * `fallback`, de modo que el Server Component pinta su sección vacía en vez de
+ * lanzar y convertir la página entera en un #441 opaco.
+ *
+ * Cualquier otro error —P2021 tabla inexistente, P2022 columna que no existe,
+ * P2025, permisos, cadena de conexión inválida— **se relanza**. Taparlo sería
+ * esconder un esquema desincronizado o un fallo de permisos detrás de una
+ * pantalla que parece «sin datos», y entonces nadie lo arregla.
  */
 export async function safeDb<T>(
   label: string,
@@ -83,8 +130,18 @@ export async function safeDb<T>(
   try {
     return await withDbTimeout(run(), label, timeoutMs);
   } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
     const detail = error instanceof Error ? error.message : String(error);
-    console.error(`[db] ${label}: se usa el respaldo mínimo (${detail})`);
+
+    if (!isTransientDbError(error)) {
+      // No es un fallo de conexión: se deja subir tal cual, con su etiqueta para
+      // que el log del servidor diga qué sección lo estaba intentando.
+      throw error;
+    }
+
+    console.error(
+      `[db] ${label}: se usa el respaldo mínimo (${typeof code === 'string' ? code : 'timeout'}: ${detail})`
+    );
     return fallback;
   }
 }

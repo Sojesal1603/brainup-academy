@@ -32,15 +32,12 @@ import {
   updateTopicDetails,
 } from '@/lib/actions';
 import { describeMastery, MASTERY_SOURCE_META } from '@/lib/knowledge';
+import ClientDate from '@/components/ui/ClientDate';
 
 interface TemarioBoardProps {
   subjects: TemarioSubject[];
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
-}
 
 /** Fin del curso actual: la tercera semana de junio. */
 function courseEnd(now = new Date()): Date {
@@ -225,7 +222,11 @@ export default function TemarioBoard({ subjects }: TemarioBoardProps) {
           >
             <div className="text-[10px] uppercase tracking-widest text-slate-500">Fin previsto</div>
             <div className={clsx('mt-1 text-xs font-semibold', late ? 'text-amber-300' : 'text-slate-200')}>
-              {projected ? formatDate(stats.projectedFinishIso) : 'marca clases para calcularlo'}
+              {projected ? (
+                <ClientDate iso={stats.projectedFinishIso} format="short" />
+              ) : (
+                'marca clases para calcularlo'
+              )}
             </div>
           </div>
         </div>
@@ -373,10 +374,7 @@ function UnitRow({
         )}
         {unit.seenInClassAt && (
           <span className="ml-2 text-[10px] text-slate-500">
-            en clase el {new Date(unit.seenInClassAt).toLocaleDateString('es-ES', {
-              day: 'numeric',
-              month: 'short',
-            })}
+            en clase el <ClientDate iso={unit.seenInClassAt} format="short" />
           </span>
         )}
         {unit.teacherMethod && !methodOpen && (
